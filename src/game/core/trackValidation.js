@@ -1,10 +1,10 @@
-import {advanceSteering} from './steering.js';
+﻿import {advanceSteering} from './steering.js';
 import {CARGO_CAPACITY_ID, WORST_CASE_HANDLING, loadoutStats} from './modules.js';
-import {hazardX, movingHazardOffset, canonicalMotionAge, usesPotentialMoverLanes, usesTimedMoverLanes,
+import {hazardX, movingHazardOffset, usesPotentialMoverLanes, usesTimedMoverLanes,
   hazardRouteGeometry, hazardRouteOffsetY, hazardScrollScale, LANE_CENTERS, HAZARD_ROW_ENVELOPE_PX} from './hazards.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
 import {HAZARD_TRAVEL_PX} from '../data/route.js';
-import {METERS_PER_PIXEL} from './economy.js';
+import {METERS_PER_PIXEL, routeTimeAtDistance} from './economy.js';
 
 const {minX, maxX, loadedCapacity, simulationHz} = GAME_BALANCE.routes.track.routeValidation;
 const maximumLaneChangesPerRow = GAME_BALANCE.routes.track.maxLaneChangesPerRow;
@@ -32,6 +32,56 @@ export function hazardClearance(hazard, y, x, elapsedSeconds) {
   }));
 }
 
+/**
+ * Per-transition invariants of hazardClearance, resolved once instead of every simulation step.
+ * Evaluates the identical floating-point expressions, so certification results are unchanged.
+ */
+function clearanceProbe(hazard, row, levelId, mode) {
+  const spec = hazardRouteGeometry(hazard);
+  const movement = hazard.movement ?? hazard.motionBounds;
+  const timed = usesTimedMoverLanes(hazard);
+  let sourceDistance = null;
+  let sourceTime = null;
+  if (timed) {
+    sourceDistance = row.plannedDistance ?? row.spawnDistance;
+    if (!Number.isFinite(sourceDistance)) throw new Error('Timed mover certification needs its source distance');
+    sourceTime = routeTimeAtDistance(Math.max(0, sourceDistance), levelId, mode);
+  }
+  const snapshot = usesPotentialMoverLanes(hazard) ? movingHazardOffset(hazard.movement, 0) : undefined;
+  const movementMin = snapshot ?? movement?.minOffsetPx ?? 0;
+  const movementMax = snapshot ?? movement?.maxOffsetPx ?? 0;
+  const baseX = hazardX(hazard);
+  return {
+    movement: hazard.movement, timed, sourceDistance, sourceTime, baseX,
+    centerX: baseX + (movementMin + movementMax) / 2,
+    radius: (movementMax - movementMin) / 2,
+    offsetY: hazardRouteOffsetY(hazard),
+    scale: hazardScrollScale(hazard),
+    parts: spec.footprint ?? [{x: 0, y: 0,
+      halfWidth: spec.hitX - playerHalfWidthPx, halfHeight: spec.hitY - playerHalfHeightPx}],
+  };
+}
+
+function probeClearance(probe, origin, x, levelId, mode) {
+  let centerX = probe.centerX;
+  let radius = probe.radius;
+  if (probe.timed) {
+    // Mirrors canonicalMotionAge with the source clock reused for this hazard.
+    const elapsed = Math.max(0, routeTimeAtDistance(Math.max(0, probe.sourceDistance +
+      (HAZARD_TRAVEL_PX + origin) * METERS_PER_PIXEL), levelId, mode) - probe.sourceTime);
+    const offset = movingHazardOffset(probe.movement, elapsed);
+    centerX = probe.baseX + (offset + offset) / 2;
+    radius = (offset - offset) / 2;
+  }
+  let clearance = Infinity;
+  for (const part of probe.parts) {
+    const dx = Math.abs(x - centerX - part.x) - part.halfWidth - radius - playerHalfWidthPx;
+    const dy = (Math.abs(origin + probe.offsetY + part.y) - part.halfHeight - playerHalfHeightPx) * probe.scale;
+    clearance = Math.min(clearance, Math.hypot(Math.max(0, dx), Math.max(0, dy)) + Math.min(0, Math.max(dx, dy)));
+  }
+  return clearance;
+}
+
 /** A complete transition, including the previous group's downstream intermediate. */
 export function driveTrackTransition(previous, next, from, to, speed, {
   handling = WORST_CASE_HANDLING, hz = simulationHz,
@@ -46,24 +96,18 @@ export function driveTrackTransition(previous, next, from, to, speed, {
   const duration = gap / speed;
   const steps = Math.ceil(duration * hz);
   const dt = duration / steps;
-  const previousHazards = [...previous.hazards, ...(previous.intermediates ?? [])];
-  const nextHazards = [...next.hazards, ...(next.intermediates ?? [])];
+  const previousProbes = [...previous.hazards, ...(previous.intermediates ?? [])]
+    .map(hazard => clearanceProbe(hazard, previous, levelId, mode));
+  const nextProbes = [...next.hazards, ...(next.intermediates ?? [])]
+    .map(hazard => clearanceProbe(hazard, next, levelId, mode));
   for (let step = 0; step <= steps; step++) {
     const y = HAZARD_ROW_ENVELOPE_PX / 2 + step * dt * speed;
-    for (const [hazards, origin, row] of [
-      [previousHazards, y, previous],
-      [nextHazards, y - gap, next],
-    ]) {
-      for (const hazard of hazards) {
-        let elapsed;
-        if (usesTimedMoverLanes(hazard)) {
-          const source = row.plannedDistance ?? row.spawnDistance;
-          if (!Number.isFinite(source)) throw new Error('Timed mover certification needs its source distance');
-          elapsed = canonicalMotionAge(source, source +
-            (HAZARD_TRAVEL_PX + origin) * METERS_PER_PIXEL, levelId, mode);
-        }
-        clearance = Math.min(clearance, hazardClearance(hazard, origin, state.x, elapsed));
-      }
+    const nextOrigin = y - gap;
+    for (const probe of previousProbes) {
+      clearance = Math.min(clearance, probeClearance(probe, y, state.x, levelId, mode));
+    }
+    for (const probe of nextProbes) {
+      clearance = Math.min(clearance, probeClearance(probe, nextOrigin, state.x, levelId, mode));
     }
     if (clearance < 0) return {completed: false, clearance, state};
     if (step < steps) state = advanceSteering({...state,

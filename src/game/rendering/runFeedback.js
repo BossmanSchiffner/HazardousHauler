@@ -1,4 +1,3 @@
-import {MAX_TRACK_SPEED} from '../data/gameBalance.js';
 import {LANE_CENTERS} from '../core/hazards.js';
 
 const PICKUP_NOTES = [60, 62, 64, 67, 72].map(note => 440 * 2 ** ((note - 69) / 12));
@@ -15,7 +14,6 @@ export class RunFeedback {
     this.voices = new Set();
     this.suspensions = new Set();
     this.removers = [];
-    this.engineSpeed = null;
     this.lastPickup = -Infinity;
     this.pickupStreak = 0;
     this.interacted = false;
@@ -59,14 +57,12 @@ export class RunFeedback {
     if (!this.context || this.context.state === 'closed') return;
     if (this.context.state === 'running') {
       this.createAudio();
-      this.syncEngine();
       return;
     }
     if (this.unlocking) return;
     this.unlocking = this.context.resume().then(() => {
       if (!this.destroyed && this.context.state === 'running') {
         this.createAudio();
-        this.syncEngine();
       }
     }, error => this.warn('audio unlock', error)).finally(() => { this.unlocking = null; });
   }
@@ -76,15 +72,14 @@ export class RunFeedback {
     const context = this.context;
     this.master = context.createGain();
     this.master.gain.value = this.suspensions.size ? 0 : 0.35;
-    this.master.connect(this.destination);
-    this.engineGain = context.createGain();
-    this.engineGain.gain.value = 0;
-    this.engineGain.connect(this.master);
-    this.engine = context.createOscillator();
-    this.engine.type = 'triangle';
-    this.engine.frequency.value = 90;
-    this.engine.connect(this.engineGain);
-    this.engine.start();
+    this.compressor = context.createDynamicsCompressor();
+    this.compressor.threshold.value = -12;
+    this.compressor.knee.value = 12;
+    this.compressor.ratio.value = 4;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.12;
+    this.master.connect(this.compressor);
+    this.compressor.connect(this.destination);
     this.noise = context.createBuffer(1, Math.ceil(context.sampleRate * 0.6), context.sampleRate);
     const data = this.noise.getChannelData(0);
     for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1;
@@ -95,26 +90,11 @@ export class RunFeedback {
       this.context?.state === 'running' && Boolean(this.master);
   }
 
-  setEngine(speed) {
-    this.engineSpeed = speed;
-    this.syncEngine();
-  }
-
-  syncEngine() {
-    if (!this.engine || this.destroyed) return;
-    const speed = this.engineSpeed;
-    const fraction = Math.max(0, Math.min(1, ((speed ?? 320) - 320) / (MAX_TRACK_SPEED - 320)));
-    const now = this.context.currentTime;
-    this.engine.frequency.setTargetAtTime(90 * (1 + 0.25 * fraction), now, 0.05);
-    this.engineGain.gain.setTargetAtTime(this.ready && speed > 0 ? 0.06 : 0, now, 0.03);
-  }
-
   resetRun(x) {
     this.clearVoices();
     this.lastPickup = -Infinity;
     this.pickupStreak = 0;
     this.resetSteering(x);
-    this.setEngine(null);
   }
 
   laneAt(x) {
@@ -204,18 +184,26 @@ export class RunFeedback {
   }
 
   impact() {
-    this.tone(105, 0, 0.3, 0.2, 'triangle', 38);
-    this.hiss(1800, 0.18, 'highpass', 0.12);
+    this.tone(105, 0, 0.3, 0.32, 'triangle', 38);
+    this.hiss(1800, 0.18, 'highpass', 0.22);
     this.vibrate([30, 20, 30]);
   }
 
+  airBrake() {
+    this.hiss(1200, 0.32, 'highpass', 0.28);
+    this.tone(80, 0, 0.12, 0.16, 'triangle', 45);
+  }
+
+  uiClick() {
+    this.tone(1400, 0, 0.045, 0.22, 'triangle', 650);
+  }
+
   depot() {
-    this.setEngine(null);
     this.lastPickup = -Infinity;
     this.pickupStreak = 0;
-    this.hiss(1600, 0.4, 'lowpass', 0.1);
-    this.tone(PICKUP_NOTES[3], 0.42, 0.18);
-    this.tone(PICKUP_NOTES[4], 0.6, 0.3);
+    this.hiss(1600, 0.4, 'lowpass', 0.2);
+    this.tone(PICKUP_NOTES[3], 0.42, 0.18, 0.18);
+    this.tone(PICKUP_NOTES[4], 0.6, 0.3, 0.18);
     this.vibrate(200);
   }
 
@@ -227,7 +215,6 @@ export class RunFeedback {
       this.master.gain.setValueAtTime(0, this.context.currentTime);
     }
     if (this.interacted && typeof this.navigator?.vibrate === 'function') this.vibrateStop();
-    this.syncEngine();
   }
 
   vibrateStop() {
@@ -244,7 +231,6 @@ export class RunFeedback {
     if (this.master && !this.suspensions.size) {
       this.master.gain.setTargetAtTime(0.35, this.context.currentTime, 0.03);
     }
-    this.syncEngine();
   }
 
   destroy() {
@@ -253,11 +239,9 @@ export class RunFeedback {
     this.destroyed = true;
     this.removers.forEach(remove => remove());
     this.removers = [];
-    if (this.engine) {
-      this.engine.stop();
-      this.engine.disconnect();
-      this.engineGain.disconnect();
+    if (this.master) {
       this.master.disconnect();
+      this.compressor.disconnect();
     }
     this.noise = null;
   }

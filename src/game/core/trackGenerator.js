@@ -1052,9 +1052,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     .sort((a, b) => a - b);
   const movingSchedule = (distance, spacing, extraContacts = [], lastFamily = previousFamily) => {
     if (!movingEligible) return {due: false, deadline: false};
-    const contact = hazardFirstContactDistance({kind: 'sweeper',
-      offsetY: HAZARD_TRAVEL_PX * moving.sweeperForwardSpeedRatio,
-      movement: {axis: 'forward', forwardSpeedRatio: moving.sweeperForwardSpeedRatio}}, distance);
+    const contact = hazardFirstContactDistance({kind: 'forklift', offsetY: 0}, distance);
     const interval = intervalFor(contact, planningStart ?? distance, false);
     const encounters = [...movingContacts(interval), ...extraContacts.filter(contact =>
       contact >= interval.start && contact < interval.depot.distance)].sort((a, b) => a - b);
@@ -1113,9 +1111,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   };
   const recipe = (family, lane, mirror, spacing, distance = planningDistance, pinches = false) => {
     if (family === 'moving_intercept') {
+      // Level 2 movers are lateral Forklifts only; the forward Sweeper is reserved for Level 3 with its own sprite.
       return movingEncounterRows(distance, spacing, {levelId, mode, mirrored: lane % 2 === 1,
-        reversed: lane >= 2, paired: mirror, phase: random() * 2 * LANE_SPACING_PX, pinches,
-        kind: lane % 2 === 0 ? 'forklift' : 'sweeper'});
+        reversed: lane >= 2, paired: mirror, phase: random() * 2 * LANE_SPACING_PX, pinches});
     }
     const pinch = (side, offsetY = 0) => ({kind: 'sideRail', lane: side, offsetX: 0, offsetY,
       lengthPx: guardrailMinimumLength('sideRail'), spanRows: 1, sideObstacle: true, pinch: true});

@@ -68,9 +68,11 @@ export function hazardTexture(kind, sector, lane = 0, scene) {
 const warnedObstacleTextures = new WeakMap();
 function obstacleTexture(scene, key) {
   if (scene.textures.exists(key)) return key;
+  assertTextureBakingAllowed(scene);
   if (!scene.textures.exists('hazard_divider')) {
     throw new Error(`Missing obstacle texture ${key}; certified barrier fallback is unavailable`);
   }
+
   const size = TEXTURE_SIZES[key];
   if (!size) throw new Error(`No certified obstacle texture dimensions for ${key}`);
   let warned = warnedObstacleTextures.get(scene.textures);
@@ -83,6 +85,12 @@ function obstacleTexture(scene, key) {
   texture.getContext().drawImage(scene.textures.get('hazard_divider').getSourceImage(), 0, 0, ...size);
   texture.refresh();
   return key;
+}
+
+function assertTextureBakingAllowed(scene) {
+  if (['running', 'docking', 'depot', 'crashing', 'finishing'].includes(scene.phase)) {
+    throw new Error('Route textures must be baked before gameplay');
+  }
 }
 
 // Keep legacy bake keys sized even when gameplay redirects their objects to modular tiles.
@@ -774,6 +782,24 @@ function drawIndustrialServiceGap(g, x, top, bottom) {
   g.fillStyle(p.edge).fillCircle(x + 11, mid, 1).fillCircle(x + 21, mid, 1);
 }
 
+function drawRoadWear(g, height, dust = false) {
+  const dark = dust ? PALETTE.seam : PALETTE.edge;
+  for (let y = 60; y < height - 90; y += 234) {
+    const x = 68 + (y * 17 % 224);
+    g.lineStyle(1, dark, 0.2)
+      .lineBetween(x, y, x + 7, y + 23)
+      .lineBetween(x + 7, y + 23, x + 2, y + 39)
+      .lineBetween(x + 7, y + 23, x + 18, y + 29);
+    g.lineStyle(1, dark, 0.16).lineBetween(53, y + 71, 337, y + 74);
+    g.lineStyle(1, PALETTE.steelLight, 0.08).lineBetween(53, y + 73, 337, y + 76);
+    for (let chip = 0; chip < 8; chip++) {
+      const px = chip % 2 ? ROAD_RIGHT - 12 - chip : ROAD_LEFT + 12 + chip;
+      g.fillStyle(dust ? PALETTE.rockLight : PALETTE.steelLight, 0.18)
+        .fillRect(px, y + chip * 9, chip % 3 + 1, 2);
+    }
+  }
+}
+
 function drawRoad(g) {
   const p = PALETTE;
   const height = TEXTURE_SIZES.industrial_road[1];
@@ -808,6 +834,7 @@ function drawRoad(g) {
         {x: x + 11, y: y + 55}, {x: x + 6, y: y + 71}, {x, y: y + 80}], true);
     }
   }
+  drawRoadWear(g, height);
   for (const x of [0, 353]) {
     g.fillStyle(p.edge).fillRect(x, 0, 37, height);
     g.fillStyle(p.steelDark).fillRect(x + 3, 0, 31, height);
@@ -896,6 +923,7 @@ function drawDustlands(g) {
     g.lineStyle(1, PALETTE.seam).lineBetween(47, y + 1, 343, y + 1);
     g.fillStyle(PALETTE.warning).fillRect(48, y + 46, 2, 14).fillRect(340, y + 96, 2, 14);
   }
+  drawRoadWear(g, height, true);
 }
 
 function drawDepot(g) {
@@ -994,6 +1022,7 @@ function createLightTextures(scene) {
 }
 
 export function createIndustrialTextures(scene) {
+  assertTextureBakingAllowed(scene);
   for (const art of [...COLLECTIBLE_ART, DEPOT_ART]) {
     if (!scene.textures.exists(art.key) && !scene.textures.exists(art.sourceKey)) {
       throw new Error(`Approved ${art === DEPOT_ART ? 'Depot' : 'collectible'} sprite failed to load: ${art.id}`);
@@ -1290,6 +1319,7 @@ export function syncSilhouetteShadow(shadow, source, visible = source.visible !=
 
 function ensureParticleDotTexture(scene) {
   if (scene.textures.exists(PARTICLE_DOT_KEY)) return PARTICLE_DOT_KEY;
+  assertTextureBakingAllowed(scene);
   const dot = scene.make.graphics({x: 0, y: 0, add: false});
   // Concentric layers fake a soft falloff inside the tiny 4x4 frame.
   [[2, 0.3], [1.5, 0.6], [0.9, 1]].forEach(([radius, alpha]) => {

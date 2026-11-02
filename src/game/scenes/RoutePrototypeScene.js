@@ -113,10 +113,10 @@ import {RouteVisualPool, routeImage, releaseRouteVisual} from '../rendering/rout
 import {VEHICLES} from '../data/catalog.js';
 import {
   CARGO_COLLISION_DISTANCE_PX,
-  createTrackStream,
   resumeSpawnDelay,
   hazardsBeforeDepot,
 } from '../core/trackGenerator.js';
+import {createRouteStream, warmRouteStreamWorkers} from '../core/routeStream.js';
 
 const VERTICAL_HIT_PX = GAME_BALANCE.physics.collision.cargoHalfHeightPx;
 const levelDisplayName = levelId => levelId === 'level1' ? 'LEVEL 1' : 'LEVEL 2';
@@ -179,8 +179,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.cargoIndicators = [];
     createIndustrialTextures(this);
     this.routeVisualPool = new RouteVisualPool(this);
+    warmRouteStreamWorkers();
     this.buildWorld();
     this.events.once('shutdown', () => {
+      this.trackStream?.destroy?.();
+      this.trackStream = null;
+      this.takeRunStream(null, null, null);
       destroyRoadEnvironment(this.roadEnvironment, this);
       this.removeObjects();
       this.removeDepotFacilities();
@@ -377,7 +381,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   setWorldVisible(visible) {
-    if (!visible) this.feedback?.setEngine(null);
     if (this.roadEnvironment) setRoadEnvironmentVisible(this.roadEnvironment, visible, this);
     this.syncResponsiveCamera();
     if (!visible && this.depotEntrance) {
@@ -770,7 +773,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
           this.menuControlContainsPointer(pointer, scrollable);
         press = null;
         tile.setAlpha(1);
-        if (valid) action();
+        if (valid) {
+          action();
+          this.feedback?.uiClick();
+        }
       })
       .on('pointerout', () => { press = null; tile.setAlpha(1); });
     this.clipMenuControl(tile, scrollable);
@@ -924,7 +930,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
         pointer.getDistance() <= 10 && this.menuControlContainsPointer(pointer, scrollable);
       pressed = null;
       control.setAlpha(1);
-      if (valid) action();
+      if (valid) {
+        action();
+        this.feedback?.uiClick();
+      }
     });
     control.on('pointerover', () => control.setAlpha(0.82));
     control.on('pointerout', () => { pressed = null; control.setAlpha(1); });
@@ -1179,6 +1188,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const progress = this.profile.levelProgress[levelId];
       const available = isLevelUnlocked(this.profile, levelId);
       const checkpointReady = isRunStartAvailable(this.profile, levelId, 'checkpoint', 'normal');
+      if (checkpointReady) this.prepareRunStream(levelId, 'normal', checkpointDistance(levelId));
       this.withMenuScrollItem(y + cardHeight / 2, cardHeight, () => {
         this.addCard(y, cardHeight, available ? PALETTE.cyan : PALETTE.steel);
         this.addLabel(`${levelDisplayName(levelId)}${progress.completed ? '  •  COMPLETE' : ''}`,
@@ -2127,6 +2137,31 @@ export class RoutePrototypeScene extends Phaser.Scene {
       ROAD_LEFT + 30, ROAD_RIGHT - 30);
   }
 
+  newRunSeed() {
+    return (Date.now() ^ Math.imul(this.profile.totalRuns + 1, 0x9e3779b9)) >>> 0;
+  }
+
+  /** Slow-to-plan starts begin route planning while their button is on screen, so driving never waits. */
+  prepareRunStream(levelId, mode, startDistance) {
+    this.preparedRunStreams ??= new Map();
+    const key = `${levelId}:${mode}:${startDistance}`;
+    if (this.preparedRunStreams.has(key)) return;
+    const seed = this.newRunSeed();
+    const firstDistance = this.predictRouteDistance(startDistance,
+      GAME_BALANCE.routes.spawning.initialRowDelaySeconds, {levelId, mode});
+    this.preparedRunStreams.set(key, {seed,
+      stream: createRouteStream(seed, levelId, mode, {startDistance, firstDistance})});
+  }
+
+  takeRunStream(levelId, mode, startDistance) {
+    const prepared = this.preparedRunStreams?.get(`${levelId}:${mode}:${startDistance}`) ?? null;
+    for (const entry of this.preparedRunStreams?.values() ?? []) {
+      if (entry !== prepared) entry.stream.destroy?.();
+    }
+    this.preparedRunStreams?.clear();
+    return prepared;
+  }
+
   startRun(start = 'beginning', levelId = 'level1', mode = 'normal', developerOptions = null) {
     if (this.debugManager?.active && developerOptions === null) {
       developerOptions = {sectorNumber: start === 'checkpoint' ? 3 : 1,
@@ -2198,9 +2233,13 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.centerShip();
     this.feedback?.resetRun(this.ship.x);
     this.debugManager?.resetBot(this.ship.x);
-    const seed = (Date.now() ^ Math.imul(this.profile.totalRuns + 1, 0x9e3779b9)) >>> 0;
+    const prepared = this.takeRunStream(levelId, mode, this.distance);
+    const seed = prepared?.seed ?? this.newRunSeed();
     this.runSeed = seed;
-    this.trackStream = createTrackStream(seed, levelId, mode);
+    this.trackStream?.destroy?.();
+    const firstRowDelay = GAME_BALANCE.routes.spawning.initialRowDelaySeconds;
+    this.trackStream = prepared?.stream ?? createRouteStream(seed, levelId, mode, {startDistance: this.distance,
+      firstDistance: this.predictRouteDistance(this.distance, firstRowDelay)});
     this.blueprintRun = createBlueprintRun(seed, runId);
     this.currentSector = sectorAtDistance(this.distance, levelId, mode);
     syncSectorRoad(this.roadSurface, this.dustSurface, this.distance, levelId, mode, this.subRoad);
@@ -2210,7 +2249,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       setRoadLighting(this.roadEnvironment,
         lightingForSector(this.currentSector, this.distance, routeFinishDistance(levelId), mode, levelId), true);
     }
-    this.spawnTimer = GAME_BALANCE.routes.spawning.initialRowDelaySeconds;
+    this.spawnTimer = firstRowDelay;
     this.nextTrackRowDistance = null;
     this.invulnerable = 0;
     this.stats = loadoutStats(this.profile, this.vehicleId);
@@ -2381,6 +2420,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const row = this.trackStream.nextRow(this.distance, {
       nextDepotDistance: this.nextDepotDistance, protectedUntilDistance: this.protectedUntilDistance,
     });
+    // A background row that is not ready yet is retried next frame; its planned distance keeps placement exact.
+    if (!row) return 0;
     const plannedDistance = row.plannedDistance ?? this.distance;
     this.nextTrackRowDistance = plannedDistance + row.spacingPx * METERS_PER_PIXEL;
     // update() already advanced distance; newborns join its object-scroll loop below.
@@ -2550,7 +2591,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
       return;
     }
     if (this.phase !== 'running') {
-      this.feedback?.setEngine(null);
       syncGuardrailSparks(this.haulerEffects, null);
       if (this.haulerEffects?.damageSmoke) this.haulerEffects.damageSmoke.emitter.emitting = false;
       return;
@@ -2567,7 +2607,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.depotLaunchElapsed = step.complete ? null : step.elapsed;
       scroll *= dt > 0 ? step.travelSeconds / dt : 0;
     }
-    this.feedback?.setEngine(scroll);
     this.distance += dt * scroll * METERS_PER_PIXEL;
     this.scrollRoad(scroll * dt);
     const finishDistance = routeFinishDistance(this.levelId);
@@ -2634,7 +2673,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
       if (this.nextTrackRowDistance == null) this.spawnTimer -= dt;
       if (this.nextTrackRowDistance == null ? this.spawnTimer <= 0
         : this.distance >= this.nextTrackRowDistance) {
-        this.spawnTimer = this.spawnTrackRow(scroll * dt) / scroll;
+        const spacingPx = this.spawnTrackRow(scroll * dt);
+        this.spawnTimer = spacingPx > 0 ? spacingPx / scroll : 0;
       }
     }
     const capacity = this.stats.capacity;
@@ -2876,8 +2916,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const stopDistance = Math.max(this.distance, this.nextDepotDistance);
     this.depotMotion = {elapsed: 0, stopDistance,
       speed: (stopDistance - this.distance) / (DEPOT_RULES.dockingSeconds / 2 * METERS_PER_PIXEL)};
+    if (this.trackStream?.prepareDepotReset) {
+      // Spawning is paused while docked, so the reset branch can be planned during braking.
+      const spawnTimer = this.depotResumeRowDelay(stopDistance, this.nextDepotDistance + DEPOT_RULES.exitMeters);
+      this.trackStream.prepareDepotReset(stopDistance,
+        this.predictRouteDistance(stopDistance, spawnTimer, {launchSeconds: DEPOT_RULES.launchSeconds}));
+    }
     this.depotLaunchElapsed = null;
     this.phase = 'docking';
+    this.feedback?.airBrake();
     this.steeringPointerId = null;
     this.shipTargetX = this.ship.x;
     this.shipVelocityX = 0;
@@ -2892,7 +2939,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const step = depotMotionStep(motion.elapsed, dt, DEPOT_RULES.dockingSeconds);
     motion.elapsed = step.elapsed;
     const scrollPx = motion.speed * step.travelSeconds;
-    this.feedback?.setEngine(motion.speed * step.speedFraction);
     this.distance += scrollPx * METERS_PER_PIXEL;
     if (step.complete) this.distance = motion.stopDistance;
     this.scrollRoad(scrollPx);
@@ -2964,21 +3010,45 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   protectDepotExit() {
     this.advanceDepot();
-    this.trackStream.resetAfterDepot(this.distance);
+    const spawnTimer = this.depotResumeRowDelay(this.distance, this.protectedUntilDistance);
+    this.trackStream.resetAfterDepot(this.distance,
+      {firstDistance: this.predictRouteDistance(this.distance, spawnTimer, {launchSeconds: DEPOT_RULES.launchSeconds})});
     this.nextTrackRowDistance = null;
-    const speed = routeSpeedAtDistance(this.distance, this.levelId, this.runMode);
+    this.spawnTimer = spawnTimer;
+  }
+
+  depotResumeRowDelay(distance, protectedUntilDistance) {
+    const speed = routeSpeedAtDistance(distance, this.levelId, this.runMode);
     const travelToShip = (this.ship.y - HAZARD_ROW_ENVELOPE_PX / 2) - SPAWN_Y;
-    this.spawnTimer = Math.max(
+    return Math.max(
       resumeSpawnDelay(speed, travelToShip),
-      (this.protectedUntilDistance - this.distance - travelToShip * METERS_PER_PIXEL) / (speed * METERS_PER_PIXEL),
+      (protectedUntilDistance - distance - travelToShip * METERS_PER_PIXEL) / (speed * METERS_PER_PIXEL),
     );
+  }
+
+  /** Distance after `seconds` of the run loop's own motion, so background planning knows each first row. */
+  predictRouteDistance(distance, seconds,
+    {launchSeconds = null, levelId = this.levelId, mode = this.runMode} = {}) {
+    const step = 1 / 240;
+    let launch = launchSeconds === null ? null : 0;
+    for (let elapsed = 0; elapsed < seconds;) {
+      const dt = Math.min(step, seconds - elapsed);
+      let scroll = Math.min(routeSpeedAtDistance(distance, levelId, mode), MAX_TRACK_SPEED);
+      if (launch !== null) {
+        const motion = depotMotionStep(launch, dt, launchSeconds, true);
+        launch = motion.complete ? null : motion.elapsed;
+        scroll *= dt > 0 ? motion.travelSeconds / dt : 0;
+      }
+      distance += dt * scroll * METERS_PER_PIXEL;
+      elapsed += dt;
+    }
+    return distance;
   }
 
   /** Brief beat so the player sees the final hit before the result screen. */
   beginCrash() {
     if (this.debugManager?.flags.god) return;
     this.phase = 'crashing';
-    this.feedback?.setEngine(null);
     syncDepotEntrance(this.depotEntrance, this.nextDepot, this.distance, this.phase, this.levelId);
     this.refreshHud();
     this.hideToast();

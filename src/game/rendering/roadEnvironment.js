@@ -2,7 +2,7 @@ import {ENVIRONMENT_VISUALS as V, SECTOR_LIGHTING, LEVEL_SECTOR_LIGHTING, OVERDR
   headlightFalloff, streetlightFalloff} from '../data/environments.js';
 import {METERS_PER_PIXEL} from '../core/economy.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
-import {DEPOT_RULES, depotWorldY} from '../core/depots.js';
+import {DEPOT_RULES, depotWorldY, depotDockingStart} from '../core/depots.js';
 import {hullPoint} from './industrial.js';
 import {routeImage, routeTile, releaseRouteVisual} from './routeVisualPool.js';
 
@@ -57,12 +57,7 @@ export function createRoadEnvironment(scene, road, width, height) {
     pool: scene.add.image(0, 0, 'streetlight_pool').setBlendMode('ADD')
       .setAlpha(V.streetlightAlpha).setDepth(2).setVisible(false),
   }));
-  const decals = Array(Math.ceil((height + 128) * METERS_PER_PIXEL / V.decalSpacingMeters) + 1).fill(null);
   const skids = Array(4).fill(null);
-  // Reserve the fixed maximum decal demand at boot, not during the first scrolling frame.
-  const decalReserve = Array.from({length: decals.length + skids.length},
-    () => routeImage(scene, 0, 0, 'road_decal_skid'));
-  decalReserve.forEach(node => releaseRouteVisual(scene, node));
   const glints = routeTile(scene, width / 2, height / 2, width, height, 'road_dawn_glints')
     .setDepth(0.1).setVisible(false);
   const streaks = scene.add.graphics().setDepth(17).setVisible(false);
@@ -73,7 +68,7 @@ export function createRoadEnvironment(scene, road, width, height) {
     scale: {start: 1.5, end: 0}, alpha: {start: 0.9, end: 0},
     tint: [0xff963c, 0xffc160], blendMode: 'ADD',
   }).setDepth(7.8);
-  return {road, width, height, texture, context, pixels, ambient, beams, lamps, decals, skids, glints,
+  return {road, width, height, texture, context, pixels, ambient, beams, lamps, skids, glints,
     streaks, dockingChevrons, backfire, color: [255, 255, 255], from: [255, 255, 255], target: [255, 255, 255],
     blendElapsed: V.ambientBlendSeconds, lighting: OVERDRIVE_LIGHTING, visible: false,
     zoom: {factor: 1}, streakRemaining: 0, depotMarks: []};
@@ -100,16 +95,16 @@ export function setRoadEnvironmentVisible(view, visible, scene) {
   view.ambient.setVisible(visible);
   if (!visible) {
     stopRoadBurst(view, scene);
-    for (const slots of [view.decals, view.skids]) slots.forEach((node, index) => {
+    view.skids.forEach((node, index) => {
       releaseRouteVisual(scene, node);
-      slots[index] = null;
+      view.skids[index] = null;
     });
     [...view.beams, view.glints, view.dockingChevrons,
       ...view.lamps.flatMap(lamp => [lamp.pole, lamp.pool])].forEach(node => node.setVisible(false));
   }
 }
 
-function syncDecal(slots, index, scene, x, y, visible) {
+function syncDecal(slots, index, scene, x, y, height, visible) {
   if (!visible) {
     releaseRouteVisual(scene, slots[index]);
     slots[index] = null;
@@ -117,7 +112,7 @@ function syncDecal(slots, index, scene, x, y, visible) {
   }
   const node = slots[index] ?? routeImage(scene, x, y, 'road_decal_skid');
   slots[index] = node;
-  node.setPosition(x, y).setAlpha(0.15).setDepth(0.2).setVisible(true);
+  node.setPosition(x, y).setDisplaySize(48, height).setAlpha(0.15).setDepth(0.2).setVisible(true);
 }
 
 export function startRoadBurst(view, scene, exhaust) {
@@ -135,9 +130,10 @@ export function startRoadBurst(view, scene, exhaust) {
   }
 }
 
-function rememberDepotDecals(view, depot) {
+function rememberDepotDecals(view, depot, scene) {
   if (!depot || !Number.isFinite(depot.distance) || view.depotMarks.some(mark => mark.distance === depot.distance)) return;
-  view.depotMarks.push({distance: depot.distance, side: depot.side});
+  view.depotMarks.push({distance: depot.distance, side: depot.side,
+    brakingStart: depotDockingStart(depot, scene.levelId ?? 'level1', scene.runMode ?? 'normal')});
   if (view.depotMarks.length > 2) view.depotMarks.shift();
 }
 
@@ -207,19 +203,14 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
     lamp.pool.setPosition(right ? ROAD_RIGHT - 42 : ROAD_LEFT + 42, y).setVisible(visible);
     if (visible) pools.push({x: lamp.pool.x, y});
   });
-  const firstDecal = Math.floor((distance + (ship.y - view.height - 64) * METERS_PER_PIXEL) / V.decalSpacingMeters);
-  view.decals.forEach((_node, i) => {
-    const mark = firstDecal + i;
-    const y = ship.y - (mark * V.decalSpacingMeters - distance) / METERS_PER_PIXEL;
-    syncDecal(view.decals, i, scene, ROAD_LEFT + 42 + ((mark * 61 % 220) + 220) % 220, y,
-      mark >= 0 && y >= -64 && y <= view.height + 64);
-  });
-  rememberDepotDecals(view, nextDepot);
+  rememberDepotDecals(view, nextDepot, scene);
   view.skids.forEach((_node, i) => {
     const depot = view.depotMarks[Math.floor(i / 2)];
-    const y = depot ? ship.y - (depot.distance + (i % 2 ? 8 : -8) - distance) / METERS_PER_PIXEL : -1000;
+    const segmentHeight = depot ? (depot.distance - depot.brakingStart) / METERS_PER_PIXEL / 2 : 0;
+    const y = depot ? depotWorldY(depot, distance) + (i % 2 + 0.5) * segmentHeight : -1000;
     syncDecal(view.skids, i, scene, depot?.side === 'left' ? ROAD_LEFT + 32 : ROAD_RIGHT - 32, y,
-      Boolean(depot) && y >= -64 && y <= view.height + 64);
+      segmentHeight, segmentHeight > 0 && y + segmentHeight / 2 >= 0 &&
+        y - segmentHeight / 2 <= view.height);
   });
   view.glints.setVisible(view.lighting === SECTOR_LIGHTING[0]);
   // White mask regions restore original world saturation inside lights, including obstacles and pickups.
@@ -245,9 +236,9 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
 
 export function destroyRoadEnvironment(view, scene) {
   stopRoadBurst(view, scene);
-  for (const slots of [view.decals, view.skids]) slots.forEach((node, index) => {
+  view.skids.forEach((node, index) => {
     releaseRouteVisual(scene, node);
-    slots[index] = null;
+    view.skids[index] = null;
   });
   releaseRouteVisual(scene, view.glints);
   [view.ambient, ...view.beams, view.streaks,

@@ -22,7 +22,7 @@ export const ENVIRONMENT_VISUALS = Object.freeze({
   subRoadSpeed: 0.7, ambientBlendSeconds: 1.8,
   headlightLength: 220, headlightWidth: 84, headlightAlpha: 0.35,
   streetlightSpacingMeters: 80, streetlightRadius: 140, streetlightAlpha: 0.38,
-  streetlightTint: 0xffe090, decalSpacingMeters: 45,
+  streetlightTint: 0xffe090,
   barrierNightScale: 1.3, barrierNightIdleAlpha: 0.3,
   cargoNightTint: 0xe6e6e6, cargoNightGlowScale: 0.9,
   burstZoom: 0.94, burstOutMs: 300, burstReturnMs: 1500,

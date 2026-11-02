@@ -78,7 +78,7 @@ export function depotEntryAllowed(depot, distance, x, priorDistance = distance, 
   const overlap = intersect(player, bay);
   // Subtracting world coordinates can lose a few ULPs at the inclusive boundary.
   const roundoff = Number.EPSILON * Math.max(Math.abs(player.x), Math.abs(bay.x), bay.width) * 4;
-  return overlap.height > 0 && overlap.width + roundoff >= player.width * 0.75;
+  return overlap.height > 0 && overlap.width + roundoff >= player.width * 0.5;
 }
 
 /** Begin braking early enough for the existing 1.5 s stop to end at the bay centre. */
