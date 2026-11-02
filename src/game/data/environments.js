@@ -50,7 +50,7 @@ export function streetlightFalloff(distance) {
 const environment = (roadTexture, roadsideIdentity, hazardFamilies, roadTints) => Object.freeze({
   roadTexture, roadsideIdentity: Object.freeze(roadsideIdentity),
   hazardFamilies: Object.freeze([...new Set([...hazardFamilies,
-    'sideRail', 'sideWall', 'sweeper'])]), roadTints: Object.freeze(roadTints),
+    'sideRail', 'sideWall', 'forklift', 'sweeper'])]), roadTints: Object.freeze(roadTints),
 });
 
 /** Visual asset inventories; challenge selection lives in challengeProfiles.js. */

@@ -3051,6 +3051,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.cameras?.main?.flash?.(200, 0, 255, 255, 0.4);
     if (this.runMode === 'continuous') this.renderContinuousDepot();
     else this.renderDepot();
+    this.recordMilestones();
   }
 
   renderContinuousDepot(message = '') {
