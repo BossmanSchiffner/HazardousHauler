@@ -108,6 +108,8 @@ import {advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, p
 import {DEPOT_RULES, nextDepotAfter, depotEntryAllowed, depotDockingStart, depotMotionStep, depotWorldY} from '../core/depots.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
 import {balance} from '../data/balance.js';
+import {RunFeedback} from '../rendering/runFeedback.js';
+import {RouteVisualPool, routeImage, releaseRouteVisual} from '../rendering/routeVisualPool.js';
 import {VEHICLES} from '../data/catalog.js';
 import {
   CARGO_COLLISION_DISTANCE_PX,
@@ -170,13 +172,20 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.profile = loadProfile();
     this.stats = loadoutStats(this.profile, this.profile.selectedVehicleId);
     this.phase = 'menu';
+    this.feedback = new RunFeedback(this);
     this.overlayObjects = [];
     this.objects = [];
     this.depotFacilities = [];
     this.cargoIndicators = [];
     createIndustrialTextures(this);
+    this.routeVisualPool = new RouteVisualPool(this);
     this.buildWorld();
-    this.events.once('shutdown', () => destroyRoadEnvironment(this.roadEnvironment, this));
+    this.events.once('shutdown', () => {
+      destroyRoadEnvironment(this.roadEnvironment, this);
+      this.removeObjects();
+      this.removeDepotFacilities();
+      this.routeVisualPool.destroy();
+    });
     this.handleViewportResize = this.handleViewportResize.bind(this);
     this.scale.on('resize', this.handleViewportResize);
     this.events.once('shutdown', () => this.scale.off('resize', this.handleViewportResize));
@@ -368,6 +377,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   setWorldVisible(visible) {
+    if (!visible) this.feedback?.setEngine(null);
     if (this.roadEnvironment) setRoadEnvironmentVisible(this.roadEnvironment, visible, this);
     this.syncResponsiveCamera();
     if (!visible && this.depotEntrance) {
@@ -480,6 +490,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   playPickupFeedback(item) {
+    this.feedback?.cargoPickup(this.time.now / 1000);
     const isStack = item.kind === 'coinStack';
     this.coinBurst.explode(isStack ? 22 : 9, item.sprite.x, item.sprite.y);
     this.floatCurrency(`+${item.value}`, this.ship.y - 48, '#ffe6a1', isStack ? 24 : 18);
@@ -488,6 +499,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   playHitFeedback(x, y, coinsLost, fatal, godHit = false) {
+    if (!godHit) this.feedback?.impact();
     this.debris.explode(fatal ? 40 : 18, x, y);
     this.cameras.main.shake(fatal ? 380 : 100, fatal ? 0.02 : 0.012);
     if (!godHit) playImpactSparks(this.haulerEffects, this.ship, x, y);
@@ -2184,6 +2196,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.sandboxSpawnLane = 0;
     this.devReadout = null;
     this.centerShip();
+    this.feedback?.resetRun(this.ship.x);
     this.debugManager?.resetBot(this.ship.x);
     const seed = (Date.now() ^ Math.imul(this.profile.totalRuns + 1, 0x9e3779b9)) >>> 0;
     this.runSeed = seed;
@@ -2262,9 +2275,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   addCargoPickupVisual(x, y, value) {
-    const sprite = scaleSpriteArt(this.add.image(x, y, cargoPickupTexture(value)),
+    const sprite = scaleSpriteArt(routeImage(this, x, y, cargoPickupTexture(value)),
       balance.COLLECTIBLE_VISUAL_SCALE).setDepth(5);
-    const pickupGlow = scaleSpriteArt(this.add.image(x, y, cargoPickupGlowTexture(value)))
+    const pickupGlow = scaleSpriteArt(routeImage(this, x, y, cargoPickupGlowTexture(value)))
       .setDepth(4.5).setBlendMode('ADD');
     syncCargoPickupVisuals(sprite, pickupGlow, this.time.now,
       this.roadEnvironment?.lighting.headlights ?? false);
@@ -2354,12 +2367,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   removeObjectAt(index) {
     const item = this.objects[index];
-    item.sprite.destroy();
-    item.shadow?.destroy();
-    item.cautionLights?.forEach(light => light.destroy());
-    item.roadsideBase?.destroy();
-    item.blueprintGlow?.destroy();
-    item.pickupGlow?.destroy();
+    releaseRouteVisual(this, item.sprite);
+    releaseRouteVisual(this, item.shadow);
+    item.cautionLights?.forEach(light => releaseRouteVisual(this, light));
+    releaseRouteVisual(this, item.roadsideBase);
+    releaseRouteVisual(this, item.blueprintGlow);
+    releaseRouteVisual(this, item.pickupGlow);
     item.valueText?.destroy();
     this.objects.splice(index, 1);
   }
@@ -2399,7 +2412,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
           cautionLights: sprite.guardrailBeacon ? [sprite.guardrailBeacon] : null});
         continue;
       }
-      const sprite = this.add.image(hazardX({...hazard, movementOffsetPx}),
+      const sprite = routeImage(this, hazardX({...hazard, movementOffsetPx}),
         hazardSpawnY, hazardTexture(hazard.kind, sector, hazard.lane, this)).setDepth(5);
       scaleSpriteArt(sprite);
       if (definition.roadside) {
@@ -2411,7 +2424,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
         }
       }
       const roadsideBase = definition.roadside && !definition.scenery
-        ? scaleSpriteArt(this.add.image(hazard.lane === 0 ? 21.5 : 368.5, sprite.y,
+        ? scaleSpriteArt(routeImage(this, hazard.lane === 0 ? 21.5 : 368.5, sprite.y,
           `base_${resolveVisualTheme(sector).hazardThemeId}`))
           .setFlipX(hazard.lane === 3).setDepth(5.5)
         : null;
@@ -2436,10 +2449,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
         row.pickups.map(pickup => pickup.lane), this.levelId, this.runMode) : null;
     if (blueprint) {
       const converted = this.profile.ownedVehicleIds.includes('apex');
-      const sprite = scaleSpriteArt(this.add.image(LANE_CENTERS[blueprint.lane], spawnY,
+      const sprite = scaleSpriteArt(routeImage(this, LANE_CENTERS[blueprint.lane], spawnY,
         converted ? 'cargo_coinStack' : 'cargo_blueprint'), balance.COLLECTIBLE_VISUAL_SCALE).setDepth(5);
       const blueprintGlow = converted ? null
-        : scaleSpriteArt(this.add.image(sprite.x, sprite.y, 'cargo_blueprint_glow'))
+        : scaleSpriteArt(routeImage(this, sprite.x, sprite.y, 'cargo_blueprint_glow'))
           .setDepth(4.5).setBlendMode('ADD');
       const valueText = converted
         ? this.addCurrency(`+${blueprint.amount * BP_TO_COINS}`, sprite.x, spawnY + 26 * SPRITE_ART_SCALE,
@@ -2537,6 +2550,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       return;
     }
     if (this.phase !== 'running') {
+      this.feedback?.setEngine(null);
       syncGuardrailSparks(this.haulerEffects, null);
       if (this.haulerEffects?.damageSmoke) this.haulerEffects.damageSmoke.emitter.emitting = false;
       return;
@@ -2553,6 +2567,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.depotLaunchElapsed = step.complete ? null : step.elapsed;
       scroll *= dt > 0 ? step.travelSeconds / dt : 0;
     }
+    this.feedback?.setEngine(scroll);
     this.distance += dt * scroll * METERS_PER_PIXEL;
     this.scrollRoad(scroll * dt);
     const finishDistance = routeFinishDistance(this.levelId);
@@ -2606,6 +2621,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       brakeTimeRemaining: this.keyboardBrakeRemaining,
     });
     this.ship.x = movement.x;
+    this.feedback?.steer(this.ship.x);
     this.shipVelocityX = movement.velocity;
     if (digitalBrake) this.keyboardBrakeRemaining = movement.brakeTimeRemaining;
     this.applyTruckRoll(Phaser.Math.Clamp(
@@ -2780,7 +2796,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const facility = this.depotFacilities[i];
       facility.container.y += scrollPx;
       if (facility.container.y > H + height) {
-        facility.container.destroy();
+        releaseRouteVisual(this, facility.container);
         this.depotFacilities.splice(i, 1);
       }
     }
@@ -2795,7 +2811,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   removeDepotFacilities() {
-    this.depotFacilities?.forEach(facility => facility.container.destroy());
+    this.depotFacilities?.forEach(facility => releaseRouteVisual(this, facility.container));
     if (this.depotFacilities) this.depotFacilities.length = 0;
   }
 
@@ -2876,6 +2892,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const step = depotMotionStep(motion.elapsed, dt, DEPOT_RULES.dockingSeconds);
     motion.elapsed = step.elapsed;
     const scrollPx = motion.speed * step.travelSeconds;
+    this.feedback?.setEngine(motion.speed * step.speedFraction);
     this.distance += scrollPx * METERS_PER_PIXEL;
     if (step.complete) this.distance = motion.stopDistance;
     this.scrollRoad(scrollPx);
@@ -2912,7 +2929,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const crossingX = priorShipX + (this.ship.x - priorShipX) * fraction;
     if (!this.debugManager?.flags.bot &&
         depotEntryAllowed({...this.nextDepot, distance: entryDistance}, this.distance, crossingX,
-          Math.min(priorDistance, entryDistance))) {
+          Math.min(priorDistance, entryDistance), (player, bay) =>
+            Phaser.Geom.Rectangle.Intersection(
+              new Phaser.Geom.Rectangle(player.x, player.y, player.width, player.height),
+              new Phaser.Geom.Rectangle(bay.x, bay.y, bay.width, bay.height)))) {
       this.ship.x = crossingX;
       this.beginDocking();
     } else if (this.distance >= this.nextDepotDistance) {
@@ -2958,6 +2978,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   beginCrash() {
     if (this.debugManager?.flags.god) return;
     this.phase = 'crashing';
+    this.feedback?.setEngine(null);
     syncDepotEntrance(this.depotEntrance, this.nextDepot, this.distance, this.phase, this.levelId);
     this.refreshHud();
     this.hideToast();
@@ -2973,6 +2994,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   absorbWithShield(x, y, invulnerabilitySeconds) {
+    this.feedback?.impact();
     this.invulnerable = invulnerabilitySeconds;
     this.updateShield();
     this.refreshHud();
@@ -3034,6 +3056,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     if (this.phase !== 'running' && this.phase !== 'docking') return;
     this.depotMotion = null;
     this.phase = 'depot';
+    this.feedback?.depot();
     this.currentSector = sectorAtDistance(this.distance, this.levelId, this.runMode);
     this.syncFinishLine();
     this.depotCount += 1;
@@ -3231,6 +3254,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.protectDepotExit();
     syncSectorRoad(this.roadSurface, this.dustSurface, this.distance, this.levelId, this.runMode, this.subRoad);
     this.centerShip();
+    this.feedback?.resetSteering(this.ship.x);
     this.phase = 'running';
     this.hudContainer?.setVisible(true);
     this.depotLaunchElapsed = 0;

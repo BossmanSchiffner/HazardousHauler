@@ -8,7 +8,7 @@ export const HELP_SECTIONS = Object.freeze([
   ['COLLECT CARGO', 'Collect Cargo to gain more coins. Cargo in further Sections are more valuable!.'],
   ['WATCH YOUR LOAD', 'A fuller load makes steering more difficult!.'],
   ['AVOID HAZARDS', 'Hits damage Hull and drop valuable cargo! Bank your cargo before a crash takes it all!'],
-  ['USE DEPOTS', 'Depot-side markers appear within 60 m. Either outer lane stops and refills Normal shields.\nBank & Continue secures Normal cargo; then repair or resume. Bank & End Run ends safely.\nCenter lanes bypass with cargo at risk for a bigger bonus; no shield recharge.\nEndless stops: End Run pays out, or Skip restores shields without banking.'],
+  ['USE DEPOTS', 'Depot-side markers appear within 60 m. Line up with the indicated bay to stop and refill Normal shields.\nBank & Continue secures Normal cargo; then repair or resume. Bank & End Run ends safely.\nOther lanes bypass with cargo at risk for a bigger bonus; no shield recharge.\nEndless stops: End Run pays out, or Skip restores shields without banking.'],
   ['BONUS SYSTEM', `Each skip adds +${DEPOT_ECONOMY.riskStepPercent}%, up to +${DEPOT_ECONOMY.riskCapPercent}%. Near misses add +${GAME_BALANCE.physics.collision.closeCall.bonusStepPercent}% up to +${GAME_BALANCE.physics.collision.closeCall.maximumBonusPercent}%; Hull or shield hits reset the unbanked near-miss bonus. After two Depots, stay damage-free to earn +${noDamageBonusPercent}% on eligible cargo at run end.`],
   ['UPGRADE SMART', 'Spend Coins in the Garage on Steering, Cargo Capacity and other upgrades.'],
 ].map(Object.freeze));

@@ -1,10 +1,10 @@
 import {depotPaletteStep} from '../core/depots.js';
 
 export const ROAD_SURFACE_PRESETS = Object.freeze({
-  industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', mesh: false, material: 'concrete'}),
-  dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', mesh: false, material: 'bedrock'}),
-  neon: Object.freeze({roadTexture: 'neon_road', subRoadTexture: 'subroad_neon', mesh: true, material: 'conduits'}),
-  foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', mesh: true, material: 'conduits'}),
+  industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
+  neon: Object.freeze({roadTexture: 'neon_road', subRoadTexture: 'subroad_neon', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
 });
 
 export const SECTOR_LIGHTING = Object.freeze([

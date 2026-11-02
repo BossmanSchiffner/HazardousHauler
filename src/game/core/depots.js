@@ -53,11 +53,32 @@ export function nextDepotAfter(distance, rules = DEPOT_RULES, levelId = 'level1'
     side: at === transitions[0] || Math.floor(at / rules.loopMeters) % 8 === 0 ? 'left' : 'right'});
 }
 
-export function depotEntryAllowed(depot, distance, x, priorDistance = distance) {
-  const laneWidth = (ROAD_RIGHT - ROAD_LEFT) / 4;
-  return Number.isFinite(depot.distance) && priorDistance <= depot.distance && distance >= depot.distance &&
-    x >= ROAD_LEFT && x <= ROAD_RIGHT &&
-    (x < ROAD_LEFT + laneWidth || x > ROAD_RIGHT - laneWidth);
+/** Canonical cab and indicated-side approach bay; sprite scaling never changes entry. */
+export function depotEntryBounds(depot, distance, x) {
+  const {mouthLeft, mouthWidth, mouthHeight} = DEPOT_ENTRANCE_GEOMETRY;
+  const halfWidth = GAME_BALANCE.hazards.playerHalfWidthPx;
+  const halfHeight = GAME_BALANCE.hazards.playerHalfHeightPx;
+  return {
+    player: {x: x - halfWidth, y: SHIP_Y - halfHeight, width: halfWidth * 2, height: halfHeight * 2},
+    bay: {x: depot.side === 'left' ? mouthLeft : ROAD_LEFT + ROAD_RIGHT - mouthLeft - mouthWidth,
+      y: depotWorldY(depot, distance) - mouthHeight / 2, width: mouthWidth, height: mouthHeight},
+  };
+}
+
+function intersectBounds(a, b) {
+  return {width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)),
+    height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))};
+}
+
+export function depotEntryAllowed(depot, distance, x, priorDistance = distance, intersect = intersectBounds) {
+  if (!Number.isFinite(depot.distance) || !['left', 'right'].includes(depot.side) ||
+      priorDistance > depot.distance || distance < depot.distance) return false;
+  // Sample the crossing plane, even if one frame travels through the whole bay.
+  const {player, bay} = depotEntryBounds(depot, depot.distance, x);
+  const overlap = intersect(player, bay);
+  // Subtracting world coordinates can lose a few ULPs at the inclusive boundary.
+  const roundoff = Number.EPSILON * Math.max(Math.abs(player.x), Math.abs(bay.x), bay.width) * 4;
+  return overlap.height > 0 && overlap.width + roundoff >= player.width * 0.75;
 }
 
 /** Begin braking early enough for the existing 1.5 s stop to end at the bay centre. */

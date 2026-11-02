@@ -10,9 +10,9 @@ export const HINTS = Object.freeze({
   cargo: 'Cargo has value and adds Load.\nA fuller load makes steering slower.',
   stack: 'Better cargo appears farther into the run.\nIt can replace cheaper cargo if it fits.',
   hazard: 'Hits damage Hull and can lose cargo.\nAt zero Hull, the run ends.',
-  depot: 'Green markers show the Depot side within 60 m.\nEither outer lane stops; center lanes bypass.',
+  depot: 'Green markers show the Depot side within 60 m.\nLine up with that bay to stop; other lanes bypass.',
   depotEconomy: 'Normal stops refill equipped shields.\nBank & Continue secures cargo; then repair or resume.\nBank & End Run secures cargo and ends the run.\n\n' +
-    `Center-lane bypass keeps cargo at risk and adds +${DEPOT_ECONOMY.riskStepPercent}% bonus, up to +${DEPOT_ECONOMY.riskCapPercent}%.\n\n` +
+    `Passing outside the indicated bay keeps cargo at risk and adds +${DEPOT_ECONOMY.riskStepPercent}% bonus, up to +${DEPOT_ECONOMY.riskCapPercent}%.\n\n` +
     `Repairs restore ${DEPOT_ECONOMY.repairHullRestored} Hull and cost wallet Coins.`,
 });
 

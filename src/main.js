@@ -9,7 +9,8 @@ const game = new Phaser.Game({
   width: 390,
   height: 844,
   scale: {
-    mode: Phaser.Scale.RESIZE,
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   render: {pixelArt: false, antialias: true},
   // Phaser's smoothing clamps frames to 16.7 ms when unfocused/cooling down,

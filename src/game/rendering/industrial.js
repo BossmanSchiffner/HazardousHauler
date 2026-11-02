@@ -8,6 +8,7 @@ import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../core/depots.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
 import {balance} from '../data/balance.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
+import {routeImage, routeContainer, routeTile} from './routeVisualPool.js';
 
 /** Route environments and approved sprite art; no gameplay or save state. */
 export const PALETTE = Object.freeze({
@@ -121,9 +122,6 @@ export const TEXTURE_SIZES = Object.freeze({
   overdrive_road: Object.freeze([390, 1248]),
   ...Object.fromEntries(Object.values(ROAD_SURFACE_PRESETS).map(preset =>
     [preset.subRoadTexture, Object.freeze([390, 1248])])),
-  road_decal_oil: Object.freeze([48, 64]),
-  road_decal_crack: Object.freeze([48, 64]),
-  road_decal_rut: Object.freeze([48, 64]),
   road_decal_skid: Object.freeze([48, 64]),
   road_dawn_glints: Object.freeze([390, 312]),
   truck_headlight_cone: Object.freeze([ENVIRONMENT_VISUALS.headlightWidth, ENVIRONMENT_VISUALS.headlightLength]),
@@ -859,72 +857,18 @@ function drawRack(g) {
 }
 
 function drawSubRoad(g, preset) {
-  const bedrock = preset.material === 'bedrock';
-  const conduits = preset.material === 'conduits';
-  g.fillStyle(bedrock ? 0x302b28 : 0x101820).fillRect(0, 0, 390, 1248);
+  const dust = preset.blendMode === 'ADD';
+  g.fillStyle(dust ? 0x000000 : 0xffffff).fillRect(0, 0, 390, 1248);
   for (let y = 0; y < 1248; y += 78) {
-    g.fillStyle(bedrock ? 0x66584c : 0x28323a, 0.65).fillRect(8, y + 4, 374, 54);
-    g.lineStyle(2, bedrock ? 0x171c20 : 0x050a12)
-      .lineBetween(0, y + 18, 121, y + 42).lineBetween(121, y + 42, 390, y + 10);
-    if (bedrock) {
-      for (let i = 0; i < 24; i++) {
-        g.fillStyle(i % 2 ? 0x9b856d : 0x181c20, 0.5)
-          .fillRect((i * 71 + y) % 390, y + i * 13 % 74, 3, 2);
-      }
-    } else {
-      for (const [index, x] of [57, 108, 282, 333].entries()) {
-        const color = conduits ? [0x35e6ed, 0xd85cdd, 0xf39a36][index % 3] : 0x5a6971;
-        if (conduits) g.fillStyle(color, 0.15).fillRect(x - 7, y, 14, 78);
-        g.fillStyle(color, conduits ? 0.65 : 0.45).fillRect(x - 2, y, 4, 78);
-        g.fillStyle(0x0a111a).fillRect(x - 5, y + 24, 10, 4);
-      }
-      g.fillStyle(0x050a12).fillRect(159, y + 20, 72, 36);
-      for (let x = 163; x < 231; x += 8) g.fillStyle(0x495966).fillRect(x, y + 22, 3, 32);
+    for (let i = 0; i < 24; i++) {
+      g.fillStyle(dust ? 0xb9a080 : 0x667078, dust ? 0.22 : 0.18)
+        .fillRect((i * 71 + y) % 390, y + i * 13 % 74, dust ? 28 : 2, dust ? 3 : 18);
     }
   }
 }
 
-function carveRoadSurface(scene, key, mesh) {
-  const texture = scene.textures.get(key);
-  const context = texture.getContext();
-  const height = TEXTURE_SIZES[key][1];
-  if (mesh) {
-    context.save();
-    context.globalCompositeOperation = 'destination-out';
-    for (let y = 0; y < height; y += 22) for (let x = ROAD_LEFT + 10; x < ROAD_RIGHT - 8; x += 22) {
-      context.beginPath();
-      context.moveTo(x, y);
-      context.lineTo(x + 8, y + 8);
-      context.lineTo(x, y + 16);
-      context.lineTo(x - 8, y + 8);
-      context.closePath();
-      context.fill();
-    }
-    context.restore();
-  } else {
-    for (let y = 20; y < height; y += 78) {
-      for (const x of [53, 325]) for (let slot = 0; slot < 6; slot++) {
-        context.clearRect(x, y + slot * 5, 12, 3);
-      }
-      context.clearRect(112 + y % 120, y + 40, 28, 2);
-    }
-  }
-  texture.refresh();
-}
-
-function drawRoadDecal(g, kind) {
-  if (kind === 'oil') {
-    for (let i = 0; i < 5; i++) g.fillStyle(0x060d15, 0.13).fillEllipse(24, 32, 44 - i * 6, 58 - i * 8);
-  } else if (kind === 'crack') {
-    g.lineStyle(2, 0x0b1420, 0.6).lineBetween(10, 0, 28, 24)
-      .lineBetween(28, 24, 18, 44).lineBetween(18, 44, 30, 64)
-      .lineBetween(28, 24, 44, 18).lineBetween(18, 44, 2, 49);
-  } else {
-    for (const x of [12, 32]) {
-      g.fillStyle(kind === 'skid' ? 0x050a12 : 0xb49a79, 0.3).fillRect(x, 0, 4, 64);
-      for (let y = 0; y < 64; y += 8) g.fillStyle(0x151c24, 0.3).fillRect(x, y, 5, 3);
-    }
-  }
+function drawRoadDecal(g) {
+  for (const x of [12, 32]) g.fillStyle(0x050a12).fillRect(x, 0, 4, 64);
 }
 
 function drawDustlands(g) {
@@ -1072,8 +1016,7 @@ export function createIndustrialTextures(scene) {
   const drawings = {
     ...Object.fromEntries(Object.values(ROAD_SURFACE_PRESETS).map(preset =>
       [preset.subRoadTexture, graphics => drawSubRoad(graphics, preset)])),
-    ...Object.fromEntries(['oil', 'crack', 'rut', 'skid'].map(kind =>
-      [`road_decal_${kind}`, graphics => drawRoadDecal(graphics, kind)])),
+    road_decal_skid: drawRoadDecal,
     road_dawn_glints: graphics => {
       for (let y = 40; y < 312; y += 78) {
         graphics.fillStyle(0xffe6ae, 0.07).fillRect(49, y, 292, 2);
@@ -1148,9 +1091,6 @@ export function createIndustrialTextures(scene) {
     draw(g);
     g.generateTexture(key, ...TEXTURE_SIZES[key]);
     g.clear();
-    if (['industrial_road', 'dustlands_road', 'neon_road', 'reactor_road', 'overdrive_road'].includes(key)) {
-      carveRoadSurface(scene, key, ['neon_road', 'reactor_road', 'overdrive_road'].includes(key));
-    }
   }
   g.destroy();
   for (const art of OBSTACLE_ART) {
@@ -1159,10 +1099,11 @@ export function createIndustrialTextures(scene) {
 }
 
 export function buildIndustrialRoad(scene, {width, height, stripeGap, stripesPerColumn}) {
-  const subRoad = scene.add.tileSprite(width / 2, height / 2, width + 64, height + 64,
-    ROAD_SURFACE_PRESETS.industrial.subRoadTexture).setDepth(-2);
-  const surface = scene.add.tileSprite(width / 2, height / 2, width, height, 'industrial_road').setDepth(-1);
-  const dust = scene.add.tileSprite(width / 2, height / 2, width, height, 'dustlands_road').setDepth(-0.5).setAlpha(0);
+  const preset = ROAD_SURFACE_PRESETS.industrial;
+  const subRoad = routeTile(scene, width / 2, height / 2, width + 64, height + 64,
+    preset.subRoadTexture).setDepth(0.05).setBlendMode(preset.blendMode).setAlpha(preset.overlayAlpha);
+  const surface = routeTile(scene, width / 2, height / 2, width, height, 'industrial_road').setDepth(-1);
+  const dust = routeTile(scene, width / 2, height / 2, width, height, 'dustlands_road').setDepth(-0.5).setAlpha(0);
   const lines = [];
   for (let lane = 1; lane < LANE_CENTERS.length; lane++) {
     const x = (LANE_CENTERS[lane - 1] + LANE_CENTERS[lane]) / 2;
@@ -1190,8 +1131,10 @@ export function syncSectorRoad(base, incoming, distance, levelId = 'level1', mod
   base.setTint(roadTint(baseSector, baseDistance, levelId, mode));
   incoming.setTint(roadTint(sector, distance, levelId, mode));
   if (subRoad) {
-    const key = resolveVisualTheme(sector).surfacePreset.subRoadTexture;
+    const preset = resolveVisualTheme(sector).surfacePreset;
+    const key = preset.subRoadTexture;
     if (subRoad.displayTexture.key !== key) subRoad.setTexture(key);
+    subRoad.setBlendMode(preset.blendMode).setAlpha(preset.overlayAlpha);
   }
 }
 
@@ -1216,10 +1159,10 @@ export function createDepotFacility(scene, depot, y, blendMode = 'ADD') {
   const centerOffset = (bay.centerY - bounds.y - bounds.height / 2) * scale;
   const mouthRight = DEPOT_ENTRANCE_GEOMETRY.mouthLeft + DEPOT_ENTRANCE_GEOMETRY.mouthWidth;
   const leftX = mouthRight + edgeOffset;
-  const body = scaleSpriteArt(scene.add.image(left ? leftX : ROAD_LEFT + ROAD_RIGHT - leftX, -centerOffset,
+  const body = scaleSpriteArt(routeImage(scene, left ? leftX : ROAD_LEFT + ROAD_RIGHT - leftX, -centerOffset,
     DEPOT_ART.key)).setFlipX(left);
-  const glow = scene.add.image(left ? 56 : 334, 0, 'depot_canopy_glow').setFlipX(!left).setBlendMode(blendMode);
-  const container = scene.add.container(0, y, [body, glow]).setDepth(3);
+  const glow = routeImage(scene, left ? 56 : 334, 0, 'depot_canopy_glow').setFlipX(!left).setBlendMode(blendMode);
+  const container = routeContainer(scene, 0, y, [body, glow]).setDepth(3);
   return {container, body, glow, depot};
 }
 
@@ -1254,7 +1197,7 @@ export function syncDepotEntrance(view, depot, distance, phase) {
 
 export function createBarrierLights(scene, sprite, kind, time, night = false) {
   const lights = (['forklift', 'sweeper'].includes(kind) ? [0] : [-1, 1]).map(() =>
-    scaleSpriteArt(scene.add.image(sprite.x, sprite.y, 'barrier_caution_light')).setDepth(6));
+    scaleSpriteArt(routeImage(scene, sprite.x, sprite.y, 'barrier_caution_light')).setDepth(6));
   syncBarrierLights(lights, sprite, kind, time, night);
   return lights;
 }
@@ -1291,17 +1234,17 @@ export function createGuardrailStructure(scene, hazard, x, y) {
     tiles.push({key: 'chicane_mid', top: -length / 2 + exit + i * midLength, height: midLength});
   }
   tiles.push({key: 'chicane_entry', top: length / 2 - entry, height: entry});
-  const image = (key, tx, ty, height) => scene.add.image(tx, ty, obstacleTexture(scene, key))
+  const image = (key, tx, ty, height) => routeImage(scene, tx, ty, obstacleTexture(scene, key))
     .setDisplaySize(width, height).setFlipX(key === 'chicane_entry' ? side > 0 : side < 0);
   // Every shadow sits beneath every tile so a cap's shadow never darkens its neighbour.
   const shadows = tiles.map(tile => image(tile.key, tileX + balance.SHADOW_OFFSET_X,
     tile.top + tile.height / 2 + balance.SHADOW_OFFSET_Y, tile.height)
     .setTint(SHADOW_TINT).setAlpha(balance.SHADOW_ALPHA));
   const parts = tiles.map(tile => image(tile.key, tileX, tile.top + tile.height / 2, tile.height));
-  const container = scene.add.container(x, y, [...shadows, ...parts]).setDepth(5);
+  const container = routeContainer(scene, x, y, [...shadows, ...parts]).setDepth(5);
   container.setSize(width, length);
   container.guardrailParts = parts;
-  container.guardrailBeacon = scaleSpriteArt(scene.add.image(0, 0, 'barrier_caution_light'));
+  container.guardrailBeacon = scaleSpriteArt(routeImage(scene, 0, 0, 'barrier_caution_light'));
   syncGuardrailBeacon(container, 0);
   return container;
 }
@@ -1324,7 +1267,7 @@ const TRAILER_CONTACT_SHADOW = Object.freeze({offsetX: 0,
 const PARTICLE_DOT_KEY = 'particle-dot';
 
 export function createSilhouetteShadow(scene, source) {
-  return scene.add.image(source.x ?? 0, source.y ?? 0, source.texture?.key, source.frame?.name)
+  return routeImage(scene, source.x ?? 0, source.y ?? 0, source.texture?.key, source.frame?.name)
     .setTint(SHADOW_TINT).setVisible(false);
 }
 
