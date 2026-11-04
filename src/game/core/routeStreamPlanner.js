@@ -2,6 +2,9 @@ import {createTrackStream} from './trackGenerator.js';
 import {DEPOT_RULES, nextDepotAfter} from './depots.js';
 import {METERS_PER_PIXEL} from './economy.js';
 
+/** Busy background planners report liveness at this cadence, well inside the stream's stall window. */
+export const ROUTE_STREAM_HEARTBEAT_MS = 250;
+
 /** Depot context the scene holds before any facility has been passed or docked. */
 export function initialRouteContext(startDistance, levelId = 'level1', mode = 'normal') {
   return {nextDepotDistance: nextDepotAfter(startDistance, DEPOT_RULES, levelId, mode).distance,
@@ -25,8 +28,8 @@ export function advanceRouteContext(context, spawnDistance, levelId = 'level1', 
  * Deterministic call log over the existing track stream. Replaying the same calls always rebuilds the
  * same generator state, which lets planning run ahead of the scene without changing any generator rule.
  */
-export function createRoutePlanner(seed, levelId = 'level1', mode = 'normal') {
-  const stream = createTrackStream(seed, levelId, mode);
+export function createRoutePlanner(seed, levelId = 'level1', mode = 'normal', {onPlanningProgress} = {}) {
+  const stream = createTrackStream(seed, levelId, mode, {onPlanningProgress});
   let rows = 0;
   let cursor = null;
   const apply = call => {

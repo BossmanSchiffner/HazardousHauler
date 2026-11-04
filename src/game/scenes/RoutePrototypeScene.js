@@ -1,4 +1,7 @@
 import Phaser from 'phaser';
+import titleVideoUrl from '../../../../art-direction/LoadIn_Screen.mp4?url';
+import runMusicUrl from '../../../../art-direction/BG_Music.mp3?url';
+import logoUrl from '../../../../art-direction/GameLogo.svg?url';
 import {BUILD_ID} from '../data/build.js';
 import {loadProfile, saveProfile} from '../core/save.js';
 import {DEPOT_APPROACH_HINT_M, HINTS, hintForEvent, markHintSeen} from '../core/onboarding.js';
@@ -113,10 +116,10 @@ import {RouteVisualPool, routeImage, releaseRouteVisual} from '../rendering/rout
 import {VEHICLES} from '../data/catalog.js';
 import {
   CARGO_COLLISION_DISTANCE_PX,
-  resumeSpawnDelay,
+  depotResumeFirstDistance,
   hazardsBeforeDepot,
 } from '../core/trackGenerator.js';
-import {createRouteStream, warmRouteStreamWorkers} from '../core/routeStream.js';
+import {createRouteStream, ROUTE_STREAM_LATE_ROW_MS, warmRouteStreamWorkers} from '../core/routeStream.js';
 
 const VERTICAL_HIT_PX = GAME_BALANCE.physics.collision.cargoHalfHeightPx;
 const levelDisplayName = levelId => levelId === 'level1' ? 'LEVEL 1' : 'LEVEL 2';
@@ -159,6 +162,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   preload() {
+    this.load.video('title_screen_video', titleVideoUrl, 'loadeddata', false, true);
+    this.load.audio('cargo_run_music', runMusicUrl);
+    this.load.image('hazardous_haul_logo', logoUrl);
     preloadStandardHauler(this);
     preloadSwiftRunner(this);
     preloadGarageDisplayArt(this);
@@ -169,10 +175,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   create() {
-    this.profile = loadProfile();
+    let saveWarning = null;
+    this.profile = loadProfile(message => { saveWarning = message; });
     this.stats = loadoutStats(this.profile, this.profile.selectedVehicleId);
     this.phase = 'menu';
     this.feedback = new RunFeedback(this);
+    this.feedback.setMusicBuffer?.(this.cache?.audio?.get?.('cargo_run_music'));
     this.overlayObjects = [];
     this.objects = [];
     this.depotFacilities = [];
@@ -196,6 +204,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.handleViewportResize(this.scale.gameSize);
 
     this.input.on('pointerdown', pointer => {
+      if (this.phase === 'title') {
+        this.startTitleScreen(pointer.wasTouch ? 'touch' : 'mouse');
+        return;
+      }
       this.beginMenuScroll(pointer);
       this.beginSteering(pointer);
     });
@@ -204,8 +216,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.moveSteering(pointer);
     });
     this.input.on('pointerup', pointer => {
-      this.endMenuScroll(pointer);
-      this.steeringPointerId = null;
+      this.handlePointerUp(pointer);
     });
     this.input.on('gameout', pointer => {
       this.endMenuScroll(pointer);
@@ -217,7 +228,18 @@ export class RoutePrototypeScene extends Phaser.Scene {
           point.y <= this.menuScrollBottom) this.scrollMenuBy(deltaY);
     });
     this.steeringKeys = this.input.keyboard?.addKeys('A,D,LEFT,RIGHT');
+    const titleKeyHandler = event => {
+      if (this.phase !== 'title') return;
+      event?.preventDefault?.();
+      this.startTitleScreen('keyboard');
+    };
+    this.input.keyboard?.on?.('keydown', titleKeyHandler);
+    this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown', titleKeyHandler));
+    const pauseKeyHandler = event => this.handlePauseKey(event);
+    this.input.keyboard?.on?.('keydown-SPACE', pauseKeyHandler);
+    this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown-SPACE', pauseKeyHandler));
     this.initializeUrlDebug(globalThis.location?.search ?? '');
+    if (saveWarning) this.showToast(saveWarning, 'error');
   }
 
   initializeUrlDebug(search) {
@@ -237,7 +259,35 @@ export class RoutePrototypeScene extends Phaser.Scene {
         sectorNumber: flags.warp?.sectorNumber ?? 1, vehicleId: this.profile.selectedVehicleId,
       });
     } else if (flags.unlockAll) this.showGarage('', false, 'upgrades');
-    else this.showMenu();
+    else this.showTitleScreen();
+  }
+
+  showTitleScreen() {
+    this.clearOverlay();
+    this.phase = 'title';
+    this.setScreenRenderer(() => this.showTitleScreen());
+    this.setWorldVisible(false);
+    const viewport = this.cameraViewportBounds();
+    const matte = this.add.rectangle(viewport.x + viewport.width / 2,
+      viewport.y + viewport.height / 2, viewport.width, viewport.height, PALETTE.background).setDepth(149);
+    this.overlayObjects.push(matte);
+    const video = this.add.video(viewport.x + viewport.width / 2,
+      viewport.y + viewport.height / 2, 'title_screen_video').setDepth(150).setOrigin(0.5);
+    if (video.video) video.video.muted = true;
+    video.play(true);
+    const mediaWidth = video.video?.videoWidth || 720;
+    const mediaHeight = video.video?.videoHeight || 1280;
+    const fitScale = Math.min(viewport.width / mediaWidth, viewport.height / mediaHeight);
+    video.setScale(fitScale);
+    this.titleVideo = video;
+    this.overlayObjects.push(video);
+  }
+
+  startTitleScreen(inputType) {
+    if (this.phase !== 'title') return;
+    this.initialInputType = inputType;
+    this.titleVideo?.stop?.();
+    this.showMenu();
   }
 
   persistProfile(profile) {
@@ -460,10 +510,17 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   triggerHint(event) {
+    if (this.hintSaveFailed && this.toast.visible && this.toastPriority >= TOAST_STYLES.error.priority) return;
     const id = hintForEvent(this.profile.seenHints, event);
     if (!id) return;
-    this.profile.seenHints = markHintSeen(this.profile.seenHints, id);
-    this.persistProfile(this.profile);
+    const profile = {...this.profile, seenHints: markHintSeen(this.profile.seenHints, id)};
+    if (!this.persistProfile(profile)) {
+      this.hintSaveFailed = true;
+      this.showToast('Tip preference could not be saved. Check browser storage and retry.', 'error');
+      return;
+    }
+    this.hintSaveFailed = false;
+    this.profile = profile;
     if (this.toast.visible && this.toastPriority >= TOAST_STYLES.hint.priority) this.hintQueue.push(id);
     else this.showToast(HINTS[id], 'hint');
   }
@@ -523,6 +580,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.menuScrollContainer?.clearMask?.(true);
     this.menuScrollMaskGraphics?.destroy?.();
     this.overlayObjects = [];
+    this.pauseDimmer = null;
     this.menuScrollContainer = null;
     this.menuScrollMask = null;
     this.menuScrollMaskGraphics = null;
@@ -797,12 +855,17 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const trimId = this.profile?.shipStates?.[vehicleId]?.equippedColorId ?? 'default';
     const vehicleName = vehicleId === 'swift' ? 'SWIFT RUNNER' : 'STANDARD HAULER';
     const trimName = vehicleTrimName(vehicleId, trimId);
-    if (!compactHeader) this.addLabel(`CARGO RUN  /  ${vehicleName}  /  ${trimName}`,
-      W / 2, 64, 9, colorText(PALETTE.steelLight), 238).setOrigin(0.5);
-    this.addLabel(title, W / 2, compactHeader ? 24 : 116,
+    if (!compactHeader) this.addLabel(`HAZARDOUS HAUL  /  ${vehicleName}  /  ${trimName}`,
+      W / 2, 64, 8, colorText(PALETTE.steelLight), W - MENU_SPACING.edge * 2).setOrigin(0.5);
+    const titleY = compactHeader ? 48 : 116;
+    const titleText = title ? this.addLabel(title, W / 2, titleY,
       compactHeader ? 20 : title.length > 18 ? 24 : 28,
-      colorText(PALETTE.cyanLight), 340);
-    if (subtitle) this.addLabel(subtitle, W / 2, 169, 14, '#a9bacb', W - MENU_SPACING.edge * 2);
+      colorText(PALETTE.cyanLight), compactHeader ? 240 : 340) : null;
+    if (subtitle) {
+      const titleHeight = titleText.displayHeight ?? titleText.height ?? (compactHeader ? 24 : 34);
+      const subtitleY = Math.max(169, titleY + titleHeight + 16);
+      this.addLabel(subtitle, W / 2, subtitleY, 14, '#a9bacb', W - MENU_SPACING.edge * 2);
+    }
   }
 
   cameraViewportBounds() {
@@ -873,11 +936,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const fill = options.fill ?? PALETTE.cockpit;
     const height = options.height ?? 54;
     const x = options.x ?? W / 2;
-    const control = addSteelControl(this, x, y, width, height, fill, PALETTE.cyan);
+    const controlDepth = options.depth ?? 34;
+    const control = addSteelControl(this, x, y, width, height, fill, PALETTE.cyan, controlDepth);
     const txt = this.add.text(x, y, label, {
       ...this.textStyle(options.size ?? 18, options.color ?? '#f1f8ff'),
       wordWrap: {width: width - MENU_SPACING.padding * 2},
-    }).setOrigin(0.5).setDepth(35);
+    }).setOrigin(0.5).setDepth(controlDepth + 1);
     this.trackOverlayObject(control);
     this.trackOverlayObject(txt);
     if (options.subtitle) {
@@ -891,7 +955,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     }
     if (options.coins !== undefined) {
       const price = this.addCurrency(options.coins, x + (txt.width + 10) / 2, txt.y,
-        {size: options.size ?? 18, depth: 35, maxWidth: 95});
+        {size: options.size ?? 18, depth: controlDepth + 1, maxWidth: 95});
       txt.x -= (price.displayWidth + 10) / 2;
       if (options.disabled) price.setAlpha(0.5);
     }
@@ -960,32 +1024,31 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   showMenu() {
+    this.feedback?.stopRunMusic?.();
     this.depotMotion = null;
     this.depotLaunchElapsed = null;
     this.phase = 'menu';
     this.setScreenRenderer(() => this.showMenu());
     this.setWorldVisible(false);
     this.removeObjects();
-    this.panel('CARGO RUN');
+    this.panel('');
     const height = this.menuHeight ?? H;
-    const offset = Math.max(0, (height - 692) * 0.35);
-    const vehicleId = this.profile.selectedVehicleId;
-    const colorId = this.profile.shipStates[vehicleId].equippedColorId;
     const actionsY = height - 300;
-    const previewY = Math.min(244 + offset, actionsY - 174);
-    this.addHomePreview(vehicleId, colorId, previewY);
-    const trimName = vehicleTrimName(vehicleId, colorId);
-    this.addLabel(`${vehicleId === 'swift' ? 'SWIFT RUNNER' : 'STANDARD HAULER'}  •  ${trimName}`,
-      W / 2, previewY + 70, 10, colorText(PALETTE.steelLight), 340);
-    this.addCurrency(this.profile.coins, 91, previewY + 104, {size: 14});
+    const logoTop = 118;
+    const logoMaxHeight = Math.min(190, Math.max(100, actionsY - 268));
+    const logo = this.add.image(W / 2, logoTop + logoMaxHeight / 2, 'hazardous_haul_logo').setDepth(32);
+    logo.setScale(Math.min((W - MENU_SPACING.edge * 2) / logo.width, logoMaxHeight / logo.height));
+    this.trackOverlayObject(logo);
+    const summaryY = logoTop + logo.displayHeight + 28;
+    this.addCurrency(this.profile.coins, 91, summaryY, {size: 14});
     const level2Unlocked = this.profile.levelProgress.level2.unlocked;
     const best = level2Unlocked
       ? `BEST  L1 ${this.profile.levelProgress.level1.bestDistance.toLocaleString('en-US')} m  •  L2 ${this.profile.levelProgress.level2.bestDistance.toLocaleString('en-US')} m`
       : `LEVEL 1 BEST  ${this.profile.levelProgress.level1.bestDistance.toLocaleString('en-US')} m`;
-    this.addLabel(best, 278, previewY + 98, 10, '#b8c9d8', 202);
+    this.addLabel(best, 278, summaryY, 10, '#b8c9d8', 202);
     if (blueprintEligible(this.profile) || this.profile.blueprints || level2Unlocked) {
       this.addLabel(`BLUEPRINTS  ${this.profile.blueprints} / 5`,
-        W / 2, previewY + 124, 9, colorText(PALETTE.cyanLight));
+        W / 2, summaryY + 24, 9, colorText(PALETTE.cyanLight));
     }
     this.addButton('NORMAL RUN', actionsY, () => this.showLevelSelect(), {height: 54});
     const endlessReady = isRunStartAvailable(this.profile, 'level1', 'beginning', 'continuous');
@@ -997,7 +1060,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
       {fill: PALETTE.steelDark, height: 54, size: 18});
     this.addButton('HOW-TO', actionsY + 186,
       () => this.showHowToPlay(), {fill: PALETTE.edge, height: 54, size: 17});
-    this.addLabel('Mouse, A/D or arrows. On touch, drag to steer.', W / 2, height - 72, 11, '#b4c5d4', 340);
+    const controlsHint = this.initialInputType === 'touch'
+      ? 'Touch and drag to steer.' : 'Mouse, A/D or arrows to steer.';
+    this.addLabel(controlsHint, W / 2, height - 72, 11, '#b4c5d4', 340);
     const buildY = height - 40;
     const buildLabel = this.addLabel(`Build ${BUILD_ID}`, W / 2, buildY, 8, '#71879a');
     if (buildLabel?.setInteractive) {
@@ -1007,45 +1072,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
         this.registerDeveloperTap();
       });
     }
-  }
-
-  addHomePreview(vehicleId, colorId, previewY = 250) {
-    if (!this.add?.rectangle || !this.tweens?.add) {
-      addHaulerPreview(this, W / 2, previewY, 1.1, vehicleId, colorId)
-        .forEach(object => this.trackOverlayObject(object));
-      return;
-    }
-    const preview = this.add.container(W / 2, previewY).setDepth(32);
-    const road = this.add.rectangle(0, 0, 96, 112, PALETTE.steelDark).setDepth(32);
-    const laneMarks = [-34, 0, 34].map(y =>
-      this.add.rectangle(0, y, 3, 18, PALETTE.steel).setDepth(33));
-    const ship = this.add.image(0, 0,
-      vehicleTexture(vehicleId, colorId, true))
-      .setDepth(35);
-    ship.setScale(Math.min(76 / ship.width, 88 / ship.height) * SPRITE_ART_SCALE);
-    const tint = vehicleTint(vehicleId, colorId);
-    if (tint) ship.setTint(tint);
-    const coins = [-42, 42].map((offset, index) => {
-      const coin = this.add.image(offset, -48 + index * 42, 'cargo_coin')
-        .setDisplaySize(15 * SPRITE_ART_SCALE, 15 * SPRITE_ART_SCALE).setDepth(34);
-      this.tweens.add({targets: coin, y: 48, alpha: 0, duration: 2100 + index * 430,
-        delay: index * 700, repeat: -1,
-        onRepeat: () => coin.setPosition(offset, -48).setAlpha(1)});
-      return coin;
-    });
-    laneMarks.forEach((mark, index) => this.tweens.add({
-      targets: mark, y: 48, duration: 1600, delay: index * 280, repeat: -1,
-      onRepeat: () => mark.setY(-48),
-    }));
-    preview.add([road, ...laneMarks, ...coins, ship,
-      ...addGoldPreviewSparkles(this, ship, vehicleId, colorId)]);
-    const maskGraphics = this.make.graphics({x: 0, y: 0, add: false});
-    maskGraphics.fillStyle(0xffffff).fillRect(W / 2 - 65, previewY - 55, 130, 110);
-    preview.setMask(maskGraphics.createGeometryMask());
-    this.homePreviewMaskGraphics = maskGraphics;
-    this.trackOverlayObject(preview);
-    this.trackOverlayObject(addSteelControl(this, W / 2, previewY, 146, 128,
-      PALETTE.edge, PALETTE.cyan, 31));
   }
 
   registerDeveloperTap() {
@@ -1401,22 +1427,25 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.shopChassisId = vehicleId;
     const stats = loadoutStats(p, vehicleId);
     const layout = this.menuMetrics();
-    this.addButton('TRUCKS', 90, () => {
+    const tabWidth = (W - MENU_SPACING.edge * 2 - MENU_SPACING.gap) / 2;
+    const tabLeftX = MENU_SPACING.edge + tabWidth / 2;
+    const tabRightX = tabLeftX + tabWidth + MENU_SPACING.gap;
+    this.addButton('TRUCKS', 126, () => {
       if (tab !== 'garage') this.showGarage('', false, 'garage');
-    }, {x: 106, width: 162, height: 54, size: 14,
+    }, {x: tabLeftX, width: tabWidth, height: 54, size: 14,
       fill: tab === 'garage' ? PALETTE.cockpit : PALETTE.steelDark});
-    this.addButton('UPGRADES', 90, () => {
+    this.addButton('UPGRADES', 126, () => {
       if (tab !== 'upgrades') this.showGarage('', false, 'upgrades');
-    }, {x: 284, width: 162, height: 54, size: 13,
+    }, {x: tabRightX, width: tabWidth, height: 54, size: 13,
       fill: tab === 'upgrades' ? PALETTE.cockpit : PALETTE.steelDark});
     this.addGarageWallet();
     const sectionHeader = this.addLabel(tab === 'garage'
       ? `${vehicleId === 'swift' ? 'SWIFT' : 'STANDARD'}  •  ${stats.capacity} CARGO  •  ${p.blueprints} BLUEPRINTS`
       : `MODULES  •  RANK LIMIT ${moduleLevelCap(p.milestones)}  •  TAP SOCKETS`,
-    W / 2, 122, 10, '#b8c9d8', 342);
+    W / 2, 168, 10, '#b8c9d8', 342);
     if (tab === 'garage') {
-      this.createMenuScroll('garage:garage', 138, layout.contentBottom);
-      let y = 142;
+      this.createMenuScroll('garage:garage', 184, layout.contentBottom);
+      let y = 188;
       if (message) {
         this.addLabel(message, W / 2, y, 11, isError ? '#ff9aa6' : '#6fe6bc', 340);
         y += 34;
@@ -1510,7 +1539,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const grid = squareGridMetrics(W, {padding: MENU_SPACING.edge, gap: MENU_SPACING.gap, columns: 2});
       const gridTop = y + 8;
       const cards = peekingCardMetrics(gridTop, layout.contentBottom, 1, 0.3);
-      const tileHeight = Math.max(224, cards.height);
+      const tileHeight = cards.height;
       const firstTileY = gridTop + tileHeight / 2;
       UPGRADE_GRID_ORDER.forEach((item, index) => {
         const column = index % grid.columns;
@@ -1603,15 +1632,16 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   addGarageWallet() {
-    this.trackOverlayObject(addSteelControl(this, 314, 42, 100, 34, PALETTE.steelDark, PALETTE.steel, 33));
-    this.addCurrency(this.profile.coins, 314, 42, {size: 16, maxWidth: 80});
+    this.trackOverlayObject(addSteelControl(this, 300, 56, 100, 34, PALETTE.steelDark, PALETTE.steel, 33));
+    this.addCurrency(this.profile.coins, 300, 56, {size: 16, maxWidth: 80});
   }
 
   addUpgradeHeader(title, subtitle) {
     this.panel('UPGRADES', '', {compactHeader: true});
     this.addGarageWallet();
-    const heading = this.addLabel(title.toUpperCase(), W / 2, 84, 22, '#a0f4ff', 294);
-    const noteY = 84 + heading.height + 12;
+    const headingY = 108;
+    const heading = this.addLabel(title.toUpperCase(), W / 2, headingY, 22, '#a0f4ff', 294);
+    const noteY = headingY + heading.height + 12;
     const note = this.addLabel(subtitle, W / 2, noteY, 12, '#b8c9d8', 294);
     return noteY + note.height + 18;
   }
@@ -1628,10 +1658,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.setWorldVisible(false);
     this.panel('GARAGE', '', {compactHeader: true});
     this.addGarageWallet();
-    this.addLabel('TRUCK PREVIEW  /  COLORS', W / 2, 86, 12, '#a0f4ff', 342);
+    this.addLabel('TRUCK PREVIEW  /  COLORS', W / 2, 108, 12, '#a0f4ff', 342);
     const layout = this.menuMetrics();
-    this.createMenuScroll(`vehicle-detail:${vehicleId}`, 118, layout.contentBottom);
-    let y = 126;
+    this.createMenuScroll(`vehicle-detail:${vehicleId}`, 140, layout.contentBottom);
+    let y = 148;
     if (message) {
       const notice = this.addLabel(message, W / 2, y, 12, isError ? '#ff9aa6' : '#6fe6bc', 326);
       y += notice.height + MENU_SPACING.gap;
@@ -1779,7 +1809,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.setWorldVisible(false);
     this.panel('GARAGE', '', {compactHeader: true});
     this.addGarageWallet();
-    this.addLabel('CONFIRM COLOR PURCHASE', W / 2, 86, 12, '#a0f4ff', 342);
+    this.addLabel('CONFIRM COLOR PURCHASE', W / 2, 108, 12, '#a0f4ff', 342);
     const layout = this.menuMetrics();
     this.createMenuScroll(`trim-confirm:${vehicleId}:${trimId}`, layout.contentTop, layout.contentBottom);
     const centering = Math.max(0, (layout.contentBottom - layout.contentTop - 170) / 2);
@@ -2126,6 +2156,87 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.shipTargetX = Phaser.Math.Clamp(point.x, ROAD_LEFT + 30, ROAD_RIGHT - 30);
   }
 
+  handlePointerUp(pointer) {
+    this.endMenuScroll(pointer);
+    this.steeringPointerId = null;
+    if (pointer.wasTouch && this.phase === 'running') this.pauseRun();
+  }
+
+  handlePauseKey(event) {
+    if (event?.repeat) return;
+    if (this.phase === 'running') this.pauseRun();
+    else if (this.phase === 'paused') this.beginResumeCountdown();
+  }
+
+  showPauseOverlay(title, dimAlpha) {
+    this.clearOverlay();
+    this.pauseDimmer = this.add.rectangle(W / 2, H / 2, W, H, 0x87919b, dimAlpha)
+      .setDepth(101).setScrollFactor(0);
+    this.overlayObjects.push(this.pauseDimmer);
+    this.addLabel(title, W / 2, 248, 28, colorText(PALETTE.cyanLight), W - 48).setDepth(112);
+  }
+
+  pauseRun() {
+    if (this.phase !== 'running') return;
+    this.phase = 'paused';
+    this.steeringPointerId = null;
+    this.keyboardBrakeRemaining = 0;
+    this.feedback?.suspend('manualPause');
+    this.showPauseMenu();
+  }
+
+  showPauseMenu() {
+    this.phase = 'paused';
+    this.showPauseOverlay('PAUSED', 0.36);
+    this.addFooterActions([
+      {label: 'RESUME RUN', onClick: () => this.beginResumeCountdown(),
+        options: {fill: PALETTE.steelDark}},
+      {label: 'END RUN', onClick: () => this.showPauseEndRunConfirmation(),
+        options: {fill: PALETTE.hazardDark}},
+    ], {depth: 112});
+  }
+
+  showPauseEndRunConfirmation() {
+    if (this.phase !== 'paused') return;
+    this.phase = 'pauseEndConfirm';
+    this.showPauseOverlay('END RUN?', 0.48);
+    const hold = cargoTotals(this.cargoItems).value;
+    const secured = this.runEconomy.cargoCoins + this.runEconomy.bonusCoins;
+    const continuous = this.runMode === 'continuous';
+    const wreckRetained = continuous ? Math.floor(hold * GAME_BALANCE.rewards.continuous.wreckRetention) : 0;
+    const risk = continuous
+      ? hold - wreckRetained + continuousQuote(this.cargoItems, this.runEconomy).bonus
+      : bankingQuote(this.cargoItems, this.runEconomy).payout + this.runEconomy.noDamageBonusPending;
+
+    const confirmationPlate = this.add.rectangle(W / 2, 384, 326, 210, PALETTE.edge, 0.94)
+      .setStrokeStyle(1, PALETTE.hazard, 0.9).setDepth(110);
+    this.overlayObjects.push(confirmationPlate);
+    this.addLabel('BANKED THIS RUN  /  SAFE', W / 2, 302, 13, '#6fe6bc', 300).setDepth(112);
+    this.addCurrency(secured, W / 2, 334, {size: 23, color: '#6fe6bc', maxWidth: 250, depth: 113});
+    this.addLabel(`WALLET REMAINS ${this.profile.coins} COINS`, W / 2, 361, 11, '#b8c9d8', 300).setDepth(112);
+    this.addLabel('UNBANKED CARGO', W / 2, 394, 13, '#f2c474', 300).setDepth(112);
+    this.addCurrency(hold, W / 2, 426, {size: 23, color: '#f2c474', maxWidth: 250, depth: 113});
+    this.addLabel(continuous
+      ? `END NOW: LOSE ${risk} COINS  •  WRECK KEEPS ${wreckRetained}`
+      : `END NOW: LOSE ${risk} COINS INCLUDING BONUSES`,
+    W / 2, 463, 12, '#ff9aa6', 320).setDepth(112);
+    this.addFooterActions([
+      {label: 'BACK TO PAUSE', onClick: () => this.showPauseMenu(),
+        options: {fill: PALETTE.steelDark}},
+      {label: 'END RUN', onClick: () => this.finishRun(false, false, true),
+        options: {fill: PALETTE.hazardDark}},
+    ], {depth: 112});
+  }
+
+  beginResumeCountdown() {
+    if (this.phase !== 'paused') return;
+    this.phase = 'resumeCountdown';
+    this.resumeCountdownElapsed = 0;
+    this.showPauseOverlay('GET READY', 0.2);
+    this.pauseCountdownText = this.addLabel('3', W / 2, H / 2 - 38, 76,
+      colorText(PALETTE.cyanLight), 160).setDepth(112);
+  }
+
   moveSteering(pointer) {
     if (this.debugManager?.flags.bot || this.phase !== 'running' || this.keyboardSteeringDirection() !== null) return;
     const mouse = !pointer.wasTouch && !this.sys?.game?.device?.input?.touch;
@@ -2190,8 +2301,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.removeObjects();
     this.removeDepotFacilities();
     this.phase = 'running';
+    this.resumeCountdownElapsed = null;
+    this.pauseCountdownText = null;
     this.levelId = levelId;
     this.runMode = mode;
+    this.feedback?.startRunMusic?.(mode === 'normal');
     this.developerRun = developerRun;
     this.developerSandbox = developerOptions?.sandbox === true;
     this.vehicleId = developerOptions?.vehicleId ?? this.profile.selectedVehicleId;
@@ -2203,6 +2317,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.distance = this.startDistance;
     this.checkpointStart = !developerRun && checkpointStart;
     this.finishNoticeShown = false;
+    this.finishObstaclesCleared = false;
     this.depotCount = 0;
     const runId = crypto.getRandomValues(new Uint32Array(4)).join('-');
     const runMetadata = {
@@ -2240,6 +2355,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const firstRowDelay = GAME_BALANCE.routes.spawning.initialRowDelaySeconds;
     this.trackStream = prepared?.stream ?? createRouteStream(seed, levelId, mode, {startDistance: this.distance,
       firstDistance: this.predictRouteDistance(this.distance, firstRowDelay)});
+    this.lateRouteRows = 0;
+    this.resumeSpawnDistance = null;
     this.blueprintRun = createBlueprintRun(seed, runId);
     this.currentSector = sectorAtDistance(this.distance, levelId, mode);
     syncSectorRoad(this.roadSurface, this.dustSurface, this.distance, levelId, mode, this.subRoad);
@@ -2426,9 +2543,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.nextTrackRowDistance = plannedDistance + row.spacingPx * METERS_PER_PIXEL;
     // update() already advanced distance; newborns join its object-scroll loop below.
     const spawnY = SPAWN_Y + (this.distance - plannedDistance) / METERS_PER_PIXEL - frameScroll;
-    const emitted = row.emitted ?? hazardsBeforeDepot(row, plannedDistance, this.nextDepotDistance,
-      this.protectedUntilDistance, this.levelId, this.runMode);
-    const hazards = emitted
+    // A row the planner delivered late would appear inside the reaction window, so it becomes clear road.
+    // Rows pre-placed behind a Depot exit are measured from that exit, not from their planned distance.
+    const late = this.distance - Math.max(plannedDistance, this.resumeSpawnDistance ?? -Infinity) >
+      routeSpeedAtDistance(plannedDistance, this.levelId,
+      this.runMode) * METERS_PER_PIXEL * ROUTE_STREAM_LATE_ROW_MS / 1000;
+    if (late) this.lateRouteRows = (this.lateRouteRows ?? 0) + 1;
+    const emitted = !late && (row.emitted ?? hazardsBeforeDepot(row, plannedDistance, this.nextDepotDistance,
+      this.protectedUntilDistance, this.levelId, this.runMode));
+    const hazards = emitted && this.hazardRowAllowedAtFinish(plannedDistance)
       ? [...row.hazards, ...row.intermediates] : [];
     for (const hazard of hazards.filter(h => !h.continuation)) {
       const definition = hazardDefinition(hazard.kind);
@@ -2447,6 +2570,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
         // Shadows are baked per tile inside the structure container.
         const sprite = createGuardrailStructure(this, hazard,
           hazardX({...hazard, movementOffsetPx}), spawnY + hazard.offsetY);
+        if (hazard.sideObstacleId) this.fadeInSideObstacle(sprite);
         if (sprite.guardrailBeacon) syncGuardrailBeacon(sprite, this.time.now,
           this.roadEnvironment?.lighting.headlights ?? false);
         this.objects.push({...record, sprite,
@@ -2504,6 +2628,29 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.objects.push({sprite, valueText, blueprintGlow, type: 'blueprint', reward: blueprint});
     }
     return row.spacingPx;
+  }
+
+  fadeInSideObstacle(sprite) {
+    if (!this.tweens?.add || !sprite?.setAlpha) return;
+    sprite.setAlpha(0);
+    this.tweens.add({targets: sprite, alpha: 1, duration: 220, ease: 'Sine.easeOut'});
+  }
+
+  hazardRowAllowedAtFinish(plannedDistance) {
+    if (this.runMode === 'continuous') return true;
+    const clearStart = routeFinishDistance(this.levelId) - GAME_BALANCE.routes.finishClearanceMeters;
+    return this.distance < clearStart && plannedDistance < clearStart;
+  }
+
+  clearObstaclesAtFinish() {
+    if (this.runMode === 'continuous' || this.finishObstaclesCleared) return;
+    const clearStart = routeFinishDistance(this.levelId) - GAME_BALANCE.routes.finishClearanceMeters;
+    if (this.distance < clearStart) return;
+    this.finishObstaclesCleared = true;
+    for (let index = this.objects.length - 1; index >= 0; index--) {
+      if (this.objects[index].type === 'hazard') this.removeObjectAt(index);
+    }
+    syncGuardrailSparks(this.haulerEffects, null);
   }
 
   refreshHud() {
@@ -2577,6 +2724,18 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   updateStep(_time, delta) {
+    if (this.phase === 'resumeCountdown') {
+      this.resumeCountdownElapsed = Math.min(3, this.resumeCountdownElapsed + Math.min(delta / 1000, 0.05));
+      this.pauseCountdownText?.setText(`${Math.ceil(3 - this.resumeCountdownElapsed)}`);
+      if (this.resumeCountdownElapsed >= 3 - 1e-9) {
+        this.clearOverlay();
+        this.pauseCountdownText = null;
+        this.phase = 'running';
+        this.hudContainer?.setVisible(true);
+        this.feedback?.resume('manualPause');
+      }
+      return;
+    }
     if (this.menuScrollContainer && !this.menuScrollGesture && this.menuScrollVelocity) {
       const next = advanceMenuScroll(this.menuScrollOffset, this.menuScrollVelocity,
         this.menuScrollMax, Math.min(delta / 1000, 0.05));
@@ -2610,6 +2769,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.distance += dt * scroll * METERS_PER_PIXEL;
     this.scrollRoad(scroll * dt);
     const finishDistance = routeFinishDistance(this.levelId);
+    this.clearObstaclesAtFinish();
     const remainingToFinish = finishDistance - this.distance;
     if (this.runMode !== 'continuous' && !this.finishNoticeShown && remainingToFinish <= 150) {
       this.finishNoticeShown = true;
@@ -2889,6 +3049,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       item.grindSide = pushing ? contact.side : 0;
       if (pushing) scrape = contact;
     }
+    if (scrape) this.feedback?.playMetalScrape();
     syncGuardrailSparks(this.haulerEffects, scrape);
   }
 
@@ -2918,9 +3079,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       speed: (stopDistance - this.distance) / (DEPOT_RULES.dockingSeconds / 2 * METERS_PER_PIXEL)};
     if (this.trackStream?.prepareDepotReset) {
       // Spawning is paused while docked, so the reset branch can be planned during braking.
-      const spawnTimer = this.depotResumeRowDelay(stopDistance, this.nextDepotDistance + DEPOT_RULES.exitMeters);
-      this.trackStream.prepareDepotReset(stopDistance,
-        this.predictRouteDistance(stopDistance, spawnTimer, {launchSeconds: DEPOT_RULES.launchSeconds}));
+      this.trackStream.prepareDepotReset(stopDistance, depotResumeFirstDistance(stopDistance));
     }
     this.depotLaunchElapsed = null;
     this.phase = 'docking';
@@ -3010,20 +3169,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   protectDepotExit() {
     this.advanceDepot();
-    const spawnTimer = this.depotResumeRowDelay(this.distance, this.protectedUntilDistance);
-    this.trackStream.resetAfterDepot(this.distance,
-      {firstDistance: this.predictRouteDistance(this.distance, spawnTimer, {launchSeconds: DEPOT_RULES.launchSeconds})});
-    this.nextTrackRowDistance = null;
-    this.spawnTimer = spawnTimer;
-  }
-
-  depotResumeRowDelay(distance, protectedUntilDistance) {
-    const speed = routeSpeedAtDistance(distance, this.levelId, this.runMode);
-    const travelToShip = (this.ship.y - HAZARD_ROW_ENVELOPE_PX / 2) - SPAWN_Y;
-    return Math.max(
-      resumeSpawnDelay(speed, travelToShip),
-      (protectedUntilDistance - distance - travelToShip * METERS_PER_PIXEL) / (speed * METERS_PER_PIXEL),
-    );
+    const firstDistance = depotResumeFirstDistance(this.distance);
+    this.trackStream.resetAfterDepot(this.distance, {firstDistance});
+    // The first rows are placed already on the road (the Depot overlay hid them) and arrive DEPOT_RESUME_METERS on.
+    this.resumeSpawnDistance = this.distance;
+    this.nextTrackRowDistance = firstDistance;
+    this.spawnTimer = 0;
   }
 
   /** Distance after `seconds` of the run loop's own motion, so background planning knows each first row. */
@@ -3345,11 +3496,14 @@ export class RoutePrototypeScene extends Phaser.Scene {
     }
   }
 
-  finishRun(banked, completed = false) {
+  finishRun(banked, completed = false, voluntaryEnd = false) {
     if (this.phase === 'result') return; // guard against double settlement
     if (banked && this.phase !== 'depot' && !completed) return;
     if (completed && this.phase !== 'running' && this.phase !== 'finishing') return;
-    if (!banked && this.phase !== 'running' && this.phase !== 'crashing') return;
+    if (!banked && this.phase !== 'running' && this.phase !== 'crashing' &&
+        !(voluntaryEnd && this.phase === 'pauseEndConfirm')) return;
+    this.voluntaryRunEnd = voluntaryEnd;
+    this.feedback?.stopRunMusic?.();
     const settlement = settleRun(this.profile, this.runEconomy, this.cargoItems, this.distance, banked, completed);
     if (settlement.duplicate) {
       this.phase = 'result';
@@ -3374,7 +3528,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
         this.panel('SAVE FAILED', 'Your run is paused. No result reward has been applied.');
         this.addLabel('Check browser storage, then retry saving.\nPreviously banked Coins remain secure.',
           W / 2, 280, 17, '#bfd0e0', 320);
-        this.addButton('RETRY SAVING RESULTS', 530, () => this.finishRun(false), {size: 16});
+        this.addButton('RETRY SAVING RESULTS', 530, () => this.finishRun(false, false, voluntaryEnd), {size: 16});
         this.showToast('Run results could not be saved. Please retry.', 'error');
       }
       return;
@@ -3400,11 +3554,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.setWorldVisible(false);
     const levelName = levelDisplayName(this.levelId);
     this.panel(this.runMode === 'continuous'
-      ? banked ? 'ENDLESS CASHED OUT' : 'ENDLESS WRECK'
-      : completed ? `${levelName} COMPLETE` : banked ? 'RUN COMPLETE' : 'VEHICLE DISABLED',
+      ? banked ? 'ENDLESS CASHED OUT' : this.voluntaryRunEnd ? 'ENDLESS RUN ENDED' : 'ENDLESS WRECK'
+      : completed ? `${levelName} COMPLETE` : banked ? 'RUN COMPLETE'
+        : this.voluntaryRunEnd ? 'RUN ENDED' : 'VEHICLE DISABLED',
     `${this.runMode === 'continuous'
       ? banked ? 'Cashed out at' : 'Hull destroyed after'
-      : completed ? `Finished ${levelName} at` : banked ? 'Run ended at' : 'Hull destroyed after'} ${Math.floor(this.distance)} m`);
+      : completed ? `Finished ${levelName} at` : banked || this.voluntaryRunEnd ? 'Run ended at' : 'Hull destroyed after'} ${Math.floor(this.distance)} m`);
     this.syncHaulerVisuals();
     const result = this.runResult;
     const layout = this.menuMetrics();

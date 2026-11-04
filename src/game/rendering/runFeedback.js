@@ -1,7 +1,10 @@
 import {LANE_CENTERS} from '../core/hazards.js';
 
-const PICKUP_NOTES = [60, 62, 64, 67, 72].map(note => 440 * 2 ** ((note - 69) / 12));
+const PICKUP_NOTES = [261.63, 293.66, 329.63, 392, 523.25];
 const MAX_VOICES = 12;
+const SCRAPE_INTERVAL = 0.12;
+const SFX_VOLUME = 0.525;
+const MUSIC_VOLUME = 0.35;
 
 /** Cosmetic feedback only; Phaser owns the shared AudioContext and master mute/volume. */
 export class RunFeedback {
@@ -14,8 +17,11 @@ export class RunFeedback {
     this.voices = new Set();
     this.suspensions = new Set();
     this.removers = [];
-    this.lastPickup = -Infinity;
-    this.pickupStreak = 0;
+    this.lastScrape = -Infinity;
+    this.musicBuffer = null;
+    this.musicRequested = false;
+    this.musicSource = null;
+    this.musicGain = null;
     this.interacted = false;
     this.destroyed = false;
     this.unlocking = null;
@@ -48,7 +54,7 @@ export class RunFeedback {
   warn(kind, error) {
     if (this.warnings.has(kind)) return;
     this.warnings.add(kind);
-    this.report(`Cargo Run ${kind} feedback unavailable.`, error);
+    this.report(`Hazardous Haul ${kind} feedback unavailable.`, error);
   }
 
   unlock() {
@@ -57,12 +63,14 @@ export class RunFeedback {
     if (!this.context || this.context.state === 'closed') return;
     if (this.context.state === 'running') {
       this.createAudio();
+      this.startMusicSource();
       return;
     }
     if (this.unlocking) return;
     this.unlocking = this.context.resume().then(() => {
       if (!this.destroyed && this.context.state === 'running') {
         this.createAudio();
+        this.startMusicSource();
       }
     }, error => this.warn('audio unlock', error)).finally(() => { this.unlocking = null; });
   }
@@ -71,7 +79,7 @@ export class RunFeedback {
     if (this.master || this.destroyed) return;
     const context = this.context;
     this.master = context.createGain();
-    this.master.gain.value = this.suspensions.size ? 0 : 0.35;
+    this.master.gain.value = this.suspensions.size ? 0 : SFX_VOLUME;
     this.compressor = context.createDynamicsCompressor();
     this.compressor.threshold.value = -12;
     this.compressor.knee.value = 12;
@@ -90,10 +98,57 @@ export class RunFeedback {
       this.context?.state === 'running' && Boolean(this.master);
   }
 
+  setMusicBuffer(buffer) {
+    this.musicBuffer = buffer ?? null;
+    this.startMusicSource();
+  }
+
+  startRunMusic(enabled) {
+    this.musicRequested = Boolean(enabled);
+    if (!this.musicRequested) {
+      this.stopRunMusic();
+      return;
+    }
+    this.startMusicSource();
+  }
+
+  startMusicSource() {
+    if (!this.ready || !this.musicRequested || !this.musicBuffer || this.musicSource) return;
+    const source = this.context.createBufferSource();
+    const gain = this.context.createGain();
+    source.buffer = this.musicBuffer;
+    source.loop = true;
+    gain.gain.setValueAtTime(this.suspensions.size ? 0 : MUSIC_VOLUME, this.context.currentTime);
+    source.connect(gain);
+    gain.connect(this.destination);
+    source.onended = () => {
+      if (this.musicSource !== source) return;
+      this.musicSource = null;
+      this.musicGain?.disconnect();
+      this.musicGain = null;
+      this.startMusicSource();
+    };
+    this.musicSource = source;
+    this.musicGain = gain;
+    source.start();
+  }
+
+  stopRunMusic() {
+    this.musicRequested = false;
+    if (!this.musicSource) return;
+    const source = this.musicSource;
+    const gain = this.musicGain;
+    this.musicSource = null;
+    this.musicGain = null;
+    source.onended = null;
+    source.stop();
+    source.disconnect();
+    gain?.disconnect();
+  }
+
   resetRun(x) {
     this.clearVoices();
-    this.lastPickup = -Infinity;
-    this.pickupStreak = 0;
+    this.lastScrape = -Infinity;
     this.resetSteering(x);
   }
 
@@ -123,16 +178,19 @@ export class RunFeedback {
     }
   }
 
-  addVoice(source, gain, filter, start, duration, volume) {
+  addVoice(source, gain, filter, start, duration, volume, scheduleGain = null) {
     while (this.voices.size >= MAX_VOICES) this.releaseVoice(this.voices.values().next().value, true);
     const voice = {source, gain, filter};
     this.voices.add(voice);
     source.connect(filter ?? gain);
     if (filter) filter.connect(gain);
     gain.connect(this.master);
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(volume, start + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    if (scheduleGain) scheduleGain(gain.gain, start, duration);
+    else {
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(volume, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    }
     source.onended = () => this.releaseVoice(voice);
     source.start(start);
     source.stop(start + duration);
@@ -171,21 +229,64 @@ export class RunFeedback {
     this.addVoice(source, this.context.createGain(), filter, this.context.currentTime, duration, volume);
   }
 
-  cargoPickup(now) {
-    this.pickupStreak = now - this.lastPickup <= 2 ? this.pickupStreak + 1 : 1;
-    this.lastPickup = now;
-    const note = (this.pickupStreak - 1) % PICKUP_NOTES.length;
-    this.tone(PICKUP_NOTES[note]);
-    if (note === 4) {
-      this.tone(PICKUP_NOTES[2] * 2, 0.07, 0.3, 0.08);
-      this.tone(PICKUP_NOTES[3] * 2, 0.14, 0.3, 0.08);
-    }
+  playPickupChime() {
+    PICKUP_NOTES.forEach((frequency, index) => this.tone(frequency, index * 0.08, 0.3, 0.15));
+  }
+
+  playHardCrash() {
+    if (!this.ready) return;
+    const start = this.context.currentTime;
+    this.tone(120, 0, 0.35, 0.4, 'triangle', 30);
+    const noise = this.context.createBufferSource();
+    noise.buffer = this.noise;
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, start);
+    filter.frequency.linearRampToValueAtTime(100, start + 0.3);
+    this.addVoice(noise, this.context.createGain(), filter, start, 0.35, 0.4);
+  }
+
+  playMetalScrape() {
+    if (!this.ready || this.context.currentTime - this.lastScrape < SCRAPE_INTERVAL) return;
+    this.lastScrape = this.context.currentTime;
+    const start = this.context.currentTime;
+    const source = this.context.createOscillator();
+    source.type = 'sawtooth';
+    source.frequency.setValueAtTime(350, start);
+    source.frequency.linearRampToValueAtTime(280, start + 0.1);
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1800, start);
+    filter.Q.setValueAtTime(5, start);
+    this.addVoice(source, this.context.createGain(), filter, start, 0.12, 0.12);
+  }
+
+  playDepotWhoosh() {
+    if (!this.ready) return;
+    const start = this.context.currentTime;
+    const noise = this.context.createBufferSource();
+    noise.buffer = this.noise;
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(200, start);
+    filter.frequency.exponentialRampToValueAtTime(2500, start + 0.3);
+    filter.frequency.exponentialRampToValueAtTime(300, start + 0.6);
+    filter.Q.setValueAtTime(3, start);
+    this.addVoice(noise, this.context.createGain(), filter, start, 0.6, 0.25,
+      (gain, at) => {
+        gain.setValueAtTime(0.01, at);
+        gain.linearRampToValueAtTime(0.25, at + 0.25);
+        gain.exponentialRampToValueAtTime(0.001, at + 0.6);
+      });
+  }
+
+  cargoPickup() {
+    this.playPickupChime();
     this.vibrate(30);
   }
 
   impact() {
-    this.tone(105, 0, 0.3, 0.32, 'triangle', 38);
-    this.hiss(1800, 0.18, 'highpass', 0.22);
+    this.playHardCrash();
     this.vibrate([30, 20, 30]);
   }
 
@@ -199,9 +300,7 @@ export class RunFeedback {
   }
 
   depot() {
-    this.lastPickup = -Infinity;
-    this.pickupStreak = 0;
-    this.hiss(1600, 0.4, 'lowpass', 0.2);
+    this.playDepotWhoosh();
     this.tone(PICKUP_NOTES[3], 0.42, 0.18, 0.18);
     this.tone(PICKUP_NOTES[4], 0.6, 0.3, 0.18);
     this.vibrate(200);
@@ -213,6 +312,10 @@ export class RunFeedback {
     if (this.master) {
       this.master.gain.cancelScheduledValues(this.context.currentTime);
       this.master.gain.setValueAtTime(0, this.context.currentTime);
+    }
+    if (this.musicGain) {
+      this.musicGain.gain.cancelScheduledValues(this.context.currentTime);
+      this.musicGain.gain.setValueAtTime(0, this.context.currentTime);
     }
     if (this.interacted && typeof this.navigator?.vibrate === 'function') this.vibrateStop();
   }
@@ -229,7 +332,9 @@ export class RunFeedback {
   resume(reason) {
     this.suspensions.delete(reason);
     if (this.master && !this.suspensions.size) {
-      this.master.gain.setTargetAtTime(0.35, this.context.currentTime, 0.03);
+      this.master.gain.setTargetAtTime(SFX_VOLUME, this.context.currentTime, 0.03);
+      this.musicGain?.gain.setTargetAtTime(MUSIC_VOLUME, this.context.currentTime, 0.03);
+      this.startMusicSource();
     }
   }
 
@@ -239,10 +344,12 @@ export class RunFeedback {
     this.destroyed = true;
     this.removers.forEach(remove => remove());
     this.removers = [];
+    this.stopRunMusic();
     if (this.master) {
       this.master.disconnect();
       this.compressor.disconnect();
     }
     this.noise = null;
+    this.musicBuffer = null;
   }
 }

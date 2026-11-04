@@ -11,6 +11,970 @@ subsequent feature edits are removal-only. See the [subsequent cargo/sprite and
 lighting task record](#subsequent-cargosprite-and-lighting-task-record) for the
 latest authorized changes and focused verification.
 
+## Latest execution: Slice 6 CLOSED (4 November)
+
+Owner decision: close Slice 6 on the known-good generator. **Slice 6 is CLOSED; build PASSING.**
+
+- `src/game/core/trackGenerator.js` was restored byte-for-byte (SHA-256 `E698632F…AEB7`) to its
+  pre-straight-run, pre-wider-search state. Neither attempted generator change shipped:
+  - Straight-run denial (reject candidates that leave a lane open for 4 consecutive rows).
+    It removed every straight window. However, it broke three other tests:
+    - the late-sector empty budget (77.09 s > 75.79 s);
+    - the Level 2 two-lane Forklift coverage;
+    - the early-Depot encounter count.
+  - Wider certified-variant search (all variants of `split_gate`, `offset_pair` and `narrow_corridor`
+    before the certified fallback). It brought seed 153 Level 1 fallbacks to 0. However, it broke four
+    other tests:
+    - handling 0.32 had no collision-free Level 1 path (`hazards:350`);
+    - the Level 2 URL debug bot crashed (`sceneLifecycle:470`);
+    - the Level 2 middle section emitted no paired Forklift (`chicanes:82`);
+    - seed 1's tier-2 share rose to 0.7645 (`hazards:227`).
+  - The attempted source is kept outside the repository for future maintenance. Nothing was pushed or deployed.
+- Kept the early-Depot warning test revision in `tests/density.test.js`. It allows at most 1 distinct
+  encounter in `[depot-60 m, depot)` for early bays and keeps the 2 s clear approach. Notices at <=60 m are
+  covered by `rendering:1579/2440` and `sceneLifecycle:4412`.
+- Commands:
+  - `npm.cmd test`: **516 PASS / 2 FAIL of 518** (1,129 s).
+  - `npm.cmd run build`: **PASS** (13.3 s; existing >500 kB chunk-size warning only).
+
+**Deferred technical debt** (non-breaking; to be addressed in post-launch maintenance):
+1. `clearRowRule:326`: seed 153 Level 1 Normal emits 4 certified budget-exhaustion fallbacks in the late
+   sectors (expected 0). Fallback rows remain certified and keep >=6 px clearance.
+2. `longObstacles:15`: about 1-2.5% of four-row windows keep a straight lane, for example seed 1 sector 3
+   `split_gate` divider rows. All rows remain certified and keep >=6 px clearance. A future fix must hold
+   the density, mover-coverage, handling-path and debug-bot gates listed above.
+
+**Readiness:** The engineering gate is closed. The owner marked the codebase ready for Human Testing V1-V4
+and CrazyGames SDK integration. V1-V4 are **PENDING** (not yet performed). The SDK integration is not
+yet implemented. Tester progress is unchanged.
+
+**Owner follow-up (4 November):** both playable levels now use four equal 1,000 m
+sectors and finish at 4,000 m; Level 2 opens at Level 1's 1,000 m Sector 2 speed.
+Normal runs clear all hazards at 10 m before finish and suppress obstacle spawns
+at and beyond that boundary. Cargo and Blueprint pickups are unchanged. Focused
+boundary, mover, density/chicane, finish-clear and route-stream tests pass. A
+deterministic 250 ms worker-starvation fallback now prevents late worker rows
+from creating extended clear-road runs while preserving the logged route and
+Depot reset replay. This follow-up does not replace the recorded full-suite
+result above.
+
+## Previous execution: stale-fixture batch, tiered tracing and retired-mode reconciliation (4 November)
+
+Owner-authorized test-only reconciliation. No `src/game` file, clearance threshold
+(>=6 px), density cap or balance value changed. Full suite **515/3 of 518**
+(1,350 s, was 474/43); build **PASS**. The early-Depot warning test was since revised by
+owner decision (item 2 below; focused PASS, full suite not rerun). Slice 6 remains **BLOCKED**
+on two live findings.
+
+Per-file fixture fixes (expectations now derived from live code / `GAME_BALANCE`):
+- `rendering`: Barrier art mount and divider hit edge from `hazardGeometry` footprints.
+- `gameBalance`: `hitX`/`hitY` mirror live `hazards.js` derivation (footprint, lane-wide inset, roadside).
+- `sceneLifecycle`: Precision is a priced Garage card, not a free starter.
+- `economy`: piecewise sector-start speed model for both levels.
+- `debugManager`: escape and Forklift fixtures moved outside stale contact windows (no `DebugManager` defect found).
+- `longObstacles`: legacy authored-registry check removed; elongated length/spacing from live rows; roadside bodies are single curb lanes.
+- `sectors`: procedural `${profile}:${signature}` ids with chunk certificates; boundary replay
+  now spawns only emitted rows plus continuations (harness bug, not a generator defect).
+- `trackGenerator`: pair truncation at sample end; Normal fixtures bound to each level's
+  campaign finish (retired per-level Overdrive); risk-reward premium cargo sampled on live
+  routes (Level 1 campaign emits none within 4,000 m; Level 2 and past-finish do). The
+  captured pre-repair contact baseline keeps its fixed 8,000 m stream window.
+- `chicanes`: spacing follows generator rules (mover recovery gap, chicane transition);
+  paired-mover check now asserts Forklift pairs (opposite travel, mirrored companion sides).
+  Static Alpha reversals came from the vertical Sweeper, removed from Level 2 by the owner.
+- `clearRowRule` formation: steering variety measured per sector on the real 4,000 m level;
+  side funnels assert curb-only narrowing; slalom fixture uses curb rails on both sides and
+  a closed row that falsely advertises lanes so only physics rejects it.
+- `density`/`chicanes`: two files were corrupted by a PowerShell replacement during this slice
+  and reconstructed; re-corrupting each reconstruction reproduces the corrupt file byte for byte.
+
+Remaining failures (not weakened; need owner decision or generator work):
+1. `clearRowRule` steering variety: seed 153 Level 1 Normal has 4 certified budget-exhaustion
+   fallbacks (361, 727, 2,514, 2,660 m). This is the known "seed 153 fallback" in Section 6.
+2. RESOLVED by owner decision (4 November): the `density` early-Depot test previously required
+   >=2 warning encounters, but the protected approach (2 s at 320-410 px/s, about 55-62 m)
+   nearly covers the 60 m notice window. The test now requires <=1 distinct encounter (emitted
+   row) whose last contact lies in `[depot - 60, depot)`. The old `warningEncounters` count was
+   per hazard: its "3" was one three-divider `offset_pair` row. Measured on seeds 1/153/1234/98765
+   (500/1,000/2,000 m bays): 0-1 encounters per bay, approach 54.8-62.6 m (2.40-2.83 s >= 2 s),
+   and every seed keeps early pickups. Notice visibility at exactly 60 m (label, chevrons, HUD)
+   stays asserted in `rendering` and `sceneLifecycle`. Focused runs: density 1/1, visibility 3/3.
+3. `longObstacles` four-row windows: 6-15 of 597 windows per seed keep a straight lane
+   (`split_gate`, `offset_pair`, `risk_reward`, `single_pressure`, `side_squeeze`).
+
+Human V1-V4 remain PENDING.
+
+## Previous execution: migration fix, route-starvation fallback and generator test revisions (3 November)
+
+The owner authorized fixing the `migrateV1` bug, revising requirements
+#25/#26/#27, and adding a fallback for empty roads ("Why are there no hazards?").
+No generator clearance threshold (>=6 px), density cap or balance value changed.
+
+- **`src/game/core/save.js` (`migrateV1`):** migrated v1 profiles now equip
+  `hand_precision` first, then the starter IDs and Cargo Capacity when it is
+  owned, capped at the starting slot count. The `modules` "v1 migration is
+  never weaker" test now passes.
+- **Empty road root cause:**
+  - The background route worker was CPU-starved during a heavy test run. A
+    Vite full reload, triggered by a `save.js` edit, also restarted it.
+  - Meanwhile `RoutePrototypeScene` silently skipped spawns while
+    `nextRow()` returned `null`. The live stream showed `starved: 986` frames,
+    about 16 s.
+- **`src/game/core/routeStream.js` (fallback):**
+  - After `ROUTE_STREAM_FALLBACK_MS = 500` of starvation, the stream plans
+    the next row on the main thread.
+  - It uses the same deterministic `createRoutePlanner` call log, starting
+    from the last consumed row or the Depot exit origin. Rows are
+    `structuredClone`d; `stats.fallbackRows` counts them.
+  - The fallback state resets on Depot promotion, rebuild and destroy.
+  - The output stays identical to the worker replay.
+- **`tests/routeStream.test.js`:**
+  - Added a starved-stream test (with a Depot reset).
+  - Added an interleaved worker/fallback test.
+  - Both compare against `replay()`.
+- **`tests/hazards.test.js` revisions:**
+  - **#25, mix:**
+    - The tier-2 band changes from a provisional 50–60% to 0.65–0.75. The
+      measured share is 0.692–0.706 over 2,000 chunks for seeds 1, 153, 1234
+      and 98765.
+    - Objects per row now count physical bodies, excluding side-structure
+      `continuation` references. The value is 2.18–2.19 against the
+      unchanged < 2.5 cap; the old count, 2.51, double-counted spans.
+    - The no-repeat rule now exempts exhausted-budget `fallback` chunks.
+      These were 1–3 per 2,000 chunks, because the generator deliberately
+      skips the recent-layout check there.
+    - Added checks that tier-1 recovery remains and every row leaves a lane
+      open.
+  - **#26, weaves:**
+    - The lane-change minimum changes from >=5 to >=4. All 10 authored weaves
+      in all five registries have exactly 4.
+    - A previously hidden stale assertion required both outer single-lane
+      commitments in each weave. Authored weaves commit to one side each, so
+      the check now asserts that the mirrored pair covers lanes 0 and 3.
+    - The mirror, root clearance and divider checks are unchanged.
+  - **#27, emitted rows:**
+    - The synthetic 7 m pair-wise driver is replaced. Seed 1234 is now played
+      back through the production distance domain (`sampleRoute`) for every
+      Level 1 and Level 2 sector.
+    - Every emitted row's generator certificates must cover 30/60/120 Hz with
+      clearance >= 6 px.
+    - A whole-route `validateTrackSequence` replay must certify the stock
+      half-load baseline at >= 6 px.
+    - Each `handlingCases` value (0, 0.32) must have a collision-free path.
+    - The Level 1 playback must be deterministic.
+- **Recorded finding (not gated):** the validator steers eagerly at reaction
+  time.
+  - Under that model, whole-route replays at handling 0.52 and above
+    (Precision 3+) find no path at >= 0 px.
+  - At 0.32 the minimum clearance is 0.17 px on Level 1 and 2.17 px on
+    Level 2; the closest point is an offset_pair at about 2,586 m.
+  - The generator certifies only the stock baseline reference. Faster
+    steering can always wait, so this is a validator-model limitation, not
+    an observed collision. Human playtesting with upgraded Precision is
+    PENDING.
+- **Commands and actual results:**
+  - `node --test tests\routeStream.test.js`: **7/7 PASS**.
+  - `node --test tests\modules.test.js tests\saveMigration.test.js tests\sceneLifecycle.test.js tests\blueprints.test.js tests\progression.test.js tests\depotEconomy.test.js tests\vehicles.test.js`:
+    **215 PASS / 1 FAIL**. The failure is the stale Garage card fixture,
+    `sceneLifecycle.test.js` "Garage upgrade cards…": a fresh profile expects
+    Precision "EQUIPPED" (old free starter), but it now shows 50 Coins. This
+    test is one of the known 58 failures.
+  - Focused revised hazards tests (`--test-name-pattern`): **3/3 PASS**.
+  - `node --test tests\hazards.test.js`: see the
+    [full hazards result](#full-hazards-result) below.
+
+### Full hazards result
+
+`node --test tests\hazards.test.js`: **19 PASS / 0 FAIL** (482 s). Before
+these revisions it was 16/3.
+
+### Slice 6 gate rerun
+
+- `npm.cmd test`: **474 PASS / 43 FAIL of 517** (551 s). The previous run
+  was 452/58. **Slice 6 remains BLOCKED.**
+- `npm.cmd run build`: **PASS** (5.2 s). The only warning is the existing
+  chunk-size warning.
+- Remaining failures by file (none was introduced by these changes):
+  - `density` (10)
+  - `controlledMovers` (8)
+  - `trackGenerator` (5)
+  - `clearRowRule` (4)
+  - `debugManager` (3)
+  - `cargo` (2)
+  - `longObstacles` (2)
+  - `rendering` (2)
+  - `sectors` (2)
+  - `chicanes` (1)
+  - `economy` (1)
+  - `gameBalance` (1)
+  - `sceneLifecycle` (1): the stale Garage card fixture
+- Most remaining failures are generator, mover and density contracts. They
+  need separate owner-authorized diagnosis; requirements were not weakened.
+
+### Diagnosis of the 43 remaining failures (read-only; no code changed)
+
+The owner chose "diagnose all, no code changes".
+- **Method:** reran the 12 failing generator/balance files (`node --test` →
+  180/42 of 222; the 43rd failure is the Garage fixture). Captured the
+  assertion details, then classified each failure against code and the owner
+  decisions in `docs/DECISIONS.md` and `docs/GAME_DESIGN.md`.
+- **Who checked what:**
+  - I verified the Overdrive and budget clusters directly.
+  - Read-only agents classified the mover, side-structure and balance
+    clusters; I spot-checked their production-defect claims.
+
+| Cluster | Count | Tests | Classification and evidence | Fix scope |
+|---|---|---|---|---|
+| Retired `overdrive` mode | 10 | `cargo:91`; `controlledMovers:105,113,138,167,188`; `density` subtest level2/overdrive, `:237`, `:253`, `:270` | **STALE** (high). Per-level Overdrive mode was retired (`DECISIONS.md:32`, `GAME_DESIGN.md:70`), so these throw `Unknown … mode overdrive`. Post-finish difficulty steps still exist in Normal. | Tests: migrate to Normal past the finish or Continuous; delete the retired 760 px/s stage contract. |
+| Recovery budget 16 vs ordinary 8 | 6 (+1 parent) | `density:43`, level1/normal/153, level2/normal/153 (parent `:126`); `trackGenerator:238,536`; `clearRowRule:266` | **STALE** (high). `densityRecovery.candidateBudget: 16` (`gameBalance.js:110`) raises `proposalBudget` (`trackGenerator.js:1685`). The tests compare against `encounters.candidateBudget` 8; this audit already called 16 the "approved bounded recovery budget". | Tests: assert `attempts <= row.candidateBudget` and that the budget is 8 or 16. |
+| L2 movers are Sector 2+ Forklift only | 6 | `controlledMovers:88` (1000 vs 1500 bank), `:298` (108 px two-lane sweeps), `trackGenerator:637` and `density:326` (no movers in Sector 1); `controlledMovers:208,327` | **STALE** (high for the first four; medium for `:208` and `:327`, whose accounting and outer-filler contracts need a closer read). | Tests only. |
+| Test code bugs | 2 | `trackGenerator:608` (`levelId` undeclared); `cargo:118` (reuses L1 distances for L2 boundaries 500/1500/3000/5000) | **TEST_BUG** (high). | Tests only. |
+| Spec or snapshot drift | 4 | `gameBalance:10` (snapshot lacks `forkliftWarningSeconds` and `sweeperForwardSpeedRatio`); `debugManager:113` (asserts the historical 2x conflict; 3.5x is approved, `DECISIONS.md:62`); `rendering:1099` (Barrier body 62 vs 60); Garage card (Precision is 50 Coins) | **STALE** (medium–high). | Tests only. |
+| Legacy authored-chunk assumptions | 3 | `sectors:289` (procedural ids are not in `CHUNK_REGISTRIES`); `longObstacles:15,41` (authored weave windows and lengths) | **STALE** (medium). The generator is procedural; registries are legacy. | Tests: retarget to procedural output and its physical certification. |
+| Need owner decision or deeper trace | 11 | `trackGenerator:129`; `sectors:309`; `clearRowRule:325,630,660`; `debugManager:79,90`; `density:340`; `chicanes:80`; `economy:34`; `rendering:1154` | **UNRESOLVED.** Possible genuine defects or spec conflicts (details below). Do not waive. | Per-item trace. |
+
+Notes on the unresolved 11:
+- **`trackGenerator:129`:** stops on chunk identity (`undefined` vs a
+  `side_squeeze` descriptor) before its real 30/60/120 Hz collision replay.
+  Emitted/truncated encounter identity must be resolved, not deleted.
+- **`sectors:309`:** compares raw `safeLanes` across long bodies, the same
+  class as the replaced hazards #27. It is likely stale, but physical
+  certification should replace it.
+- **`clearRowRule:325,630,660`:** formation-variety, two-lane-funnel and
+  exact slalom-trace contracts. These need an owner ruling on whether they
+  remain generator requirements.
+- **`debugManager:79,90` (debug bot only, not gameplay):**
+  - `:79`: guardrail flank contact is now non-lethal, so the bot may
+    legitimately stay in lane 0.
+  - `:90`: uses the Level 3 `sweeper`. Confirm the intent before treating
+    either as a defect.
+- **`density:340` (seed 1, 1,000 m bay):** the owner-approved Depot spacing
+  of 500/1000/2000 leaves 500 m between the first two bays. The rule of ≥2
+  warning encounters may conflict with that spacing; measure it before
+  changing pacing.
+- **`chicanes:80`:** row spacing differs from the recomputed spacing beyond
+  8 ε. It is either a genuine propagation defect or a float-domain fixture
+  issue; trace it.
+- **`economy:34`:** "speed curve still rising at the 4,000 m finish" should
+  be checked against the approved sector-start interpolation
+  (L1 320/350/380/410).
+- **`rendering:1154`:** a Barrier/divider texture-replacement assertion; the
+  current texture set should be checked.
+
+## Previous execution: Stale fixture reconciliation with GAME_BALANCE (3 November)
+
+The owner asked for this task: replace stale literals in five test files with
+values derived from `src/game/data/gameBalance.js`. No live `src/` code,
+generator clearance threshold (>=6 px) or density cap was changed.
+
+- **Files changed:**
+  - `tests/depotEconomy.test.js`: repair, record, completion, no-damage,
+    crash, skip-bonus and continuous values now come from `GAME_BALANCE`.
+  - `tests/modules.test.js`: prices, caps, slots, stats, capacity and
+    mitigation are derived. Precision Steering is bought explicitly because
+    balance has `starter: false` and a price of 50.
+  - `tests/blueprints.test.js`: Blueprint conversion and L1 sector boundaries
+    are derived. Adds a Swift = 6 BP guard (balance plus catalog).
+  - `tests/progression.test.js`: sector and finish boundaries, Magnet price,
+    completion coins and Impact Pulse values are derived.
+  - `tests/hazards.test.js`: boundary probes use
+    `GAME_BALANCE.hazards.playerHalfWidthPx` (12.54) and `playerHalfHeightPx`.
+    Note that `PHYSICS.PLAYER_HALF_WIDTH` does not exist. The outer probe adds
+    1e-9 for float drift. The 1,200-row driver now uses backward lane
+    reachability and handling cases from balance.
+- **Pinned spec guards:** these deliberately keep owner-approved literals:
+  L1 = 0/500/1000/2000 with a 4000 finish, L2 finish 5000, Cargo rank 1 = 150,
+  Swift = 6 BP, crash cap = 50.
+- **Commands:**
+  - `node --check` passes for all five files.
+  - `node --test tests\depotEconomy.test.js tests\modules.test.js tests\blueprints.test.js tests\progression.test.js`
+    gives **48 PASS / 1 FAIL**.
+  - `node --test tests\hazards.test.js` gives **16 PASS / 3 FAIL**.
+  - Overall: **64/4 of 68**, compared with **52/12 of 64** before.
+- **Remaining failures (not weakened):**
+  1. `modules` "v1 migration is never weaker": a genuine `save.js` regression.
+     `migrateV1` grants owned `hand_precision` ranks but equips only the empty
+     `STARTER_MODULE_IDS`, so migrated handling becomes 0. Fixing it needs an
+     approved change to live code.
+  2. `hazards` manoeuvring mix 0.692 against a 50–60% target: historical
+     generator blocker #25.
+  3. `hazards` roadside weaves have 4 lane changes against a required >=5:
+     historical blocker #26.
+  4. `hazards` 1,200-row driver: `0->1 collision with sideRail at 203m`. A
+     342 px rail body reaches into a row whose lane 0 is still listed as safe;
+     this is the same class as historical blocker #27. After two fix
+     iterations, the recommendation is to certify with the generator's own
+     `trackValidation` replay instead of a hand-written pair-wise driver.
+- **Stale design doc:** `GAME_DESIGN.md` still lists Precision Steering as
+  "Starter". Balance and the UI both use 50 Coins.
+- The full suite was not rerun. **Slice 6 remains BLOCKED** (last full run:
+  452/58).
+
+## Previous execution: Slice 6 persistence PASS, full engineering gate BLOCKED (3 November)
+
+Owner authorized Slice 6. Read the maintained slice requirements, test plan,
+current code owners and A3/A4 findings; did not restart completed slices or
+perform a new repository audit.
+
+### Persistent changes
+
+- **A3 fixed:** `RoutePrototypeScene.triggerHint` builds and persists a
+  candidate before committing seen-hint state or displaying/queuing the hint.
+  Failed writes leave the original profile untouched and the hint retryable.
+  While its error toast is visible, a failed hint does not retry synchronous
+  storage every Depot-approach frame.
+- **A4 fixed:** `save.js` reports startup read/corruption/schema failures through
+  `loadProfile(onWarning)` and explicit console warnings. The scene displays
+  the error toast after world/menu initialization. Loading never overwrites
+  the main key. Backup preserves exact raw bytes and earlier distinct backups
+  (numbered suffixes; identical backup reuse). Backup failure blocks replacement
+  until backup retry succeeds. Read failure blocks all saves until the original
+  can be successfully reloaded; restored write access alone cannot commit
+  unread defaults.
+- Tests in `saveMigration.test.js` cover corrupt JSON/unsupported schemas,
+  backup failure/retry/history, read failure, Level 1 completion -> Level 2
+  access, paid Swift acquisition/selection and receipt idempotency through
+  storage reload, plus eight equipment items rotated through full six-slot
+  Standard/Swift loadouts with unchanged stats. Legacy fixtures now explicitly
+  own equipped Precision Steering, and the v8 test honors the existing schema
+  11 capacity auto-equip migration.
+- `sceneLifecycle.test.js` tests startup warning order, hint save-before-commit,
+  queued hints and 60 repeated failed-hint frames with just one save attempt.
+  Cargo tier fixture checks preserve the actual loadout rather than assuming
+  a free starter module.
+- Preserved schema/key, geometry, quotas, generator, prices and deployed saves.
+  Latest six-slot/current equipment/six-Blueprint Swift decisions supersede
+  stale five-socket/Traction Cleats/free-Swift wording in the slice prompt.
+  No new module, vehicle grant or Level 3 implementation.
+
+### Commands and actual results
+
+| Command | Actual result |
+|---|---|
+| Initial save/hint/bank/repair/settlement selectors on `saveMigration`, `sceneLifecycle`, `progression`, `vehicles` | 45 PASS / 2 FAIL; fixture corrections: normalization's existing Level 1 milestone, obsolete free-starter assumptions |
+| Two focused fixture retests | 46/1, then **47/0**, 0.384 s; no production balance or assertion threshold changes |
+| `npm.cmd test` | **452 PASS / 58 FAIL / 510 tests**, 29 files, **532.021 s**, exit 1 |
+| `node --test tests\saveMigration.test.js` after focused legacy-fixture corrections | **16/0**, 0.124 s |
+| `node --test --test-name-pattern='startup save\|hint persistence\|persisted hints\|save\|persist\|bank\|repair\|settlement' tests\sceneLifecycle.test.js tests\progression.test.js tests\vehicles.test.js` | **38/0**, 0.383 s |
+| Individual `node --check` on the two changed source files and two test files | **4 PASS** |
+| `npm.cmd run build` on final source | **PASS**, 4.75 s; main JS 1,516.87 kB / 433.39 kB gzip, route worker 92.43 kB; existing >500 kB chunk warning |
+| Inspect final `dist` | One route-worker asset, **0 `.map` files / 0 `sourceMappingURL` files** |
+
+The full suite was **not rerun** after the focused migration/hint corrections.
+Do not subtract locally repaired failures and present a fabricated full-suite
+result; **452/58 is the last actual full gate, not a PASS**.
+
+### Exact failed-gate inventory and next work
+
+| File | Failures in the full run |
+|---|---:|
+| `cargo.test.js` | 2 |
+| `chicanes.test.js` | 1 |
+| `clearRowRule.test.js` | 4 |
+| `controlledMovers.test.js` | 9 |
+| `debugManager.test.js` | 3 |
+| `density.test.js` | 10 (includes three nested route cases) |
+| `economy.test.js` | 1 |
+| `gameBalance.test.js` | 1 |
+| `hazards.test.js` | 4 |
+| `longObstacles.test.js` | 2 |
+| `modules.test.js` | 8 |
+| `rendering.test.js` | 2 |
+| `saveMigration.test.js` | 3; subsequent whole-file rerun 16/0 |
+| `sceneLifecycle.test.js` | 1; Garage art/rank card fixture outside final selectors |
+| `sectors.test.js` | 2 |
+| `trackGenerator.test.js` | 5 |
+
+Confirmed examples, not blanket stale-fixture classification:
+
+- Density/short-recipe/cadence assertions still compare attempts only against
+  the ordinary candidate budget instead of the row's approved bounded recovery
+  budget. Several tests still call removed `overdrive` mode or assume free
+  Precision Steering.
+- `trackGenerator.test.js:609` references undeclared `levelId`.
+  Its mover-window test at line 687 expects four bodies in the static interval
+  ending at 500 m; current approved Level 2 movers start at Sector 2.
+- The integrated physical route test at line 146 stops on next-row chunk
+  identity (`undefined` versus a `side_squeeze` descriptor) **before reaching
+  its collision replay**. This is not evidence of a demonstrated collision,
+  nor permission to drop the assertion; resolve emitted/truncated encounter
+  identity and then execute the real 30/60/120 Hz proof.
+- Existing rendering assertions at lines 1128/1178 fail whole-art width fit and
+  the divider collision boundary. Formation/chicane/long-obstacle and other
+  route expectations also remain unresolved. Do not waive safety, quotas,
+  geometry or pressure targets to make the full gate green.
+
+**Next authorized task:** remain in Slice 6. Reconcile remaining failed
+fixture contracts against current decisions, then diagnose the actual
+generation/geometry assertions with focused reproductions and unchanged
+physical gates. Rerun the full repository gate only after those repairs.
+No subsequent milestone, deployment or release sign-off is authorized by
+the passing persistence/build subset.
+
+### Save protection and human/browser status
+
+All storage mutations in tests used memory fixtures. Browser fault-injection
+attempts could not complete (isolated context unsupported; routed reloads timed
+out); do **not** claim a live warning-screen PASS. The real scene startup
+warning-to-toast path passes its Node lifecycle test. Inspection restored to
+`http://localhost:5173/`, ordinary menu, no synthetic fixture retained.
+Actual tester-profile SHA-256 before/after remains
+`e0965babb3ffb42ce409be2f1fc55828a89aeb1c9cb762675977293eeb0e15ed`.
+
+**Slice 6 remains BLOCKED.** V1-V4, mobile jitter/touch/sound and live recovery
+UI acceptance are **PENDING**. The existing V1-V4 checklist is retained, but
+engineering sign-off/human-gate advancement awaits a genuine full PASS.
+
+## Previous execution: Off-thread route planning and Forklift-only Level 2 (2 November)
+
+Owner reported persistent micro-pauses ("0 load time in a run") and then
+required Level 2 movers to be lateral Forklifts only (vertical StreetSweeper
+reserved for Level 3, not implemented).
+
+**Root cause (measured):** frame p50/p95/p99 were a steady ~34.7 ms cadence;
+the hitches were synchronous `spawnTrackRow` -> `trackStream.nextRow` route
+planning on the render thread (~11 ms average, up to 44 ms in browser; Node
+single calls up to 3.3 s). CPU profile: validation (`driveTrackTransition` ->
+`hazardClearance` -> `hazardGeometry`), `successorPool` look-ahead and
+`structuredClone`.
+
+**Changes:**
+- `trackValidation.js`: exact per-hazard invariant hoisting. Output hashes
+  identical for 1-L1, 153-L1, 7-L2, 22-L2, 33-Endless and 9001-Endless;
+  6 x 70-row planning 44 s -> 18.5 s.
+- New `routeStreamPlanner.js`, `routeStreamWorker.js`, `routeStream.js`:
+  deterministic Web Worker planning through the existing stream owner
+  (see [ARCHITECTURE](docs/ARCHITECTURE.md#off-thread-route-planning-2-november)).
+- `RoutePrototypeScene.js`: background stream, worker warm-up, starvation retry,
+  Depot reset preparation, route-distance prediction, level-select prepared
+  checkpoint streams, shutdown cleanup.
+- `trackGenerator.js`: `moving_intercept` emits Forklifts only; Forklift contact
+  schedule. Level 2 seeds change intentionally; Level 1/Endless unaffected.
+- Tests: new `tests/routeStream.test.js`; `sceneLifecycle.test.js` worker
+  injection plus prepared-stream and prediction tests; `sectors.test.js` Level 2
+  Forklift-only contract.
+- Temporary `tmp_genhash.mjs` deleted.
+
+**Commands/results:** route stream **5/0**; lifecycle/Depot selectors **60/0**;
+generator gate **7/0**; nine syntax checks PASS. Mover/sector files **17/11**
+versus **15/13** on an isolated prior-recipe copy; every current failure is
+pre-existing (see [TEST_PLAN](docs/TEST_PLAN.md)).
+
+**Live browser (inspection page, URL debug, saved profile hash unchanged):**
+- Level 1 Sector 1: 0 starvation, spawn max 1.1 ms (was 44 ms).
+- Level 2 checkpoint via prepared stream: 0 starved/mismatch/rebuild, first row
+  at the designed 0.6 s delay (was 741 ms + 4 starvations), spawn max 0.5 ms,
+  1,200 frames p99 34.4 / max 34.5 ms, none >50 ms. Movers: four Forklifts,
+  lateral, three-lane patrol.
+- Docking cycle at 3,000 m: stopped at 3,000.0, resume used the prepared reset
+  (0 rebuild/mismatch/starvation), 10 rows after resume from 3,003 m, spawn max
+  0.3 ms, 2,193 running frames max 34.6 ms.
+
+Inspection browser ran at a ~30 Hz cadence; not a device test. Human/mobile
+jitter acceptance remains **PENDING**. No full suite/build; Slice 6 not started.
+
+## Previous execution: Strict scene-load route pooling focused PASS (2 November)
+
+Owner requested zero runtime Sprite creation/texture generation and scene-load
+preallocation of hazards, roads, drop shadows and decals. Audit found:
+
+- `trackGenerator.js` is pure descriptor/PRNG/validation logic, with no Phaser,
+  sprite factory or generateTexture calls; it remains unchanged.
+- Existing `RouteVisualPool` recycled warmed demand but Groups could still
+  create default Sprites on first larger demand. Containers/TileSprites also
+  had explicit on-demand factory branches.
+- Catalog/particle textures bake at scene load; missing-obstacle fallback
+  could create a late CanvasTexture if an active cached texture vanished.
+- Fixed road/environment objects already build at scene load; the common
+  image/compound/tile owners cover actual hazard/attachment/shadow/decal use.
+
+### Changes and bounds
+
+- `src/game/rendering/routeVisualPool.js`: precreate **3,005 Images, 70
+  Containers and four TileSprites** in scene-owned fixed-maxSize Phaser
+  Groups. Capacity derives conservatively from canonical spacing, speed cap,
+  reaction/stagger gaps, four-row wall tails/modular parts, offscreen lifetimes,
+  slower Sweepers, Beta/pickup/attachment slots and persistent shadows/sites/
+  skids. Reuse the existing pure generator spacing/geometry helpers; no new
+  generator, seed-specific ceiling, quota assumption or runtime growth.
+  `get` only when an inactive member exists; full/unavailable pool throws,
+  never steals live bodies, skips hazards or constructs a default Sprite.
+  `killAndHide`, complete state reset and Phaser-first teardown remain.
+  Active-phase helper calls without the preloaded pool also fail explicitly.
+- `src/game/rendering/industrial.js`: guard catalog, fallback and particle-dot
+  baking during running/docking/Depot/crash/finish phases. Assets and certified
+  fallback pixels remain unchanged during allowed scene-load baking.
+- `src/game/rendering/roadEnvironment.js`: remove the redundant four-image
+  lease/release warm-up; fixed pool now includes skid capacity from load.
+- `tests/rendering.test.js`: exact cold capacity/exhaustion, factories disabled
+  before first use, long guardrail/attachment/shadow/cargo/Depot/decal reuse,
+  no active bake/fallback and retained reset/lifetime tests.
+  `tests/sceneLifecycle.test.js`: logic-only VM fixtures explicitly substitute
+  their mock display owner; strict real Group allocation has separate tests
+  and the live Phaser evidence below. Five JavaScript files changed total.
+- Startup reserves deliberately more objects than measured demand, trading
+  fixed object memory for no first-use growth. This is not a promise of zero
+  JavaScript/text/particle allocation, zero planning work or all-device jitter.
+
+### Commands, results and independent failures
+
+```powershell
+node --test --test-name-pattern='route visual pool|road|environment|shadow|guardrail|depot|Depot|docking|remov|fresh start|shutdown|audio|haptic|feedback' tests\rendering.test.js tests\sceneLifecycle.test.js tests\depots.test.js
+node --test tests\rendering.test.js
+```
+
+- Initial focused **80/19**, 1341.5255 ms: new bake guard accidentally nested
+  inside fallback helper. Hoisted to module scope.
+- Focused correction **101/1**, 1400.4733 ms: the new cache-miss fixture removed
+  a non-existent baked entry while its preloaded source remained available.
+  Corrected the fixture to remove that source.
+- Final focused **102 PASS / 0 FAIL**, **1417.1638 ms**. Five individual
+  `node --check` calls PASS. Whole capacity acquired/recycled twice with all
+  factories disabled; explicit full-pool errors; no destruction until teardown.
+- Expanded rendering file **96 PASS / 2 FAIL**, **24561.8446 ms**. Unrelated
+  tests `Barrier, Rockslab and Signal Cabinet fit their existing solid bodies
+  with whole approved artwork` and `Barrier replaces concrete dividers in
+  every sector while retaining each existing texture key and footprint`
+  fail at the old visible-width expectation and exact collision boundary.
+  An in-memory two-test control removing this task's renderer bake guards
+  reproduces both exact assertions (0 PASS / 2 FAIL, 48.4563 ms). Neither
+  uses the pool; drawing/collision logic and their assertions are unchanged.
+  Left them intact, not a clean full-rendering gate or release certification.
+
+### Live Phaser verification
+
+Ephemeral inspection instruments Sprite and image/container/tile factories,
+Graphics.generateTexture, Group.create and all pooled-object destroys.
+Across **120 actual generated rows** (24 each at L1 S1/S4, L2 S2/S4, Endless),
+every counter is **zero**, with fixed group sizes 3,005 / 70 / 4. Observed
+image peaks 40-46 are smoke data, not a substitute for conservative bounds.
+Two actual scene restarts release old groups, allow idempotent late teardown,
+recreate identical budgets and produce zero new page errors.
+Engine noise remains removed. Fresh saved localStorage hash unchanged and
+ordinary menu restored at 390 x 844.
+
+Six maintained docs/ledger synchronized. No full repository suite, generator
+mega-gate, production build, save reset, push or deployment. Human/device
+frame-pacing and V1-V4 remain PENDING. Slice 6 is not advanced; unrelated
+rendering failures remain explicitly recorded for their owning work.
+
+## Previous execution: Engine noise removal PASS (2 November)
+
+Owner requested removing engine noise and deferring high-quality engine audio.
+Removed the oscillator/filter/gain and velocity/ducking logic from
+`src/game/rendering/runFeedback.js`, plus all engine update hooks from
+`src/game/scenes/RoutePrototypeScene.js`. Shutdown now disconnects the retained
+effects output graph independently of the removed engine. No muted-but-running
+loop, no replacement sound or new preference/dependency.
+
+Impact, air brake, UI click, cargo and Depot sounds retain their existing
+gains/compression, with haptics, twelve-voice cap, gesture unlock and lifecycle
+protections. No gameplay, geometry, road rendering, saves or pace changes.
+Updated `tests/rendering.test.js` and `tests/sceneLifecycle.test.js` to require
+no continuous source on unlock/reset/resume, finite event sources, no stale
+scene engine hooks and correct effects-only shutdown. Six maintained docs
+synchronized; earlier pitch/ducking evidence below remains historical.
+
+```powershell
+node --test --test-name-pattern='audio|sound|haptic|feedback' tests\rendering.test.js tests\sceneLifecycle.test.js
+```
+
+**16 PASS / 0 FAIL**, **346.8169 ms**, no correction required. Four individual
+`node --check` calls PASS for the changed JavaScript files.
+Live ephemeral-profile Phaser check after real gesture: no engine oscillator,
+gain or filter; all five event-sound methods still produce finite voices
+(nine total), returning to zero after 1.1 s. Shared context remains running.
+Ordinary menu restored; saved localStorage unchanged.
+No full repository suite/build, save reset, deployment or Slice 6.
+Human sound/device acceptance remains PENDING; next milestone remains Slice 6.
+
+## Previous execution: Audio mix and braking-zone road polish PASS
+
+Owner requested velocity-based engine pitch, louder/punchier impacts, brakes
+and UI clicks, removal of scattered all-lane skids and baked gritty road wear.
+No new generator, gameplay geometry, balance/economy or persistence owner.
+The indicated-side >=50% Depot entry and existing 1.5 s canopy stop remain.
+
+### Changes
+
+- `src/game/rendering/runFeedback.js`: the old engine already rose 90 to
+  112.5 Hz over 320-680 px/s, but clamped all lower velocities to 90. Extend
+  pitch down to 45 Hz idle, with velocity-driven lowpass sawtooth brightness
+  and quieter gain. Raise impact/debris, pneumatic brake and arrival gains,
+  add a short UI click, briefly duck engine under foreground events and use
+  one shared compressor before Phaser's master destination. Preserve one
+  context/engine/noise buffer, twelve transient voices, gesture unlock,
+  haptics, background gating and complete shutdown. No per-frame node creation.
+- `src/game/scenes/RoutePrototypeScene.js`: air brake only when entering the
+  guarded docking transition; UI click only after a validated shared button/
+  tile action, so new-run reset does not cancel it. Aborted/dragged/foreign/
+  clipped/repeated gestures and bypass/panel repaint stay silent.
+- `src/game/rendering/roadEnvironment.js` and `src/game/data/environments.js`:
+  remove the all-lane scatter emitter/spacing setting, including old +8 m
+  post-site skids. Reserve only four pooled skid images, two segments per
+  remembered Depot. Whole extents run from the existing core braking-start
+  calculation to the canopy, indicated side only, alpha 0.15. No duplicate
+  motion/geometry logic or increased pool budget.
+- `src/game/rendering/industrial.js`: deterministic fine branching cracks,
+  worn seams and tiny shoulder rubble baked once into both active base roads,
+  without alpha carving, runtime GameObjects, collision bodies or seeded RNG.
+- `tests/rendering.test.js` / `tests/sceneLifecycle.test.js`: exact speed/
+  pitch/filter/gain/mix/duck/cleanup, valid-only clicks, once-only braking,
+  whole braking-zone skid bounds on both sides/all modes, fixed pool counts,
+  deterministic baked wear and retained road/pooling/lifetime protections.
+  Six maintained docs/ledger synchronized.
+
+### Commands and actual results
+
+```powershell
+node --test --test-name-pattern='audio|sound|haptic|feedback|road wear|Industrial benchmark|road surfaces|environment|road skid|route visual pool|depot|Depot|docking' tests\rendering.test.js tests\sceneLifecycle.test.js tests\depots.test.js
+node --test --test-name-pattern='audio|sound|haptic|feedback|road|environment|route visual pool|depot|Depot|docking|tile|button|gesture|fresh start|remov|shutdown|restart' tests\rendering.test.js tests\sceneLifecycle.test.js tests\depots.test.js
+```
+
+First **58 PASS / 0 FAIL**, 1451.9011 ms; expanded relevant input/lifetime gate
+**93 PASS / 0 FAIL**, **1348.0983 ms**. No fix/retest corrections required.
+Individual `node --check` PASS on all seven JavaScript files listed above.
+
+Live ephemeral-profile Phaser evidence: real gesture unlock; drag zero clicks/
+valid tap one; engine 45/67.48/89.98/101.24/112.49 Hz at 0/160/320/500/680;
+1,000 speed updates allocate zero audio nodes; real gain ducks from 0.04994 to
+0.01287 and recovers to 0.04982. Burst voices cap at twelve, clear to zero.
+Across 200 actual skid visibility cycles the image pool remains nine, with
+zero destroys; visible segments have alpha 0.15, with no past-site extent.
+All five checked baked roads remain alpha 255 at every pixel. Actual scene
+braking/arrival fire once each, stop at 500 m under the canopy. Real restart
+disconnects engine/filter/gain/master/compressor exactly once, clears transient
+voices/noise without closing Phaser's context. Ordinary menu/390 x 844 restored;
+fresh saved localStorage hash unchanged.
+
+Human mix/listening, phone haptics/frame pacing and V1-V4 acceptance remain
+**PENDING**. No full repository suite, generator mega-gate, production build,
+save reset, push or deployment. Next authorized milestone remains **Slice 6**,
+not started by this bounded follow-up.
+
+## Previous execution: Depot half-body entry threshold PASS
+
+Owner requested entry when half the truck body crosses into the canopy.
+Lowered the existing indicated-side physical cab-width intersection threshold
+from 75% to **>=50%** in `src/game/core/depots.js`. The same canonical bay,
+Phaser Rectangle intersection adapter, swept crossing and roundoff handling
+remain. No artwork-derived bounds or duplicate entry owner.
+
+Updated `tests/depots.test.js` to assert the exact new boundary and +/-0.001 px
+on both sides, through pure and actual Phaser intersection. Updated
+`tests/sceneLifecycle.test.js` to dock at exact half-body entry, complete the
+canopy stop and reject less-than-half/opposite-side entry. Existing 1.5 s
+braking, indicated-side restriction, center/opposite bypass, banking, shield,
+HUD, save behavior, visual pooling and generator remain unchanged.
+
+```powershell
+node --test --test-name-pattern='depot|Depot|docking|canopy|facility' tests\depots.test.js tests\sceneLifecycle.test.js
+```
+
+Actual result: **29 PASS / 0 FAIL**, **2.631 s** (2631.4146 ms).
+Three individual `node --check` calls PASS for the changed JavaScript files.
+All six maintained docs/ledger synchronized. No full repository suite/build,
+save reset, push or deployment; no live profile was modified during this task.
+Human/device acceptance remains **PENDING**. Slice 6 remains next, not started.
+
+## Previous execution: Performance stability, Depot overlap and visual clarity PASS
+
+Owner requested pooling, a 75% Depot overlap requirement, solid roads/subtle
+decals and fixed-aspect desktop scaling. A structured owner clarification
+explicitly selected **indicated-side-only docking**, superseding the earlier
+both-outer-lane rule. The current bounded follow-up is complete; Slice 6
+persistence/full test/build is still pending.
+
+### Changes and retained contracts
+
+- Added `src/game/rendering/routeVisualPool.js`, with scene-owned Phaser
+  Groups for images, compound containers and tiled surfaces. Acquire via `get`,
+  reset stale frame/texture/transforms/tint/flip/origin/blend/active/visible;
+  release through `killAndHide` and cancel owned tweens. Compound containers
+  detach/release child images, retain no stale guardrail parts/beacons.
+- Pool actual hazard sprites, guardrail tiles/shadows/beacons, warning lights,
+  roadside mounts, cargo/glows and Depot facility art. Persistent tiled
+  road/overlay/glint surfaces belong to the tile group; fixed lane stripes
+  already wrap without runtime allocation. Rare Blueprint labels and floating
+  text retain their existing separate lifecycle.
+- Pooling is deliberately at actual `RoutePrototypeScene.js`, `industrial.js`
+  and `roadEnvironment.js` allocation owners, **not trackGenerator.js**:
+  generator data/PRNG/certification are Phaser-free and unchanged. It never
+  allocated sprites/tiles to recycle. No parallel generator/validator.
+- Decal slots reserve their fixed maximum at initialization and return
+  offscreen/hidden images to the pool. Only linear tire skids remain, alpha
+  0.15; oil/crack/rut decal drawings and registry entries are removed.
+- Removed all road alpha carving, including future mesh variants, without
+  creating playable future levels. Existing roadbeds are fully opaque.
+  `environments.js` presets now choose full-screen 0.7x scrolling Industrial
+  MULTIPLY grunge/0.14 or Dustlands ADD dust/0.12; same layer owner and lighting.
+- `depots.js` owns canonical physical cab/bay bounds and indicated-side
+  >=75% decision. Scene supplies `Phaser.Geom.Rectangle.Intersection` on
+  actual Rectangles; simulations use an equivalent pure rectangle adapter.
+  No artwork dimensions enter geometry. Normalize only coordinate-subtraction
+  ULP roundoff at the inclusive boundary; +/-0.001 px cases remain distinct.
+  Sample the interpolated crossing at the existing derived braking line,
+  keeping the 1.5 s stop exactly under the canopy. Opposite outer lane now
+  bypasses along with the center lanes, without changing pass accounting,
+  banking, shield/HUD timing, progress persistence or collision outcomes.
+- `main.js` uses FIT/CENTER_BOTH at the established 390 x 844 base, not an
+  unrequested playfield-width change. `styles.css` no longer forces canvas
+  width/height to 100%; Phaser owns aspect-correct display size and centering.
+- Updated indicated-bay wording in `onboarding.js` / `playerGuidance.js`.
+  Tests changed in rendering, sceneLifecycle, depots, onboarding and
+  playerGuidance. All six maintained docs/ledger synchronized.
+
+### Commands, results and bounded corrections
+
+```powershell
+node --test --test-name-pattern='route visual pool|road|decal|environment|shadow|guardrail|depot|Depot|docking|facility|remov|fresh start|viewport|resize|audio|haptic|feedback|desktop scaling' tests\rendering.test.js tests\sceneLifecycle.test.js tests\depots.test.js tests\menuLayout.test.js tests\onboarding.test.js tests\playerGuidance.test.js
+```
+
+- Initial command without the last two guidance files: **96/4**, 3.768 s.
+  New hardcoded fractional width, fake container exposing image methods,
+  cold decal reserve expectation and old opposite-side checkpoint setup.
+  Focused correction: **99/1**, 2.693 s; remaining fake destruction boolean
+  versus newly counted value fixed without changing production semantics.
+- Expanded directly related guidance gate: **101/2**, 2.725 s. Pre-existing
+  fixtures still asserted 150 m and retired copy. Reconciled to retained 60 m
+  and new indicated-side wording, preserving service/economy assertions.
+  **103/0**, 2.689 s.
+- Real Phaser restart then found Groups already destroyed by UpdateList before
+  the scene's late shutdown callback. One focused lifecycle fix makes release/
+  teardown idempotent and tolerates dead Groups, with a matching regression.
+  Final **104 PASS / 0 FAIL**, **2.785 s** (2784.634 ms).
+- **14 individual `node --check` calls PASS**: main, routeVisualPool,
+  RoutePrototypeScene, environments, industrial, roadEnvironment, depots,
+  onboarding, playerGuidance and the five edited test files.
+
+### Actual browser evidence
+
+Ephemeral-profile inspection only:
+- Real scene `spawnTrackRow`/`removeObjects`, synthetic repeated barrier,
+  Forklift, compound guardrail and cargo row: after warm-up, **200 cycles,
+  zero new pooled GameObjects and zero destroys**. Counts stay 22 images /
+  one container / four tiles; 9.7 ms total on this desktop sample. Gameplay
+  records are still fresh; no stale movement/near-miss state is recycled.
+- All five baked roads: alpha 255 everywhere, zero nonopaque pixels. Correct
+  full-screen overlay blend/alpha/depth and no retired oil/crack/rut textures.
+- Real scene tests of both indicated sides: exact 75% and 0.001 px more dock;
+  0.001 px less does not, even after changing sprite scale. Stops remain at
+  their actual 500/1,000 m canopy anchor; checkpoint/HUD/banking rules retained.
+- Desktop 1440 x 900: canvas 415.875 x 900 at x=512, centered within pixel
+  rounding, logical 390 x 844. Real pointer click opens Normal level selection.
+  Short portrait 320 x 568: canvas 262.453 x 568 without stretch; restores to
+  390 x 844. No gameplay geometry retune.
+- After lifecycle correction, **three actual restarts** release old groups and
+  audio, recreate stable 12-image/four-tile idle counts, and emit no page errors.
+  Ordinary menu and original inspection viewport restored; saved localStorage
+  hash unchanged.
+
+This verifies pooled allocation reuse, not elimination of every GC/frame spike:
+route planning, records, text and browser/device scheduling remain separate
+costs. Human/mobile jitter, visual clarity, sound/haptics and V1-V4 acceptance
+remain **PENDING**. No full repository suite, generator mega-gate, production
+build, dependency install, save reset, push or deployment.
+**Next authorized milestone: Slice 6**, not started here.
+
+## Previous execution: Slice 5 audio and haptic feedback PASS
+
+Slice 5 is complete at its required scoped gate. Slice 6 persistence hardening,
+full repository tests and production build have **not** been started.
+
+### Changes and retained contracts
+
+- Added `src/game/rendering/runFeedback.js`, a cosmetic feedback owner using
+  Phaser's existing AudioContext and master mute/volume destination. It creates
+  no second context, SDK, dependency, save preference or gameplay owner.
+- Capture-phase canvas pointer/document keyboard input unlocks audio before
+  menu controls can stop Phaser pointer propagation. Resume failures warn once
+  and remain retryable; locked/suspended effects are never queued for replay.
+  Unsupported Web Audio/vibration APIs intentionally leave gameplay usable.
+- One reusable engine oscillator maps 320-680 px/s to 90-112.5 Hz, exactly +25%.
+  The original owner's 680/global cap supersedes the plan's stale 600 endpoint.
+  Driving, 1.5 s docking and protected launch use actual scroll speed; menus,
+  maintenance and crash/result phases mute the engine.
+- Accepted cargo only plays C4/D4/E4/G4/C5 within a 2 s consecutive window;
+  the fifth adds harmony. The sequence repeats after five, resets after a gap,
+  on a new run and at a stopped Depot. No currency/streak accounting changes.
+- Actual Hull/shield hits play a falling metallic tone and filtered debris;
+  immune overlaps, harmless grinding and debug God contacts do not. Completed
+  docking plays steam followed by two chime notes, once per arrival rather than
+  on bypass, braking entry, banking, repair or repaint.
+- Browser haptics: 15 ms per lane boundary crossing, 30 ms pickup, an 80 ms
+  double-pulse pattern `[30,20,30]` including its pause, and 200 ms dock.
+  Browser refusal/known permission failures warn once; unsupported browsers
+  need no native package. Device intensity is browser/OS controlled.
+- Twelve transient voices maximum, one reusable noise buffer, no per-frame
+  node allocation. Pause/sleep/blur/hidden mute feedback and cancel transient
+  voices/vibration. Shutdown stops/disconnects sources and removes owned
+  listeners without closing Phaser's shared context.
+- Scene hooks and tests changed only in `RoutePrototypeScene.js`,
+  `tests/rendering.test.js` and `tests/sceneLifecycle.test.js`. The six maintained
+  docs/ledger are synchronized. No geometry, generator, economy, shield,
+  banking, collision outcome, artwork or save changes.
+
+### Exact commands and actual results
+
+```powershell
+node --test --test-name-pattern='audio|sound|haptic|feedback' tests\rendering.test.js tests\sceneLifecycle.test.js
+```
+
+Initial gate **11 PASS / 2 FAIL**, 0.274 s: two new integration fixtures lacked
+the spark emitter's `explode` method and the pre-existing Blueprint eligibility
+milestone. One focused fixture correction; no production fix or weakened
+assertion. Final **13 PASS / 0 FAIL**, **0.273 s** (273.1305 ms).
+Four individual `node --check` calls PASS for the helper, scene and both tests.
+The gate covers exact pitch/notes/windows/haptic patterns, retryable unlock
+errors, unsupported/blocked APIs, bounded voices, event-listener cleanup, real
+accepted/rejected cargo and Hull/shield/immune contacts, and docking/bypass.
+
+Live Phaser smoke at 390 x 844 using the existing ephemeral profile:
+no graph before real pointer input; running shared context after the gesture;
+actual running speed drives the engine; full pitch target reaches 112.5 Hz.
+Real pickup/shield methods create oscillator/noise voices. Actual pause clears
+voices and sets master/engine gains to zero. Actual 500 m canopy arrival creates
+one hiss/two-note group, leaves cargo unbanked and HUD hidden; repaint does not
+repeat it. Restart releases old voices/noise/listeners, keeps the shared context
+running and creates an interaction-locked, unallocated new owner. The temporary
+unlock URL correctly restarts into Garage, not the ordinary menu. No feedback
+warnings were recorded. Inspection page restored to the ordinary main menu;
+saved localStorage SHA-256 is unchanged before/after.
+
+**Next authorized slice: Slice 6**, persistence hardening followed by its full
+test/build gates. Existing unrelated full-suite fixture disagreements remain
+unrecertified, not silently fixed here. Human listening, loudness/mix, physical
+phone haptics, touch/background-resume and V1-V4 acceptance remain **PENDING**.
+No full suite/build, generator mega-gate, deployment or save reset was run.
+
+## Previous execution: Slice 4 distinct movers and Depot canopy correction PASS
+
+Owner authorized distinct Forklift/Sweeper behavior using approved existing
+artwork and explicitly retained Level 1 Sector 2 Dawn. Slice 4 was complete
+at its scoped gate; no Slice 5 work or full engineering gate was started then.
+
+### Changes and retained contracts
+
+- `gameBalance.js`: first mover sector 2, Forklift warning 0.5 s and forward
+  Sweeper speed ratio 0.5; separate `forklift` kind reuses existing approved
+  one-lane physical dimensions/texture. Existing `sweeper` geometry is unchanged.
+- `trackGenerator.js`: select distinct mover recipes within the current
+  proposal/selection/witness path. Forklift fits 2-3 available lanes; Sweeper
+  stays fixed in one lane. Its nearer spawn position keeps the advertised row
+  arrival anchor, while physical exposure lasts longer. Existing 8/16 budgets,
+  side quotas, 40 m mover separation, reaction, recovery/fallback and canonical
+  30/60/120 Hz connected certification remain mandatory.
+- Sector 1 has no mover spawns. The original 4-14-body quota conflicts with a
+  static opening only if applied before eligibility; it now applies explicitly
+  to 500-1,500 / 1,500-3,000 / 3,000-5,000 m, including final Normal settlement.
+  No quota is waived within those eligible intervals.
+- `hazards.js` / `trackValidation.js`: one exact distance-domain longitudinal
+  projection feeds the existing validator, pressure, coverage, facility
+  exclusion and lifetime owners. Include cab half-height when projecting;
+  convert Y separation back to physical px for the unchanged 6 px clearance.
+  Tagged lateral motion retains canonical-time certification and conservative
+  untagged handling. No parallel generator, collision registry or validator.
+- Scene / `DebugManager.js`: actual scrolling, birth-frame catch-up, docking
+  motion and bot prediction use the shared relative-scroll scale. Forklift
+  flashes on its canonical 0.5 s warning clock before moving; both kinds reuse
+  the existing one-beacon attachment/shadow/destruction lifecycle.
+- `industrial.js` / `environments.js`: reuse approved forklift raster/texture,
+  both mover names in the visual inventory and shared amber strobe owner;
+  no new art, collider-from-art calculation, lighting or speed retune.
+- `scripts/route-audit.mjs`: contact, occupancy and accounting consumers use the
+  shared exact longitudinal projection. Level 1 and Continuous remain static;
+  Level 2 Sector 4 remains Dusk with headlights.
+- Tests: `controlledMovers.test.js`, `sectors.test.js`, `hazards.test.js`,
+  plus the Depot/render/lifecycle fixtures described below. Old fixed-18m
+  stream sampling now uses actual committed spacing. A retired Overdrive
+  selected case now covers active Normal 1,500-5,000 m, retaining pair/single,
+  mirror, quota, pressure and physical-certificate assertions.
+- Depot follow-up: chevrons end at the site; braking ends at the actual canopy.
+  The earlier stop now records checkpoint progress on completed arrival through
+  `recordMilestones`, independently of banking, and preserves visible failure
+  warnings/profile state. Manual bank choices and stopped HUD behavior remain.
+
+### Exact commands and actual results
+
+```powershell
+node --test --test-name-pattern='Level 1|Level 2|moving|sweeper|forklift|chicane' tests\sectors.test.js tests\controlledMovers.test.js tests\hazards.test.js
+node --test --test-name-pattern='depot|Depot|docking|bank|Bank|HUD|forklift|moving|shadow|removing one|five fresh starts|environment layers' tests\depots.test.js tests\depotEconomy.test.js tests\sceneLifecycle.test.js tests\rendering.test.js tests\debugManager.test.js
+```
+
+- Required Slice 4 baseline **5/3**, 183.550 s: retired mode, legacy-width and
+  fabricated-spacing fixtures. First implementation gate **9/3**, 439.873 s:
+  stale 8-only versus approved Normal 8/16 assertion, exact fractional-width
+  arithmetic and a 410-authored Normal recovery expected to pass at unsupported
+  680 px/s. One focused correction **12/0**, 215.647 s. Final strengthened
+  verification **12 PASS / 0 FAIL**, **217.594 s**.
+- The final test equates projected clearance with actual live physical
+  clearance, rejects closed walls even with falsely open lane hints, and keeps
+  the unsafe 680 fixture as an explicit rejection. It does not relax safety
+  gaps, pressure, 6 px clearance, reaction or proposal budgets.
+- Four Normal seeds plus each eligible interval start retain generated
+  certificates/quotas. Seed 98765 / 1,500-5,000 m: 92 rows, eight movers,
+  six paired bodies, both orientations, four per interval, maximum per-lane
+  clear streaks [3,3,3,3].
+- Related gate initially **64/1**, 2.648 s: shield fixture incorrectly assumed
+  no banking meant no checkpoint-progress write. Corrected to unchanged
+  wallet/zero banking events plus required Normal checkpoint persistence,
+  preserving full Endless profile identity. Final **65 PASS / 0 FAIL**,
+  **2.864 s**, including both levels' immediate checkpoint and failed-storage
+  tests, Depot HUD/banking/stop timing, scenery/shadows and object cleanup.
+- All **17 individual JavaScript syntax checks PASS**: gameBalance,
+  environments, hazards, trackValidation, trackGenerator, RoutePrototypeScene,
+  DebugManager, industrial, route-audit, depots, roadEnvironment and the six
+  edited tests (depots, sceneLifecycle, rendering, controlledMovers, sectors,
+  hazards).
+- Real Phaser ephemeral-profile smoke: Forklift fixed through 0.499985
+  canonical seconds, then moves by 0.599982; Sweeper stays in lane with exactly
+  0.5 relative road scroll. Same approved texture, one amber beacon each.
+  L1/L2 Normal and Endless stop at their real gates with canopy/cab Y=684
+  (actual drawn canopy checked), HUD/chevrons hidden. No page errors; saved
+  localStorage unchanged. Inspection page restored to ordinary main menu.
+
+All six maintained docs/ledger synchronized. No full repository test/build,
+10,000-encounter gate, push, deployment, save reset or playable future level.
+Human/mobile/playtesting remains **PENDING**. **Next slice: Slice 5 audio and
+haptics**, followed by Slice 6 persistence/full tests/build at its proper gate.
+The existing unrelated fresh-profile hand_precision fixture mismatch remains
+recorded; these focused passes are not a full-suite or commercial acceptance claim.
+
+## Previous execution: Depot site cutoff and canopy stop PASS; Slice 4 in progress
+
+Owner follow-up: chevrons must end at the Depot site; the truck must stop under
+the canopy rather than roll beyond it. Previously the 1.5 s deceleration began
+at the bay centre, so integrated travel necessarily overshot the artwork.
+
+- `depots.js` derives `depotDockingStart` from the existing smoothstep stopping
+  integral and live speed curve, without adding a balance distance.
+- Scene braking begins on the approach; it integrates the remaining distance
+  over the unchanged 1.5 s and finishes exactly at the bay centre. Late-frame
+  entry uses its remaining distance, not a fixed extra roll. Sector state is
+  synchronized at the stop. Center bypass still counts only at the real gate.
+- `roadEnvironment.js` clips every chevron segment at the world-space site,
+  retaining the Depot-side-only 60 m notice and existing lifetime owner.
+- Related fixtures in `depots.test.js`, `sceneLifecycle.test.js` and
+  `rendering.test.js` assert the new braking line, canopy alignment, exact
+  30/60/120 Hz duration, clipped segments, manual banking and hidden stopped HUD.
+
+```powershell
+node --test --test-name-pattern='depot|Depot|docking|bank|Bank|HUD' tests\depots.test.js tests\depotEconomy.test.js tests\sceneLifecycle.test.js tests\rendering.test.js
+```
+
+Initial **47/3**, 2.782 s: VM old-sector assumption and two old threshold-only
+fixtures. One focused correction: **49/0**, 2.853 s; final including renamed
+canopy test **50/0**, 2.771 s. Real Phaser ephemeral-profile smoke confirms
+Level 1/2 Normal stop at 500 m, Endless at 1,000 m; all cab/canopy Y=684,
+stopped HUD/chevrons hidden and stored localStorage unchanged. Six maintained
+docs updated. No full suite/build, push, deployment or save reset.
+
+Slice 4 remains in progress, not certified. Owner explicitly chose distinct
+lateral Forklift / single-lane 0.5x Sweeper using existing art and retained
+Level 1 Sector 2 Dawn. Its baseline required gate was **5/3**, 183.550 s
+(retired Overdrive fixture, old-width boundary, fixed-18m stream fixture).
+Implementation and its first scoped gate are in progress; no Slice 5 advance.
+
 ## Latest execution: near-miss and Depot follow-ups PASS
 
 Latest explicit owner decisions supersede the original Slice 3 auto-banking

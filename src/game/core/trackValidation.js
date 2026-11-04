@@ -82,14 +82,84 @@ function probeClearance(probe, origin, x, levelId, mode) {
   return clearance;
 }
 
+function probeCenter(probe, origin, levelId, mode) {
+  if (!probe.timed) return {centerX: probe.centerX, radius: probe.radius};
+  const elapsed = Math.max(0, routeTimeAtDistance(Math.max(0, probe.sourceDistance +
+    (HAZARD_TRAVEL_PX + origin) * METERS_PER_PIXEL), levelId, mode) - probe.sourceTime);
+  return {centerX: probe.baseX + movingHazardOffset(probe.movement, elapsed), radius: 0};
+}
+
+/** Open x-intervals (ship centre) keeping at least `clearance` px from every probe at this row offset. */
+function freeIntervals(probes, origins, clearance, levelId, mode) {
+  const blocked = [];
+  probes.forEach((probe, index) => {
+    const origin = origins[index];
+    const {centerX, radius} = probeCenter(probe, origin, levelId, mode);
+    for (const part of probe.parts) {
+      const dy = (Math.abs(origin + probe.offsetY + part.y) - part.halfHeight - playerHalfHeightPx) * probe.scale;
+      if (dy >= clearance) continue;
+      const reach = dy > 0 ? Math.sqrt(clearance * clearance - dy * dy) : clearance;
+      const half = part.halfWidth + radius + playerHalfWidthPx + reach;
+      blocked.push([centerX + part.x - half, centerX + part.x + half]);
+    }
+  });
+  blocked.sort((a, b) => a[0] - b[0]);
+  const free = [];
+  let cursor = minX;
+  for (const [start, end] of blocked) {
+    if (start > cursor) free.push([cursor, Math.min(start, maxX)]);
+    cursor = Math.max(cursor, end);
+    if (cursor >= maxX) break;
+  }
+  if (cursor <= maxX) free.push([cursor, maxX]);
+  return free.filter(([start, end]) => end >= start && start <= maxX);
+}
+
+/**
+ * Geometry-only openness (owner rule): the generator guarantees an open corridor, not that a given truck
+ * can steer it in time. The ship may slide sideways freely, so a transition is open when a continuous
+ * corridor keeping `minimumClearancePx` from every hitbox links the `from` lane centre to the `to` lane
+ * centre across the whole row gap. Upgrades, not the generator, decide who can actually make the move.
+ */
+function geometricTransition(previous, next, from, to, speed, {hz, initialState, minimumClearancePx,
+  levelId, mode}) {
+  const clearance = minimumClearancePx ?? GAME_BALANCE.routes.track.routeValidation.minimumClearancePx;
+  const gap = previous.spacingPx;
+  const steps = Math.ceil(gap / speed * hz);
+  const previousProbes = [...previous.hazards, ...(previous.intermediates ?? [])]
+    .map(hazard => clearanceProbe(hazard, previous, levelId, mode));
+  const nextProbes = [...next.hazards, ...(next.intermediates ?? [])]
+    .map(hazard => clearanceProbe(hazard, next, levelId, mode));
+  const probes = [...previousProbes, ...nextProbes];
+  const startX = initialState?.x ?? LANE_CENTERS[from];
+  const targetX = LANE_CENTERS[to];
+  let reachable = null;
+  for (let step = 0; step <= steps; step++) {
+    const y = HAZARD_ROW_ENVELOPE_PX / 2 + step * gap / steps;
+    const origins = probes.map((_, index) => index < previousProbes.length ? y : y - gap);
+    const free = freeIntervals(probes, origins, clearance, levelId, mode);
+    reachable = reachable === null
+      ? free.filter(([start, end]) => start <= startX && startX <= end)
+      : free.filter(([start, end]) => reachable.some(([a, b]) => start <= b && a <= end));
+    if (!reachable.length) return {completed: false, clearance: -Infinity, state: {...initialState}};
+  }
+  const completed = reachable.some(([start, end]) => start <= targetX && targetX <= end);
+  return {completed, clearance: completed ? clearance : -Infinity,
+    state: completed ? {x: targetX, velocity: 0} : {...initialState}};
+}
+
 /** A complete transition, including the previous group's downstream intermediate. */
 export function driveTrackTransition(previous, next, from, to, speed, {
   handling = WORST_CASE_HANDLING, hz = simulationHz,
   initialState = {x: LANE_CENTERS[from], velocity: 0},
   load = loadedCapacity, capacity = loadedCapacity, loadRelief = 0, vehicleMultiplier = 1,
   reactionSeconds = 0,
-  levelId = 'level1', mode = 'normal',
+  levelId = 'level1', mode = 'normal', geometric = false, minimumClearancePx,
 } = {}) {
+  if (geometric) {
+    return geometricTransition(previous, next, from, to, speed,
+      {hz, initialState, minimumClearancePx, levelId, mode});
+  }
   let state = {...initialState};
   let clearance = Infinity;
   const gap = previous.spacingPx;
@@ -118,9 +188,15 @@ export function driveTrackTransition(previous, next, from, to, speed, {
     clearance, state};
 }
 
-/** Maximin certified path: every gate state is settled, so transitions compose without teleporting. */
+/**
+ * Maximin certified path: every gate state is settled, so transitions compose without teleporting.
+ * `departureDelaysSeconds` lets a transition begin its turn later than the reaction time, modelling a
+ * driver with faster steering who waits for the previous gate to pass instead of turning eagerly.
+ */
 export function validateTrackSequence(rows, speed, options = {}) {
   const minimumClearance = options.minimumClearancePx ?? 0;
+  const departureDelays = options.geometric ? [0] : options.departureDelaysSeconds ?? [0];
+  const reaction = options.reactionSeconds ?? 0;
   let paths = (options.initialStates ?? rows[0].safeLanes.map(lane =>
     ({lane, x: LANE_CENTERS[lane], velocity: 0})))
     .map(state => ({lane: state.lane, state: {x: state.x, velocity: state.velocity},
@@ -131,11 +207,14 @@ export function validateTrackSequence(rows, speed, options = {}) {
     for (const to of rows[i].safeLanes) {
       for (const path of paths) {
         if (Math.abs(path.lane - to) > maximumLaneChangesPerRow) continue;
-        const result = driveTrackTransition(rows[i - 1], rows[i], path.lane, to,
-          typeof speed === 'function' ? speed(i) : speed, {...options, initialState: path.state});
-        if (result.completed && result.clearance >= minimumClearance) candidates.push({lane: to, lanes: [...path.lanes, to],
-          state: result.state,
-          clearance: Math.min(path.clearance, result.clearance)});
+        for (const delay of path.lane === to ? [0] : departureDelays) {
+          const result = driveTrackTransition(rows[i - 1], rows[i], path.lane, to,
+            typeof speed === 'function' ? speed(i) : speed,
+            {...options, reactionSeconds: reaction + delay, initialState: path.state});
+          if (result.completed && result.clearance >= minimumClearance) candidates.push({lane: to, lanes: [...path.lanes, to],
+            state: result.state,
+            clearance: Math.min(path.clearance, result.clearance)});
+        }
       }
 
     }

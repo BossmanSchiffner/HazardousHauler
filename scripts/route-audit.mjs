@@ -1,5 +1,5 @@
 import {pathToFileURL} from 'node:url';
-import {createTrackStream, resumeSpawnDelay, DENSITY_TARGETS} from '../src/game/core/trackGenerator.js';
+import {createTrackStream, depotResumeFirstDistance, DENSITY_TARGETS} from '../src/game/core/trackGenerator.js';
 import {routeSpeedAtDistance, METERS_PER_PIXEL} from '../src/game/core/economy.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, sectorAtDistance} from '../src/game/core/sectors.js';
 import {hasStraightRoute, straightRouteWidth, hazardBlockedIntervals, LANE_CENTERS, hazardGeometry,
@@ -73,10 +73,7 @@ export function sampleRoute(seed, end = GAME_BALANCE.routes.level1.finishDistanc
       if (enterDepots) {
         distance = nextDepot;
         stream.resetAfterDepot(distance);
-        const speed = routeSpeedAtDistance(distance, levelId, mode);
-        const travel = HAZARD_TRAVEL_PX - HAZARD_ROW_ENVELOPE_PX / 2;
-        distance += Math.max(resumeSpawnDelay(speed, travel) * speed * METERS_PER_PIXEL,
-          protectedUntil - distance - travel * METERS_PER_PIXEL);
+        distance = depotResumeFirstDistance(distance);
       }
       nextDepot = nextDepotAfter(nextDepot, DEPOT_RULES, levelId, mode).distance;
     }
@@ -302,7 +299,8 @@ export function auditLevel2Routes(seeds = [1, 153, 1234, 98765]) {
       const speed = routeSpeedAtDistance(row.spawnDistance + HAZARD_TRAVEL_PX * METERS_PER_PIXEL, 'level2');
       const baseline = supportedTrackProfiles('level2').find(profile => profile.id === 'standard-c0-s0-mid');
       for (const hz of GAME_BALANCE.routes.track.routeValidation.sampleHz) {
-        if (!validateTrackSequence(sequence, speed, {...baseline, levelId: 'level2', hz}).completed) {
+        if (!validateTrackSequence(sequence, speed, {...baseline, levelId: 'level2', hz, geometric: true,
+          minimumClearancePx: GAME_BALANCE.routes.track.routeValidation.minimumClearancePx}).completed) {
           throw new Error(`Unreachable Level 2 chunk ${row.chunkId} with seed ${seed}`);
         }
       }
@@ -313,9 +311,11 @@ export function auditLevel2Routes(seeds = [1, 153, 1234, 98765]) {
       movingBySector[sectorAtDistance(sequence[0].spawnDistance, 'level2').id] += count;
     }
   }
+  const moverIntroduction = GAME_BALANCE.routes.movingHazards.firstSector - 1;
   if (movingHazards === 0 || certifiedChunks === 0 ||
-      Object.values(movingBySector).some(count => count === 0)) {
-    throw new Error('Level 2 audit did not encounter certified moving-hazard routes in every sector');
+      IMPLEMENTED_LEVELS.level2.some((sector, index) =>
+        (movingBySector[sector.id] > 0) !== (index >= moverIntroduction))) {
+    throw new Error('Level 2 audit did not encounter certified moving-hazard routes in every Forklift sector');
   }
   return {seeds, totalGroups, certifiedChunks, movingHazards, movingBySector, sectorGroups,
     sideObstacleRuns};
@@ -329,7 +329,7 @@ export function auditRoutes(seeds = [1, 153, 1234, 98765]) {
     routeRequiredLaneChanges: 0,
     fourRowWindows: 0, straightFourRowWindows: 0, longStructures: 0,
     betaPressureTransitions: 0, betaTransitions: 0, stretchEncounters: [0, 0, 0, 0],
-    builds: Object.fromEntries(['worst', 'baseline', 'upgraded'].map(id => [id, {completed: 0, minimumClearancePx: Infinity}])),
+    builds: Object.fromEntries(['open', 'worst', 'baseline', 'upgraded'].map(id => [id, {completed: 0, minimumClearancePx: Infinity}])),
   }]));
   let totalGroups = 0;
   const level1SideObstacleRuns = [];
@@ -406,16 +406,21 @@ export function auditRoutes(seeds = [1, 153, 1234, 98765]) {
       }
       if (sequence.some(r => r.safeLanes.every(lane => lane === 0 || lane === 3))) s.outer++;
       const speed = routeSpeedAtDistance(row.spawnDistance + HAZARD_TRAVEL_PX * METERS_PER_PIXEL);
-      for (const [id, handling] of [['worst', WORST_CASE_HANDLING], ['baseline', 0], ['upgraded', 0.32]]) {
+      // 'open' is the owner's mandatory geometric certificate; the steering builds are characterisation only.
+      for (const [id, handling] of [['open', null], ['worst', WORST_CASE_HANDLING], ['baseline', 0], ['upgraded', 0.32]]) {
         const baseline = supportedTrackProfiles().find(profile => profile.id === 'standard-c0-s0-mid');
         const entry = approach?.emitted ? approach : {...approach, hazards: approach?.hazards
           .filter(hazard => hazard.continuation) ?? [], intermediates: [], safeLanes: [0, 1, 2, 3],
           spacingPx: approach?.spacingPx ?? HAZARD_TRAVEL_PX + HAZARD_ROW_ENVELOPE_PX / 2};
-        const result = validateTrackSequence(id === 'baseline' ? [entry, ...sequence] : sequence,
-          i => routeSpeedAtDistance(sequence[id === 'baseline' ? i - 1 : i].plannedDistance +
+        const anchored = id === 'baseline' || id === 'open';
+        const result = validateTrackSequence(anchored ? [entry, ...sequence] : sequence,
+          i => routeSpeedAtDistance(sequence[anchored ? i - 1 : i].plannedDistance +
           (HAZARD_TRAVEL_PX + HAZARD_ROW_ENVELOPE_PX / 2) * METERS_PER_PIXEL),
-        id === 'baseline' ? {...baseline, hz: 60, initialStates:
-          row.certificates[GAME_BALANCE.routes.track.routeValidation.sampleHz.indexOf(60)].entries}
+        id === 'open' ? {geometric: true, hz: GAME_BALANCE.routes.track.routeValidation.sampleHz[0],
+          minimumClearancePx: GAME_BALANCE.routes.track.routeValidation.minimumClearancePx,
+          initialStates: row.certificates[0].entries}
+          : id === 'baseline' ? {...baseline, hz: 60, initialStates:
+          row.certificates[0].entries}
           : {handling, hz: 60});
         if (result.completed) s.builds[id].completed++;
         s.builds[id].minimumClearancePx = Math.min(s.builds[id].minimumClearancePx, result.clearance);

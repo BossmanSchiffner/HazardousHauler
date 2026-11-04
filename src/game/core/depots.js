@@ -17,9 +17,9 @@ export const DEPOT_RULES = Object.freeze({
 const transitionsFor = levelId => IMPLEMENTED_LEVELS[levelId].slice(1).map(sector => sector.startsAt);
 export const MOVER_WINDOW_RULES = DEPOT_RULES;
 
-/** Full-road loaded steering plus reaction, measured at the fastest approach speed. */
+/** Clean road before every Depot: a fixed owner-set distance, independent of speed. */
 export function depotApproachMeters(distance, levelId = 'level1', mode = 'normal') {
-  return routeSpeedAtDistance(distance, levelId, mode) * METERS_PER_PIXEL * DEPOT_RULES.approachSeconds;
+  return DEPOT_RULES.approachMeters;
 }
 
 /** Half-open banking intervals; Normal's final interval ends at finish settlement. */

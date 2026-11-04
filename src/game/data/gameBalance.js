@@ -41,32 +41,33 @@ const balance = {
   },
   routes: {
     metersPerPixel: 0.06,
+    finishClearanceMeters: 10,
     continuous: {baselineLevelId: 'level1', baselineSector: 2,
       depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40},
     level1: {
       challengeProfileId: 'industrial',
-      sectorEndsMeters: [500, 1000, 2000, 4000],
+      sectorEndsMeters: [1000, 2000, 3000, 4000],
       sectorThemeIds: ['industrial', 'industrial', 'industrial', 'industrial'],
       speed: {startPxPerSecond: 320, endPxPerSecond: 410, sectorStartsPxPerSecond: [320, 350, 380, 410]},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
-      challengeChance: [0.55, 0.65, 0.75, 0.85, 1],
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
       sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
-      openingLesson: {durationMeters: 300, challengeChance: 0.3},
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
     },
     level2: {
       challengeProfileId: 'dustlands',
-      sectorEndsMeters: [500, 1500, 3000, 5000],
+      sectorEndsMeters: [1000, 2000, 3000, 4000],
       sectorThemeIds: ['dustlands', 'dustlands', 'dustlands', 'dustlands'],
-      openingSpeedSource: {levelId: 'level1', distanceMeters: 500},
+      openingSpeedSource: {levelId: 'level1', distanceMeters: 1000},
       speed: {startPxPerSecond: 350, endPxPerSecond: 440, sectorStartsPxPerSecond: [350, 380, 410, 440]},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
-      challengeChance: [0.55, 0.65, 0.75, 0.85, 1],
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
       sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
-      openingLesson: {durationMeters: 300, challengeChance: 0.3},
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
     },
     movingHazards: {
       eligibleLevelIds: ['level2'],
@@ -101,8 +102,13 @@ const balance = {
       laneCentersPx: [86, 159, 232, 305],
       minRowSpacingPx: 160,
       rowGapMargin: {start: 1.3, end: 1.1},
+      // Owner rule: rows are spaced for the best possible truck (max steering, lightest chassis load)
+      // plus this reaction padding. Stock trucks are expected to fail, upgrade and retry.
+      rowReactionSeconds: 0.5,
       maxLaneChangesPerRow: 1,
       betaSlots: [0.55, 0.75],
+      // Owner rule: a lane that opens stays open 2..3 consecutive rows before it is threatened again.
+      minimumClearEvents: {normal: 2, continuous: 2},
       maximumClearEvents: {normal: 3, continuous: 3},
       encounters: {
         candidateBudget: 8, recentLayouts: 4,
@@ -116,11 +122,17 @@ const balance = {
           normal: ['split_gate', 'side_squeeze', 'static_chicane', 'offset_pair', 'risk_reward'],
           pressure: ['offset_pair', 'narrow_corridor', 'side_squeeze', 'static_chicane', 'risk_reward'],
         },
+        // Owner-approved steering demand: a "dash" forces at least dashPx of sideways travel
+        // (about a two-lane switch) even for the laziest line through real hitboxes. Shares are
+        // per-sector targets among non-recovery, non-mover encounters; selection preference only.
+        steeringDemand: {dashPx: 37, sectorDashShare: [0.30, 0.45, 0.60, 0.75]},
       },
       routeValidation: {
         baseline: {vehicleId: 'standard', loadFraction: 0.5},
+        // 'geometric': certify only that an open corridor exists (>= minimumClearancePx); no steering model.
+        certification: 'geometric',
         edgeMarginPx: 30, simulationHz: 120,
-        sampleHz: [30, 60, 120], minimumClearancePx: 6, handlingCases: [0, 0.32],
+        sampleHz: [120], minimumClearancePx: 6, handlingCases: [0, 0.32],
         hazardClearDistancePx: 40,
       },
     },
@@ -134,12 +146,13 @@ const balance = {
     },
     depot: {
       loopMeters: 450,
-      approachSeconds: 2,
+      // Owner rule: clean road for the last 50 m before a Depot; obstacles resume within 25 m after it.
+      approachMeters: 50,
       exitMeters: 18,
       noticeMeters: 60,
       announcementMeters: 75,
       entranceRevealMeters: 28,
-      resumeGraceSeconds: 2,
+      resumeMeters: 25,
       dockingSeconds: 1.5,
       launchSeconds: 1,
       normalSkipBonusStep: 0.20,

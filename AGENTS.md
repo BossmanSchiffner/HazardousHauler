@@ -1,4 +1,4 @@
-# Project Instructions - Hazardous Hauler
+# Project Instructions - Hazardous Haul
 
 ## Sources and scope
 

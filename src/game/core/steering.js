@@ -77,14 +77,15 @@ function clamp(value, min, max) {
  * Seconds for a truck resting on a lane center to move `clearDistance` px
  * toward a neighbouring lane `laneSpacing` px away (zero reaction time).
  */
-export function laneClearTimeSeconds({load, capacity, handling = 0, loadRelief = 0, laneSpacing, clearDistance}) {
+export function laneClearTimeSeconds({load, capacity, handling = 0, loadRelief = 0, vehicleMultiplier = 1,
+  laneSpacing, clearDistance}) {
   const dt = 1 / laneChangeSimulationHz;
   let state = {x: 0, velocity: 0};
   for (let time = 0; time < laneChangeMaximumSeconds; time += dt) {
     if (state.x >= clearDistance) return time;
     state = advanceSteering({
       ...state, targetX: laneSpacing, dt, minX: -laneSpacing, maxX: laneSpacing * 2,
-      load, capacity, handling, loadRelief,
+      load, capacity, handling, loadRelief, vehicleMultiplier,
     });
   }
   throw new Error('Lane change never clears the requested distance');

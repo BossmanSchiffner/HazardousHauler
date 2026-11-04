@@ -1,4 +1,4 @@
-import {createRoutePlanner} from './routeStreamPlanner.js';
+import {createRoutePlanner, ROUTE_STREAM_HEARTBEAT_MS} from './routeStreamPlanner.js';
 
 // Runs the unchanged generator off the render thread. Producers plan ahead; followers mirror consumed calls.
 let planner = null;
@@ -6,6 +6,15 @@ let producing = false;
 let allowance = 0;
 let failed = false;
 let pending = null;
+let lastBeat = 0;
+
+// A long plan or log replay is busy, not dead: tell the stall watchdog this worker is alive.
+const heartbeat = () => {
+  const time = performance.now();
+  if (time - lastBeat < ROUTE_STREAM_HEARTBEAT_MS) return;
+  lastBeat = time;
+  self.postMessage({type: 'alive'});
+};
 
 const fail = (error, index) => {
   failed = true;
@@ -36,9 +45,12 @@ self.onmessage = ({data}) => {
   if (failed) return;
   try {
     if (data.type === 'init') {
-      planner = createRoutePlanner(data.seed, data.levelId, data.mode);
+      planner = createRoutePlanner(data.seed, data.levelId, data.mode, {onPlanningProgress: heartbeat});
     } else if (data.type === 'apply') {
-      for (const call of data.calls) planner.apply(call);
+      for (const call of data.calls) {
+        heartbeat();
+        planner.apply(call);
+      }
     } else if (data.type === 'produce') {
       if (data.reset !== undefined) planner.apply({kind: 'reset', distance: data.reset});
       planner.begin(data);

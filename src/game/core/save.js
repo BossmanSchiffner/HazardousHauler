@@ -10,6 +10,8 @@ import {recordSectorProgress} from './progression.js';
 import {IMPLEMENTED_LEVELS} from './sectors.js';
 
 const KEY = 'cargo-run-prototype-profile-v1'; // storage key kept so existing saves are found
+let unreadableSave = null;
+let saveReadFailed = false;
 export const SCHEMA_VERSION = 11;
 const LEVEL_IDS = GAME_BALANCE.progression.levelIds;
 
@@ -86,7 +88,9 @@ export function migrateV1(data) {
       standard: {
         ...defaultShipState('standard'),
         unlockedSlotCount: STARTING_SLOT_COUNT,
-        equippedModuleIds: [...STARTER_MODULE_IDS, ...(cargoCapacityRank > 0 ? [CARGO_CAPACITY_ID] : [])],
+        // v1 handling was always active, so migrated Precision must stay equipped to never weaken the save.
+        equippedModuleIds: [...new Set(['hand_precision', ...STARTER_MODULE_IDS,
+          ...(cargoCapacityRank > 0 ? [CARGO_CAPACITY_ID] : [])])].slice(0, STARTING_SLOT_COUNT),
       },
     },
     levelProgress: defaultProfile().levelProgress,
@@ -265,31 +269,66 @@ export function normalizeProfile(input) {
   };
 }
 
-export function loadProfile() {
+export function loadProfile(onWarning) {
+  unreadableSave = null;
+  saveReadFailed = false;
   let raw = null;
   try {
     raw = localStorage.getItem(KEY);
-    if (!raw) return defaultProfile();
+  } catch (error) {
+    saveReadFailed = true;
+    const message = 'Saved progress could not be read. Saving is paused; check browser storage and reload.';
+    console.warn(message, error);
+    onWarning?.(message);
+    return defaultProfile();
+  }
+  if (!raw) return defaultProfile();
+  try {
     const data = JSON.parse(raw);
     if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION].includes(data?.schemaVersion)) {
-      backupUnreadable(raw);
-      return defaultProfile();
+      throw new Error('Unsupported local save schema');
     }
     return normalizeProfile(data);
   } catch (error) {
-    console.warn('Could not read local prototype save; loading defaults.', error);
-    backupUnreadable(raw);
+    unreadableSave = raw;
+    const backedUp = backupUnreadable(raw);
+    if (backedUp) unreadableSave = null;
+    const message = backedUp
+      ? 'Saved progress could not be loaded. The original was backed up; using a temporary fresh profile.'
+      : 'Saved progress could not be loaded or backed up. The original is preserved; saving is blocked until backup succeeds.';
+    console.warn(message, error);
+    onWarning?.(message);
     return defaultProfile();
   }
 }
 
 /** Keeps a copy of a save this version can't read, so a later version (or a person) can recover it. */
 function backupUnreadable(raw) {
-  if (!raw) return;
-  try { localStorage.setItem(`${KEY}-unreadable-backup`, raw); } catch { /* storage full or blocked */ }
+  try {
+    const baseKey = `${KEY}-unreadable-backup`;
+    let backupKey = baseKey, suffix = 0;
+    let existing = localStorage.getItem(backupKey);
+    while (existing !== null && existing !== raw) {
+      backupKey = `${baseKey}-${++suffix}`;
+      existing = localStorage.getItem(backupKey);
+    }
+    if (existing !== raw) localStorage.setItem(backupKey, raw);
+    return true;
+  } catch (error) {
+    console.warn('Could not back up unreadable local save; original progress will not be overwritten.', error);
+    return false;
+  }
 }
 
 export function saveProfile(profile) {
+  if (saveReadFailed) {
+    console.warn('Local prototype save blocked after a read failure; reload once browser storage is available.');
+    return false;
+  }
+  if (unreadableSave !== null) {
+    if (!backupUnreadable(unreadableSave)) return false;
+    unreadableSave = null;
+  }
   try {
     localStorage.setItem(KEY, JSON.stringify(profile));
     return true;

@@ -22,8 +22,8 @@ import {
   CARGO_COLLISION_DISTANCE_PX,
   createSeededRandom,
   createTrackStream,
+  depotResumeFirstDistance,
   hazardsBeforeDepot,
-  resumeSpawnDelay,
   rowSpacingAtSpeed,
   WORST_CASE_LANE_CLEAR_SECONDS,
 } from '../src/game/core/trackGenerator.js';
@@ -62,7 +62,7 @@ export function simulateRun({seed, stats, player, greed = 0.75, maxDistance = RO
   let shieldReady = shieldCooldown > 0, shieldTimer = 0;
   let x = LANES[1] + 36, vx = 0, targetX = x, distance = 0, time = 0;
   let hull = stats.hull, invulnerable = 0, load = 0, value = 0,
-    spawnTimer = GAME_BALANCE.routes.spawning.initialRowDelaySeconds;
+    spawnTimer = GAME_BALANCE.routes.spawning.initialRowDelaySeconds, resumeLeadMeters = 0;
   let cargoItems = [];
   let runEconomy = createRunEconomy();
   const metrics = {firstFullHoldSeconds: null, sectorSeconds: {}};
@@ -97,15 +97,18 @@ export function simulateRun({seed, stats, player, greed = 0.75, maxDistance = RO
 
     spawnTimer -= DT;
     if (spawnTimer <= 0) {
-      const r = stream.nextRow(distance);
+      const leadPx = resumeLeadMeters / METERS_PER_PIXEL;
+      const plannedDistance = distance - resumeLeadMeters;
+      resumeLeadMeters = 0;
+      const r = stream.nextRow(plannedDistance);
       rows.push({
-        y: SPAWN_Y, hazards: (hazardsBeforeDepot(r, distance, nextDepot, protectedUntil) ? [...r.hazards, ...r.intermediates] : [])
+        y: SPAWN_Y + leadPx, hazards: (hazardsBeforeDepot(r, plannedDistance, nextDepot, protectedUntil) ? [...r.hazards, ...r.intermediates] : [])
           .filter(h => !h.continuation).map(hazard => ({...hazard, alive: true})), safe: r.safeLanes,
         pickups: r.pickups.map(p => ({...p, alive: true})),
         noticeY: SHIP_Y - Math.max(120, gauss(rand, player.notice, player.noticeSd)),
         readyAt: null, lane: null, dodgeDelay: gauss(rand, player.dodge, player.dodgeSd),
       });
-      spawnTimer += r.spacingPx / scroll;
+      spawnTimer += (r.spacingPx - leadPx) / scroll;
     }
 
     // Perception and decision: one lane per row, at most one lane change from the previous decision.
@@ -158,9 +161,9 @@ export function simulateRun({seed, stats, player, greed = 0.75, maxDistance = RO
       rows.length = 0;
       x = targetX = (ROAD_LEFT + ROAD_RIGHT) / 2;
       vx = 0;
-      const travel = SHIP_Y - HAZARD_ROW_ENVELOPE_PX / 2 - SPAWN_Y;
-      spawnTimer = Math.max(resumeSpawnDelay(scroll, travel),
-        (protectedUntil - distance - travel * METERS_PER_PIXEL) / (scroll * METERS_PER_PIXEL));
+      // Mirrors the scene: the first resume row is already on the road and arrives DEPOT_RESUME_METERS on.
+      resumeLeadMeters = distance - depotResumeFirstDistance(distance);
+      spawnTimer = 0;
     }
 
     for (const row of rows) {

@@ -314,12 +314,14 @@ const pressureParts = hazard => {
     halfWidth: geometry.hitX - GAME_BALANCE.hazards.playerHalfWidthPx,
     halfHeight: geometry.hitY - GAME_BALANCE.hazards.playerHalfHeightPx}];
 };
-const bodyOccupiesPlane = (body, distance) =>
-  (body.lifetime?.clearedAtDistance ?? Infinity) >= distance &&
+const bodyOccupiesPlane = (body, distance) => bodyOccupiesWindow(body, distance, distance);
+/** A body threatens an event if any of its parts overlaps the event's [from, to] window. */
+const bodyOccupiesWindow = (body, from, to) =>
+  (body.lifetime?.clearedAtDistance ?? Infinity) >= from &&
   pressureParts(body.hazard).some(part => {
     const center = body.center - part.y * METERS_PER_PIXEL;
-    return Math.abs(distance - center) <
-      (part.halfHeight + GAME_BALANCE.hazards.playerHalfHeightPx) * METERS_PER_PIXEL;
+    const extent = (part.halfHeight + GAME_BALANCE.hazards.playerHalfHeightPx) * METERS_PER_PIXEL;
+    return center - extent < to && center + extent > from;
   });
 
 /** Project actual physical bodies once; Alpha and each occupied Beta slot remain separate events. */
@@ -373,7 +375,8 @@ export function projectPhysicalEvents(rows, {levelId = 'level1', mode = 'normal'
 export function eventPressure(event, bodies, {levelId = 'level1', mode = 'normal'} = {}) {
   const halfWidth = GAME_BALANCE.hazards.playerHalfWidthPx;
   const halfHeight = GAME_BALANCE.hazards.playerHalfHeightPx;
-  const active = bodies.filter(body => bodyOccupiesPlane(body, event.distance));
+  const active = bodies.filter(body =>
+    bodyOccupiesWindow(body, event.from ?? event.distance, event.to ?? event.distance));
   const points = new Set([event.from, event.distance, event.to]);
   // Every transition of a pressure mask occurs at a physical Y boundary or a
   // triangular mover crossing a ship-expanded lane boundary.
@@ -447,13 +450,28 @@ export function advancePressureHistory(history, events, {mode = 'normal'} = {}) 
   const limits = GAME_BALANCE.routes.track.maximumClearEvents;
   if (!Object.hasOwn(limits, mode)) throw new Error(`Unknown clear-event mode ${mode}`);
   const limit = limits[mode];
+  // Owner rule: a lane that opens stays open for at least this many rows before it is threatened.
+  const minimum = GAME_BALANCE.routes.track.minimumClearEvents?.[mode] ?? 1;
   const streaks = [...history];
   const maximum = [...history];
   const violations = [];
-  for (const event of events) for (let lane = 0; lane < streaks.length; lane++) {
-    streaks[lane] = event.threatenedLanes[lane] ? 0 : streaks[lane] + 1;
+  // Streaks count rows: an Alpha event and the Beta events of the same row form one row.
+  const groups = [];
+  for (const event of events) {
+    const last = groups.at(-1);
+    if (last && event.rowIndex !== undefined && last[0].rowIndex === event.rowIndex &&
+        last[0].sourceDistance === event.sourceDistance) last.push(event);
+    else groups.push([event]);
+  }
+  for (const group of groups) for (let lane = 0; lane < streaks.length; lane++) {
+    const threat = group.find(event => event.threatenedLanes[lane]);
+    if (threat && streaks[lane] > 0 && streaks[lane] < minimum) {
+      violations.push({distance: threat.distance, lane, streak: streaks[lane], short: true,
+        rowIndex: threat.rowIndex});
+    }
+    streaks[lane] = threat ? 0 : streaks[lane] + 1;
     maximum[lane] = Math.max(maximum[lane], streaks[lane]);
-    if (streaks[lane] > limit) violations.push({distance: event.distance, lane, streak: streaks[lane]});
+    if (streaks[lane] > limit) violations.push({distance: group[0].distance, lane, streak: streaks[lane]});
   }
   return {streaks, maximum, violations, acceptable: violations.length === 0};
 }
