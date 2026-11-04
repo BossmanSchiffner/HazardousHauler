@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import titleVideoUrl from '../../../../art-direction/LoadIn_Screen.mp4?url';
-import runMusicUrl from '../../../../art-direction/BG_Music.mp3?url';
-import logoUrl from '../../../../art-direction/GameLogo.svg?url';
+import titleVideoUrl from '../../../art-direction/LoadIn_Screen.mp4?url';
+import runMusicUrl from '../../../art-direction/BG_Music.mp3?url';
+import logoUrl from '../../../art-direction/GameLogo.svg?url';
 import {BUILD_ID} from '../data/build.js';
 import {loadProfile, saveProfile} from '../core/save.js';
 import {DEPOT_APPROACH_HINT_M, HINTS, hintForEvent, markHintSeen} from '../core/onboarding.js';

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/*.log
+android/
+ios/
+*.keystore
+*.jks
+/probe-output.txt
+/test-output.txt
