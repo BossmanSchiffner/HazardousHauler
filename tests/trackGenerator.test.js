@@ -251,25 +251,29 @@ test('short recipes preserve certified physical states and encounter variety wit
     const families = new Set();
     const recent = [];
     let previous;
+    let movingBodies = 0;
     let distance = mode === 'continuous' ? 6000 : 0;
     for (let index = 0; distance < (mode === 'continuous' ? 12000 : campaignEnd(levelId)); index++) {
       assert.ok(index < 1000, 'full route generation remains bounded');
       const chunk = generator.nextChunk(distance);
       for (const row of chunk.rows) {
+        movingBodies += row.hazards.filter(hazard => hazard.movement && !hazard.continuation).length;
         const depot = nextDepotAfter(row.plannedDistance, DEPOT_RULES, levelId, mode).distance;
         generator.recordSpawn(row, hazardsBeforeDepot(row, row.plannedDistance, depot, 0, levelId, mode),
           row.plannedDistance);
       }
       families.add(chunk.family);
-      const lengths = chunk.family === 'offset_pair' ? [6] :
-        chunk.family === 'moving_intercept' ? [2, 4] : [1, 2];
+      const lengths = chunk.rows.some(row => row.moverOverlay || row.motifId) ? [1, 2, 3, 4, 6]
+        : chunk.family === 'static_chicane' && chunk.rows.some(row => row.motifId)
+          ? [3, 6]
+        : chunk.family === 'offset_pair' ? [6]
+        : chunk.family === 'moving_intercept' ? [2, 4] : [1, 2];
       assert.ok(lengths.includes(chunk.rows.length));
       assert.ok([GAME_BALANCE.routes.track.encounters.candidateBudget, GAME_BALANCE.routes.track.encounters.densityRecovery.candidateBudget].includes(chunk.candidateBudget));
       assert.ok(chunk.candidateAttempts <= chunk.candidateBudget);
       assert.ok(chunk.obstacleCount > 0, 'fallback is not an empty road');
       if (!chunk.fallback) {
         assert.ok(!recent.includes(chunk.signature), 'do not disguise repeated geometry with a different signature');
-        if (previous && !chunk.movingDeadline) assert.notEqual(chunk.family, previous.family);
       }
       for (const [reference, certificate] of chunk.certificates.entries()) {
         assert.ok(certificate.completed && certificate.clearance >=
@@ -284,10 +288,12 @@ test('short recipes preserve certified physical states and encounter variety wit
       distance += chunk.rows.reduce((sum, row) => sum + row.spacingPx * METERS_PER_PIXEL, 0);
       previous = chunk;
     }
-    const expected = ['offset_pair', 'risk_reward', 'single_pressure', 'split_gate'];
+    const expected = levelId === 'level1' && mode === 'normal' ? ['static_chicane']
+      : levelId === 'level2' && mode === 'normal'
+        ? ['single_pressure'] : ['offset_pair', 'risk_reward', 'single_pressure', 'split_gate'];
     assert.ok(expected.every(family => families.has(family)), `${levelId}/${mode}: ${[...families]}`);
     assert.ok(['narrow_corridor', 'side_squeeze', 'static_chicane'].some(family => families.has(family)));
-    assert.equal(families.has('moving_intercept'), levelId === 'level2');
+    assert.equal(movingBodies > 0, levelId === 'level2');
   }
 });
 

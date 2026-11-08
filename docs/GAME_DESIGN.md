@@ -15,10 +15,9 @@ below without completing the relevant authorized slice.
 
 ## Core loop and controls
 
-New sessions begin on the silent Load-In video, scaled to keep the full frame
-visible in the responsive game viewport. The first touch starts the menu and
-records touch controls; a mouse click or key starts it in desktop mode. No audio
-plays before that first interaction.
+New sessions begin directly on the Main Menu; there is no load-in video or image.
+The first touch records touch controls, while a mouse click or key records
+desktop mode. No audio plays before that first interaction.
 
 Automatic forward travel, continuous lateral steering, four obstacle lanes.
 Collect cargo, trade value against carried weight, choose Depot stops, and buy

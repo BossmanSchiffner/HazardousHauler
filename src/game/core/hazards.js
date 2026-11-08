@@ -57,9 +57,20 @@ export function sideHazardQuota(obstacles, sideObstacles) {
     minimumShare, maximumShare, targetShare};
 }
 
-export function movingHazardQuota(count) {
+export function movingHazardMinimumForInterval(startDistance, endDistance) {
+  if (!Number.isFinite(startDistance) || Number.isNaN(endDistance) || endDistance <= startDistance)
+    throw new Error('Invalid moving-hazard interval');
+  if (endDistance === Infinity) return 0;
+  const {minimumPerWindow} = GAME_BALANCE.routes.movingHazards;
+  return Math.max(2, Math.ceil(minimumPerWindow * (endDistance - startDistance) / 1000));
+}
+
+export function movingHazardQuota(count, minimumPerWindow = GAME_BALANCE.routes.movingHazards.minimumPerWindow) {
   if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid emitted moving-hazard count');
-  const {minimumPerWindow: minimum, maximumPerWindow: maximum} = GAME_BALANCE.routes.movingHazards;
+  if (!Number.isSafeInteger(minimumPerWindow) || minimumPerWindow < 0)
+    throw new Error('Invalid moving-hazard quota minimum');
+  const {maximumPerWindow: maximum} = GAME_BALANCE.routes.movingHazards;
+  const minimum = minimumPerWindow;
   return {count, minimum, maximum, acceptable: count >= minimum && count <= maximum};
 }
 

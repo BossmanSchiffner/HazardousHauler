@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
-import titleVideoUrl from '../../../../art-direction/LoadIn_Screen.mp4?url';
-import runMusicUrl from '../../../../art-direction/BG_Music.mp3?url';
-import logoUrl from '../../../../art-direction/GameLogo.svg?url';
+import runMusicUrl from '@art-direction/BG_Music.mp3?url';
+import logoUrl from '@art-direction/GameLogo.svg?url';
 import {BUILD_ID} from '../data/build.js';
 import {loadProfile, saveProfile} from '../core/save.js';
 import {DEPOT_APPROACH_HINT_M, HINTS, hintForEvent, markHintSeen} from '../core/onboarding.js';
@@ -155,14 +154,12 @@ const UPGRADE_GRID_ORDER = Object.freeze([
   Object.freeze({kind: 'module', id: 'def_shield'}),
   Object.freeze({kind: 'module', id: 'util_impact_pulse'}),
 ]);
-
 export class RoutePrototypeScene extends Phaser.Scene {
   constructor() {
     super({key: 'RoutePrototypeScene'});
   }
 
   preload() {
-    this.load.video('title_screen_video', titleVideoUrl, 'loadeddata', false, true);
     this.load.audio('cargo_run_music', runMusicUrl);
     this.load.image('hazardous_haul_logo', logoUrl);
     preloadStandardHauler(this);
@@ -204,10 +201,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.handleViewportResize(this.scale.gameSize);
 
     this.input.on('pointerdown', pointer => {
-      if (this.phase === 'title') {
-        this.startTitleScreen(pointer.wasTouch ? 'touch' : 'mouse');
-        return;
-      }
+      if (!this.initialInputType) this.initialInputType = pointer.wasTouch ? 'touch' : 'mouse';
       this.beginMenuScroll(pointer);
       this.beginSteering(pointer);
     });
@@ -228,13 +222,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
           point.y <= this.menuScrollBottom) this.scrollMenuBy(deltaY);
     });
     this.steeringKeys = this.input.keyboard?.addKeys('A,D,LEFT,RIGHT');
-    const titleKeyHandler = event => {
-      if (this.phase !== 'title') return;
-      event?.preventDefault?.();
-      this.startTitleScreen('keyboard');
+    const initialKeyHandler = () => {
+      if (!this.initialInputType) this.initialInputType = 'keyboard';
     };
-    this.input.keyboard?.on?.('keydown', titleKeyHandler);
-    this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown', titleKeyHandler));
+    this.input.keyboard?.on?.('keydown', initialKeyHandler);
+    this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown', initialKeyHandler));
     const pauseKeyHandler = event => this.handlePauseKey(event);
     this.input.keyboard?.on?.('keydown-SPACE', pauseKeyHandler);
     this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown-SPACE', pauseKeyHandler));
@@ -259,45 +251,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
         sectorNumber: flags.warp?.sectorNumber ?? 1, vehicleId: this.profile.selectedVehicleId,
       });
     } else if (flags.unlockAll) this.showGarage('', false, 'upgrades');
-    else this.showTitleScreen();
-  }
-
-  showTitleScreen() {
-    this.clearOverlay();
-    this.phase = 'title';
-    this.setScreenRenderer(() => this.showTitleScreen());
-    this.setWorldVisible(false);
-    this.cameras?.main?.setBackgroundColor?.('#0b101a');
-    const viewport = this.cameraViewportBounds();
-    const matte = this.add.rectangle(viewport.x + viewport.width / 2,
-      viewport.y + viewport.height / 2, viewport.width, viewport.height, 0x0b101a).setDepth(149);
-    this.overlayObjects.push(matte);
-    const video = this.add.video(viewport.x + viewport.width / 2,
-      viewport.y + viewport.height / 2, 'title_screen_video').setDepth(150).setOrigin(0.5);
-    if (video.video) video.video.muted = true;
-    const applyScale = () => {
-      const bounds = this.cameraViewportBounds();
-      const mediaWidth = video.video?.videoWidth || 720;
-      const mediaHeight = video.video?.videoHeight || 1280;
-      const safeScale = Math.min(bounds.width / mediaWidth, bounds.height / mediaHeight);
-      video.setPosition(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-      video.setDisplaySize(mediaWidth * safeScale, mediaHeight * safeScale);
-    };
-    video.on('play', applyScale);
-    video.on('created', applyScale);
-    applyScale();
-    video.play(true);
-    this.titleVideo = video;
-    this.overlayObjects.push(video);
-  }
-
-  startTitleScreen(inputType) {
-    if (this.phase !== 'title') return;
-    this.initialInputType = inputType;
-    this.titleVideo?.stop?.();
-    this.clearOverlay();
-    this.titleVideo = null;
-    this.showMenu();
+    else this.showMenu();
   }
 
   beginRookieTrial(inputType = this.initialInputType) {
@@ -714,6 +668,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.homePreviewObjects = null;
     this.homePreviewMaskGraphics?.destroy?.();
     this.homePreviewMaskGraphics = null;
+    this.titleNeonPulse = null;
+    this.titleExhaustFlares = null;
+    this.titleAnimationTime = 0;
+    this.titleEffectScale = 1;
   }
 
   fadeOverlayIn() {

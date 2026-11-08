@@ -31,11 +31,11 @@ Depot reset replay parity, dead-worker recovery and heartbeat behavior.
 node --test --test-name-pattern="Normal-run music waits|ordinary startup shows" tests\rendering.test.js tests\sceneLifecycle.test.js
 ```
 
-Browser checks: the Load-In video is the first ordinary screen and keeps its
-full 720 x 1280 frame visible at 320 x 568, 390 x 844 and desktop aspect ratios.
-The main menu uses the Hazardous Haul logo and contains no separate truck preview.
-Confirm touch starts classify as mobile, mouse/key starts as desktop, and no
-audio plays before the first gesture. Verify looped music during Normal runs,
+Browser checks: the Main Menu is the first ordinary screen at 320 x 568, 390 x
+844 and desktop aspect ratios; no load-in video or full-screen image is shown.
+The main menu uses the Hazardous Haul logo and contains no separate truck
+preview. Confirm touch starts classify as mobile, mouse/key starts as desktop,
+and no audio plays before the first gesture. Verify looped music during Normal runs,
 no music during Endless, pause muting, and the 0.525 SFX gain. Debug URLs bypass
 the title screen but still require interaction to unlock audio.
 

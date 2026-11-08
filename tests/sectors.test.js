@@ -11,7 +11,8 @@ import {addMilestones, milestonesForDistance, moduleStatus, moduleLevelCap, next
 import {defaultProfile, normalizeProfile} from '../src/game/core/save.js';
 import {isRunStartAvailable} from '../src/game/core/progression.js';
 import {PLAYABLE_ROAD_WIDTH, PICKUP_RADIUS_PX} from '../src/game/data/route.js';
-import {hazardGeometry, hazardFirstContactDistance, hazardScrollScale, hazardSweptArtOverlaps, HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS} from '../src/game/core/hazards.js';
+import {hazardGeometry, hazardFirstContactDistance, hazardScrollScale, hazardSweptArtOverlaps,
+  HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, movingHazardMinimumForInterval} from '../src/game/core/hazards.js';
 import {sampleRoute} from '../scripts/route-audit.mjs';
 import {validateTrackSequence} from '../src/game/core/trackValidation.js';
 import {HAZARD_TRAVEL_PX} from '../src/game/data/route.js';
@@ -221,7 +222,7 @@ test('Level 2 schedules four to fourteen separated movers per sampled banking in
       }
       if (start === 0) assert.ok(encounters.every(at => at >= 1000), 'Sector 1 has no movers');
       if (start === 0) continue;
-      assert.ok(encounters.length >= GAME_BALANCE.routes.movingHazards.minimumPerWindow,
+      assert.ok(encounters.length >= movingHazardMinimumForInterval(start, end),
         `seed ${seed}, interval ${start}-${end}, generated ${encounters.length}: ${encounters.join(', ')}; ${chunks.join(' | ')}`);
       assert.ok(encounters.length <= GAME_BALANCE.routes.movingHazards.maximumPerWindow);
       for (let i = 1; i < encounters.length; i++) {

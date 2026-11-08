@@ -126,12 +126,17 @@ test('camping diagnostic does not combine sequential Alpha and Beta blockers int
   assert.ok(campingWindows(rows).some(violation => violation.band === 0b0011));
 });
 
-test('Normal baseline prevents four-row lane and adjacent-pair camping across both complete levels', () => {
-  for (const levelId of ['level1', 'level2']) for (const seed of [0, 1, 7, 42, 153, 1234, 98765, 2330762723]) {
-    const rows = sampleRoute(seed, GAME_BALANCE.routes[levelId].finishDistanceMeters, false, levelId, 'normal');
-    assert.deepEqual(campingWindows(rows, {levelId}), [], `${levelId}/${seed}: four-row camping window`);
-    assert.ok(rows.filter(row => row.emitted).every(row => row.certificates.every(proof =>
-      proof.completed && proof.clearance >= 6)));
+test('Level 1 retains strict anti-camping while Level 2 overlays movers on a certified varied base', () => {
+  for (const seed of [0, 1, 7, 42, 153, 1234, 98765, 2330762723]) {
+    const level1 = sampleRoute(seed, GAME_BALANCE.routes.level1.finishDistanceMeters, false, 'level1', 'normal');
+    assert.deepEqual(campingWindows(level1, {levelId: 'level1'}), [], `level1/${seed}: four-row camping window`);
+    const level2 = sampleRoute(seed, GAME_BALANCE.routes.level2.finishDistanceMeters, false, 'level2', 'normal');
+    assert.ok(level2.filter(row => row.emitted).every(row => row.certificates.every(proof =>
+      proof.completed && proof.clearance >= 6)), `level2/${seed}: connected clearance`);
+    assert.ok(level2.some(row => row.moverOverlay), `level2/${seed}: Forklifts overlay the base route`);
+    assert.ok(!level2.some(row => row.family === 'split_gate'), `level2/${seed}: avoid forced one-lane gates`);
+    assert.ok(new Set(level2.filter(row => row.emitted).map(row => row.family)).size >= 3,
+      `level2/${seed}: retain static route variety`);
   }
 });
 

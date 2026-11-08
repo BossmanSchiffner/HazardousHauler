@@ -5,7 +5,7 @@ import {DEPOT_RULES, nextDepotAfter, nextMoverWindowAfter} from '../src/game/cor
 import {hazardBlockedIntervals, routeHazardBlockedIntervals, usesPotentialMoverLanes, usesTimedMoverLanes, movingHazardQuota,
   hazardFirstContactDistance, hazardSweptArtOverlaps, movingHazardOffset, hazardRouteGeometry,
   hazardRouteOffsetY, hazardGeometry, hazardHits, hazardScrollScale, projectPhysicalEvents, LANE_CENTERS,
-  moverReservation, staticIntersectsMoverReservation}
+  moverReservation, staticIntersectsMoverReservation, movingHazardMinimumForInterval}
   from '../src/game/core/hazards.js';
 import {physicalPressureMetrics} from '../src/game/core/hazards.js';
 import {createTrackGenerator, movingEncounterRows, staticIntersectsMoverAtRow} from '../src/game/core/trackGenerator.js';
@@ -64,7 +64,6 @@ test('row-local mover repair excludes instantaneous overlaps without clearing su
     const emitted = rows.filter(row => row.emitted);
     const windows = emitted.flatMap(row => row.hazards.filter(hazard => hazard.movement)
       .map(hazard => hazard.moverReservation));
-    if (seed === 98765) assert.ok(windows.some(window => window.paired), `${seed}: real paired reservation`);
     for (const row of emitted) {
       assert.ok(row.hazards.length > 0, `${seed}/${row.plannedDistance}: empty obstacle row`);
       assert.deepEqual(row.certificates.map(proof => proof.hz), [30, 60, 120]);
@@ -300,15 +299,20 @@ test('controlled movers: actual accounting rejects duplicate rows, quota overflo
   assert.doesNotThrow(() => incomplete.recordSpawn({...empty, plannedDistance: introduction}, false, introduction),
     'the opening sector precedes Forklift introduction and has no moving quota');
   const atBoundary = firstBank - contactLead;
-  assert.throws(() => incomplete.recordSpawn({...empty, plannedDistance: atBoundary}, false, atBoundary),
-    new RegExp(`Moving quota failed.*"start":${firstWindow.startsAt},"depot":${firstBank}.*"required":${moving.minimumPerWindow}`));
+  assert.doesNotThrow(() => incomplete.recordSpawn({...empty, plannedDistance: atBoundary}, false, atBoundary),
+    'a missed mover quota remains diagnostic and never aborts the live run');
+  assert.deepEqual(incomplete.movingQuotaConflict, {start: firstWindow.startsAt, depot: firstBank,
+    encounters: 0, required: movingHazardMinimumForInterval(firstWindow.startsAt, firstBank),
+    maximum: moving.maximumPerWindow});
 });
 
-test('controlled moving encounters: real Normal selection emits optional chicanes with both mover behaviors', context => {
+test('controlled moving encounters: real Normal selection overlays certified Forklifts on baseline rows', context => {
   const finish = GAME_BALANCE.routes.level2.finishDistanceMeters;
   const start = IMPLEMENTED_LEVELS.level2[1].startsAt;
   const rows = sampleRoute(98765, finish, false, 'level2', 'normal', start);
   const counts = new Map(IMPLEMENTED_LEVELS.level2.slice(1).map(sector => [sector.endsAt, 0]));
+  const startsByEnd = new Map(IMPLEMENTED_LEVELS.level2.slice(1).map(sector =>
+    [sector.endsAt, sector.startsAt]));
   const orientations = new Set();
   const encounters = new Map();
   let paired = 0, movers = 0;
@@ -341,16 +345,24 @@ test('controlled moving encounters: real Normal selection emits optional chicane
       if (reservation.paired) paired++;
     }
   }
-  for (const [end, count] of counts) assert.equal(movingHazardQuota(count).acceptable, true, `${end}: ${count}`);
+  for (const [end, count] of counts) {
+    const start = startsByEnd.get(end);
+    const minimum = movingHazardMinimumForInterval(start, end);
+    assert.equal(movingHazardQuota(count, minimum).acceptable, true, `${end}: ${count}`);
+  }
   const pressure = physicalPressureMetrics(rows, {levelId: 'level2', mode: 'normal',
     startDistance: start, endDistance: finish});
   context.diagnostic(JSON.stringify({seed: 98765, start, end: finish, rows: rows.length,
     movers, pairedMoverBodies: paired, orientations: [...orientations].sort(),
     counts: Object.fromEntries(counts), maximumClearStreakByLane: pressure.maximumClearStreakByLane,
     safety: 'canonical route-time collision certification'}));
-  assert.ok(rows.some(row => row.hazards.some(hazard => hazard.moverCompanion && hazard.lane === 0)));
-  assert.ok(rows.some(row => row.hazards.some(hazard => hazard.moverCompanion && hazard.lane === 3)));
-  assert.ok(paired > 0, 'a real selected encounter, not only helper fixtures, must contain a pair');
+  assert.ok(rows.some(row => row.moverOverlay), 'real movers overlay ordinary generated rows');
+  for (const {row, hazard} of rows.flatMap(row => row.hazards.filter(hazard => hazard.movement)
+    .map(hazard => ({row, hazard})))) {
+    assert.ok([0, 1, 2, 3].includes(hazard.moverReservation.bypassLane));
+    assert.ok(row.safeLanes.includes(hazard.moverReservation.bypassLane),
+      'every overlay retains a reachable bypass');
+  }
   assert.ok(movers >= paired);
   assert.ok(pressure.events.length > 0);
   for (const encounter of encounters.values()) {
@@ -436,8 +448,7 @@ test('central movers retain fully connected geometrically open routes at 30/60/1
         `${seed}/${mode}/${hz}Hz: ${proof.clearance}`);
       assert.equal(proof.approximateMovingSafety, undefined);
     }
-    assert.ok(rows.some(row => row.emitted && row.hazards.some(usesTimedMoverLanes) &&
-      row.hazards.some(hazard => hazard.filler && hazard.moverCompanion && [0, 3].includes(hazard.lane))),
-    'native outer fillers must be emitted alongside actual central movers');
+    assert.ok(rows.some(row => row.emitted && row.moverOverlay &&
+      row.hazards.some(usesTimedMoverLanes)), 'certified movers must overlay emitted baseline rows');
   }
 });

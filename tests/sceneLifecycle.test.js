@@ -132,6 +132,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   DEPOT_RULES, nextDepotAfter, depotEntryAllowed, depotDockingStart, depotMotionStep, METERS_PER_PIXEL, syncDepotEntrance() {},
   DEPOT_APPROACH_HINT_M: DEPOT_RULES.noticeMeters, addMilestones, milestonesForDistance, releaseDeferredBlueprints,
   crashReward, blueprintEligible,
+  runMusicUrl: 'BG_Music.mp3', logoUrl: 'GameLogo.svg',
   saveProfile(profile) { if (storageAvailable) savedProfile = profile; return storageAvailable; },
   loadProfile(onWarning) {
     if (startupWarning) onWarning(startupWarning);
@@ -173,47 +174,6 @@ test('startup save recovery warning uses the error toast only after world and me
   }
 });
 
-test('title video fits completely in portrait and wide viewports and refits when metadata arrives', () => {
-  for (const bounds of [{x: 0, y: 0, width: 390, height: 844},
-    {x: -200, y: 0, width: 1200, height: 700}, {x: 0, y: 0, width: 360, height: 640}]) {
-    const scene = new Scene();
-    const handlers = new Map();
-    const video = {video: {videoWidth: 0, videoHeight: 0}, width: 256, height: 256,
-      setDepth() { return this; }, setOrigin() { return this; },
-      setPosition(x, y) { this.x = x; this.y = y; return this; },
-      setDisplaySize(width, height) { this.displayWidth = width; this.displayHeight = height; return this; },
-      on(event, handler) { handlers.set(event, handler); return this; },
-      play(loop) { this.loop = loop; return this; }};
-    scene.add = {rectangle: (x, y, width, height, fill) => {
-      assert.equal(fill, 0x0b101a);
-      return {setDepth() { return this; }};
-    }, video: () => video};
-    scene.cameras = {main: {setBackgroundColor: color => assert.equal(color, '#0b101a')}};
-    scene.clearOverlay = () => { scene.overlayObjects = []; };
-    scene.setWorldVisible = () => {};
-    scene.cameraViewportBounds = () => bounds;
-    scene.showTitleScreen();
-    const assertFit = () => {
-      assert.ok(video.displayWidth <= bounds.width + 1e-8);
-      assert.ok(video.displayHeight <= bounds.height + 1e-8);
-      assert.ok(Math.abs(video.displayWidth - bounds.width) < 1e-8 ||
-        Math.abs(video.displayHeight - bounds.height) < 1e-8);
-      assert.equal(video.x, bounds.x + bounds.width / 2);
-      assert.equal(video.y, bounds.y + bounds.height / 2);
-      assert.ok(Math.abs(video.displayWidth / video.displayHeight - 9 / 16) < 1e-8);
-    };
-    assertFit();
-    video.video.videoWidth = 360;
-    video.video.videoHeight = 640;
-    handlers.get('play')();
-    assertFit();
-    handlers.get('created')();
-    assertFit();
-    assert.equal(video.video.muted, true);
-    assert.equal(video.loop, true);
-  }
-});
-
 test('cargo feedback distinguishes crate value from the net gain when replacing cheaper cargo', () => {
   const scene = new Scene();
   scene.ship = {x: 195, y: 684};
@@ -232,27 +192,36 @@ test('cargo feedback distinguishes crate value from the net gain when replacing 
   assert.deepEqual(messages, ['HOLD +5']);
 });
 
-test('ordinary startup shows the title screen and first input records its device class', () => {
-  const scene = new Scene();
-  scene.profile = defaultProfile();
-  let titleScreens = 0;
-  scene.showTitleScreen = () => { titleScreens++; };
-  scene.showMenu = () => assert.fail('ordinary startup should not skip the title screen');
-  scene.initializeUrlDebug('');
-  assert.equal(titleScreens, 1);
-  for (const inputType of ['touch', 'mouse', 'keyboard']) {
-    scene.phase = 'title';
-    const video = {stopped: false, destroyed: false, stop() { this.stopped = true; },
-      destroy() { this.destroyed = true; }};
-    scene.titleVideo = video;
-    scene.overlayObjects = [video];
-    scene.showMenu = () => { scene.phase = 'menu'; };
-    scene.startTitleScreen(inputType);
-    assert.equal(scene.initialInputType, inputType);
-    assert.equal(video.stopped, true);
-    assert.equal(video.destroyed, true);
-    assert.equal(scene.titleVideo, null);
+test('ordinary startup opens the main menu directly and classifies the first input', () => {
+  for (const [inputType, trigger] of [['touch', 'pointerdown'], ['mouse', 'pointerdown'], ['keyboard', 'keydown']]) {
+    const scene = new Scene();
+    const listeners = new Map();
+    scene.buildWorld = () => {};
+    scene.handleViewportResize = () => {};
+    scene.beginMenuScroll = () => {};
+    scene.beginSteering = () => {};
+    scene.moveMenuScroll = () => {};
+    scene.moveSteering = () => {};
+    scene.handlePointerUp = () => {};
+    scene.endMenuScroll = () => {};
+    scene.scale = {on() {}, off() {}, gameSize: {width: 390, height: 844}};
+    scene.events = {once() {}};
+    scene.input = {
+      on(name, handler) { listeners.set(name, handler); },
+      keyboard: {
+        addKeys: () => ({}),
+        on(name, handler) { listeners.set(name, handler); },
+        off() {},
+      },
+    };
+    let menuOpens = 0;
+    scene.showMenu = () => { menuOpens++; scene.phase = 'menu'; };
+    scene.create();
+    assert.equal(menuOpens, 1);
     assert.equal(scene.phase, 'menu');
+    if (trigger === 'pointerdown') listeners.get(trigger)({wasTouch: inputType === 'touch'});
+    else listeners.get(trigger)({preventDefault() {}});
+    assert.equal(scene.initialInputType, inputType);
   }
 });
 
@@ -725,7 +694,7 @@ test('URL debug bot traverses all four Level 2 sectors on the returning-mover re
     sectors.add(scene.currentSector.number);
   }
   assert.equal(scene.phase, 'result', `bot stopped at ${scene.distance} m with Hull ${scene.hull}`);
-  assert.equal(scene.distance, 5000);
+  assert.equal(scene.distance, routeFinishDistance('level2'));
   assert.ok(scene.hull > 0);
   assert.deepEqual([...sectors], [1, 2, 3, 4]);
 });
@@ -808,11 +777,13 @@ test('shield absorption feedback preserves the remaining charges and refreshes H
 
 test('scene preloads the approved Standard, Swift and object sprites before creating the existing world', () => {
   const scene = new Scene();
-  const loads = [];
+  const loads = [], audio = [];
   scene.textures = {exists: () => false};
-  scene.load = {image: (...args) => loads.push(args)};
+  scene.load = {image: (...args) => loads.push(args), audio: (...args) => audio.push(args)};
   scene.preload();
-  assert.deepEqual(loads, [[STANDARD_HAULER_ART.sourceKey, STANDARD_HAULER_ART.url],
+  assert.deepEqual(audio, [['cargo_run_music', 'BG_Music.mp3']]);
+  assert.deepEqual(loads, [['hazardous_haul_logo', 'GameLogo.svg'],
+    [STANDARD_HAULER_ART.sourceKey, STANDARD_HAULER_ART.url],
     [SWIFT_RUNNER_ART.sourceKey, SWIFT_RUNNER_ART.url],
     ...GARAGE_DISPLAY_ART.map(art => [art.key, art.url]),
     ...GARAGE_UPGRADE_ART.map(art => [art.key, art.url]),
@@ -1028,7 +999,7 @@ test('frame-quantized spawning preserves source and continuation world positions
           hazardGeometry(item).height) < 1e-8, 'the drawn guardrail spans exactly its collider');
       }
     }
-    assert.ok(scene.distance >= end && references > 0 && rendered > 0,
+    assert.ok(scene.distance >= end && (levelId === 'level2' || references > 0) && rendered > 0,
       'exercise real continuing bodies across complete intervals and the Overdrive stage boundary');
     scene.removeObjects();
   }

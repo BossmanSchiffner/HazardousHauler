@@ -87,9 +87,9 @@ to refactor them during a dead-code sweep.
 The scene creates one `RunFeedback` per `create`, before building the world.
 The scene creates one `RunFeedback` per `create`, before building the world.
 Capture-phase canvas pointerdown/document keydown unlock even when menu controls
-stop Phaser propagation. The silent `LoadIn_Screen.mp4` title video and
-`BG_Music.mp3` are bundled from the parent `art-direction` folder. No new
-AudioContext, SDK or dependency.
+stop Phaser propagation. The `GameLogo.svg` and `BG_Music.mp3` are bundled from
+`art-direction`; ordinary startup opens the Main Menu without a load-in screen.
+No new AudioContext, SDK or dependency.
 
 Background music uses a separate 0.35 gain and loops only during Normal runs.
 The shared SFX gain is 0.525, 50% above its previous 0.35 level. Neither plays

@@ -12,7 +12,8 @@ import {hazardX, hazardBlockedIntervals, hasStraightRoute, straightRouteWidth, h
 import {WORST_CASE_HANDLING, loadoutStats} from '../src/game/core/modules.js';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 import {HAZARD_ROW_ENVELOPE_PX, hazardGeometry, physicalPressureMetrics, sideHazardQuota,
-  movingHazardQuota, hazardFirstContactDistance, hazardRouteOffsetY, hazardRouteGeometry} from '../src/game/core/hazards.js';
+  movingHazardQuota, movingHazardMinimumForInterval, hazardFirstContactDistance,
+  hazardRouteOffsetY, hazardRouteGeometry} from '../src/game/core/hazards.js';
 import {sampleRoute, layoutMetrics, auditRoutes, minimumLaneChanges, depotPacing} from '../scripts/route-audit.mjs';
 import {DEPOT_RULES, nextMoverWindowAfter} from '../src/game/core/depots.js';
 import {DEPOT_APPROACH_HINT_M} from '../src/game/core/onboarding.js';
@@ -262,20 +263,22 @@ test('connected coverage: three production routes reduce accidental openness wit
       const introduction = IMPLEMENTED_LEVELS.level2[moving.firstSector - 1].startsAt;
       for (const {row, hazard} of movers) {
         assert.equal(hazard.kind, 'forklift', 'Level 2 movers are lateral Forklifts only');
-        const companion = row.hazards.find(other => other.moverCompanion);
-        assert.ok(!hazard.openingLanes.includes(companion.lane), 'the sweep stays beside its outer companion');
+        assert.ok([0, 3].includes(hazard.moverReservation.bypassLane));
+        assert.ok(row.safeLanes.includes(hazard.moverReservation.bypassLane),
+          'the local overlay retains a reachable outer bypass');
       }
       assert.ok(movers.every(mover => mover.contact >= introduction), 'Forklifts begin at their introduction sector');
-      assert.ok(movers.some(mover => mover.row.sequenceLength === 4), 'real optional pairs remain reachable');
-      assert.ok(movers.some(mover => mover.row.sequenceLength === 2), 'singles remain available without a pair quota');
+      assert.ok(movers.some(mover => mover.row.moverOverlay), 'real Forklifts overlay ordinary baseline rows');
       assert.deepEqual([...moverCounts.keys()],
         IMPLEMENTED_LEVELS.level2.slice(moving.firstSector - 1).map(sector => sector.endsAt));
-      for (const count of moverCounts.values()) assert.ok(movingHazardQuota(count).acceptable);
+      for (const [end, count] of moverCounts) {
+        const start = IMPLEMENTED_LEVELS.level2.find(sector => sector.endsAt === end).startsAt;
+        assert.ok(movingHazardQuota(count, movingHazardMinimumForInterval(start, end)).acceptable);
+      }
       for (let index = 1; index < movers.length; index++) assert.ok(
         movers[index].contact - movers[index - 1].contact >=
           GAME_BALANCE.routes.movingHazards.minimumEncounterSpacingMeters);
-      for (const {row, hazard} of movers) assert.ok(row.hazards.some(other =>
-        other.moverCompanion && [0, 3].includes(other.lane)));
+      for (const {row, hazard} of movers) assert.ok(row.safeLanes.includes(hazard.moverReservation.bypassLane));
       if (options.mode === 'normal') assert.ok(rows.filter(row => row.plannedDistance < 500)
         .every(row => row.family !== 'moving_intercept' || row.sequenceLength === 2));
     } else assert.equal(movers.length, 0);
