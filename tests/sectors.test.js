@@ -59,11 +59,11 @@ test('sector challenge identity is independent of visual metadata and gameplay o
 
 test('Level 1 has four data-driven sector boundaries and difficulty steps up at each one', () => {
   assert.equal(sectorAtDistance(0).id, 'level1-sector1');
-  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.startsAt), [0, 1000, 2000, 3000]);
-  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt), [1000, 2000, 3000, 4000]);
-  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt - sector.startsAt), [1000, 1000, 1000, 1000]);
+  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.startsAt), [0, 500, 1000, 1500]);
+  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt), [500, 1000, 1500, 2000]);
+  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt - sector.startsAt), [500, 500, 500, 500]);
   assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.themeId), ['industrial', 'industrial', 'industrial', 'industrial']);
-  for (const [distance, step] of [[0, 0], [999.999, 0], [1000, 1], [2000, 2], [3000, 3], [3999, 3], [4000, 3]]) {
+  for (const [distance, step] of [[0, 0], [499.999, 0], [500, 1], [1000, 2], [1500, 3], [1999, 3], [2000, 3]]) {
     assert.equal(difficultyStepAtDistance(distance), step, `${distance} m`);
   }
   assert.equal(difficultyStepAtDistance(0, 'level1', 'continuous'), 1);
@@ -82,16 +82,16 @@ test('Level 1 has four data-driven sector boundaries and difficulty steps up at 
 test('Level 2 has independent four-sector progress and opens at its configured Level 1 speed', () => {
   const sectors = IMPLEMENTED_LEVELS.level2;
   assert.equal(sectors.length, 4);
-  assert.deepEqual(sectors.map(sector => sector.startsAt), [0, 1000, 2000, 3000]);
-  assert.deepEqual(sectors.map(sector => sector.endsAt), [1000, 2000, 3000, 4000]);
+  assert.deepEqual(sectors.map(sector => sector.startsAt), [0, 500, 1000, 2000]);
+  assert.deepEqual(sectors.map(sector => sector.endsAt), [500, 1000, 2000, 3000]);
   assert.deepEqual(sectors.map(sector => sector.id),
     ['level2-sector1', 'level2-sector2', 'level2-sector3', 'level2-sector4']);
   assert.deepEqual(sectors.map(sector => sector.themeId), ['dustlands', 'dustlands', 'dustlands', 'dustlands']);
   for (const sector of sectors) assert.equal(sectorAtDistance(sector.startsAt, 'level2').id, sector.id);
-  assert.equal(routeSpeedAtDistance(0, 'level2'), routeSpeedAtDistance(1000, 'level1'));
-  assert.equal(sectorAtDistance(2000, 'level1').id, 'level1-sector3');
-  assert.equal(sectorAtDistance(2000, 'level2').id, 'level2-sector3');
-  assert.equal(difficultyStepAtDistance(2000, 'level2'), difficultyStepAtDistance(2000, 'level1'));
+  assert.equal(routeSpeedAtDistance(0, 'level2'), routeSpeedAtDistance(500, 'level1'));
+  assert.equal(sectorAtDistance(1000, 'level1').id, 'level1-sector3');
+  assert.equal(sectorAtDistance(1000, 'level2').id, 'level2-sector3');
+  assert.equal(difficultyStepAtDistance(1000, 'level2'), difficultyStepAtDistance(1000, 'level1'));
   assert.throws(() => sectorAtDistance(0, 'level3'), /Unknown level/);
 });
 

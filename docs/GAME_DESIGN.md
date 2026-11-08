@@ -44,12 +44,15 @@ does not simulate carrying that weight.
 
 ## Levels, sectors and modes
 
-Both implemented levels have **four equal 1,000 m sectors** and a 4,000 m finish.
+Both implemented levels have four sectors with independent route lengths.
 
 | Level | Theme throughout | Sector ends (m) | Sector 3 checkpoint | Normal finish |
 | --- | --- | --- | --- | --- |
-| 1 | Industrial | 1,000 / 2,000 / 3,000 / 4,000 | 2,000 m | 4,000 m |
-| 2 | Dustlands | 1,000 / 2,000 / 3,000 / 4,000 | 2,000 m | 4,000 m |
+| 1 | Industrial | 500 / 1,000 / 1,500 / 2,000 | 1,000 m | 2,000 m |
+| 2 | Dustlands | 500 / 1,000 / 2,000 / 3,000 | 1,000 m | 3,000 m |
+
+Level 1 Depots are at 500, 1,000 and 1,500 m; Level 2 Depots are at 500,
+1,000 and 2,000 m. The finish settles the final interval without another Depot.
 
 Level 1 completion unlocks Level 2. Each level keeps independent entry/completion
 evidence, checkpoint access and records. Normal start selection offers the
@@ -141,7 +144,7 @@ generation policy. Geometry is expressed in world units, not PNG alpha bounds.
   pressure, facility envelopes and lifetime accounting use the exact projected
   longitudinal collision window, not a second validator or artwork geometry.
   Quotas remain 4-14 real bodies per eligible half-open banking interval,
-  1,000-2,000 / 2,000-3,000 / 3,000-4,000 m, including the final Normal interval;
+  500-1,000 / 1,000-2,000 / 2,000-3,000 m, including the final Normal interval;
   minimum 40 m encounter separation is unchanged. Sector 1 has no movers or
   mover quota, rather than a silently failed four-body requirement.
   Timed and explicitly tagged potential-lane patterns

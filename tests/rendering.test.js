@@ -260,22 +260,22 @@ test('route visual pool releases compound children atomically, safely reuses con
   assert.ok(created.every(node => node.destroyed === 1), 'no double-destroy of container children');
 });
 
-test('desktop scaling fixes the 390x844 portrait playfield with FIT centering and no CSS canvas stretching', () => {
+test('desktop scaling fills the viewport with RESIZE and no CSS canvas stretching', () => {
   const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
     .replace(/^import.*;\r?\n/gm, '').replace(/^if \(import\.meta\.env\.DEV\).*$/m, '');
   let config;
   vm.runInNewContext(source, {
-    Phaser: {AUTO: 'AUTO', Scale: {FIT: 'FIT', CENTER_BOTH: 'CENTER_BOTH'},
+    Phaser: {AUTO: 'AUTO', Scale: {RESIZE: 'RESIZE', CENTER_BOTH: 'CENTER_BOTH'},
       Game: class { constructor(value) { config = value; } }},
     RoutePrototypeScene: class {},
   });
   assert.equal(config.width, 390);
   assert.equal(config.height, 844);
-  assert.equal(config.scale.mode, 'FIT');
+  assert.equal(config.scale.mode, 'RESIZE');
   assert.equal(config.scale.autoCenter, 'CENTER_BOTH');
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const canvasRule = css.match(/#game canvas\s*\{([^}]+)\}/)[1];
-  assert.ok(!/(?:width|height)\s*:\s*100%/.test(canvasRule), 'Phaser controls the aspect-correct display size');
+  assert.ok(!/(?:^|;)\s*(?:width|height)\s*:\s*100%/.test(canvasRule), 'Phaser controls the aspect-correct display size');
 });
 
 function audioFeedbackFixture({supported = true, state = 'running', vibrate = () => true} = {}) {

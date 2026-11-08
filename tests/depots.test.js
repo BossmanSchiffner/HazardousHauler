@@ -34,7 +34,7 @@ test('depot schedules follow campaign transitions or each global continuous 1000
       assert.equal(next.transition, true);
       distance = next.distance;
     }
-    assert.deepEqual(normal, levelId === 'level1' ? [500, 1000, 2000] : [500, 1500, 3000]);
+    assert.deepEqual(normal, levelId === 'level1' ? [500, 1000, 1500] : [500, 1000, 2000]);
     assert.equal(nextDepotAfter(normal.at(-1), DEPOT_RULES, levelId, 'normal').distance, Infinity);
   }
   let at = 0;
@@ -59,13 +59,14 @@ test('moving windows align with banking and include the final Normal settlement 
     found.push(next.distance);
     at = next.distance;
   }
-  assert.deepEqual(found, [500, 1000, 2000, 4000]);
+  assert.deepEqual(found, [500, 1000, 1500, 2000]);
   assert.equal(nextMoverWindowAfter(499.99).distance, 500);
   assert.equal(nextMoverWindowAfter(500).distance, 1000);
-  assert.equal(nextMoverWindowAfter(2000).distance, 4000);
-  assert.equal(nextMoverWindowAfter(4000).distance, Infinity);
-  assert.equal(nextMoverWindowAfter(500, MOVER_WINDOW_RULES, 'level2').distance, 1500);
-  assert.equal(nextMoverWindowAfter(3000, MOVER_WINDOW_RULES, 'level2').distance, 5000);
+  assert.equal(nextMoverWindowAfter(1500).distance, 2000);
+  assert.equal(nextMoverWindowAfter(2000).distance, Infinity);
+  assert.equal(nextMoverWindowAfter(500, MOVER_WINDOW_RULES, 'level2').distance, 1000);
+  assert.equal(nextMoverWindowAfter(2000, MOVER_WINDOW_RULES, 'level2').distance, 3000);
+  assert.equal(nextMoverWindowAfter(3000, MOVER_WINDOW_RULES, 'level2').distance, Infinity);
   assert.equal(nextMoverWindowAfter(5000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 6000);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 10000);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').startDistance, 9000);

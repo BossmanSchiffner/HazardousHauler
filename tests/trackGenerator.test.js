@@ -816,7 +816,7 @@ test('Industrial single coins and stacks both pay 5 Coins for one cargo slot', (
   assert.ok(Math.abs(stacks / 1_000 - COIN_STACK_CHANCE) < 0.05);
 });
 
-test('coins keep a steady rhythm: one pickup every 2–4 rows, never a long empty stretch', () => {
+test('coins keep a steady rhythm: one pickup every 1–2 eligible rows', () => {
   const generator = createTrackGenerator(4242);
   let rowsWithCoins = 0;
   let gap = 0;

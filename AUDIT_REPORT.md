@@ -1,5 +1,39 @@
 # Repository Audit & Architecture Health Report
 
+## Shared Normal Baseline Checkpoint: 7 November
+
+The static baseline now uses an entry-state-oriented sweep across both Normal
+levels and all sectors. Level 2 production Forklifts use a central two-lane
+crossing followed by two populated recovery steps; paired courses have six rows
+with movers at phases 0 and 3. Standalone legacy mover fixtures remain intact.
+Normal Beta slots are one-third, one-half and two-thirds of the Alpha interval.
+Three clear rows are allowed before a lane must receive pressure on row four.
+The six-row held-opening offset-pair recipe is no longer sampled in Normal runs.
+
+The permanent four-row single-lane/adjacent-pair camping regression passes over
+16 full runs (eight seeds in each level), using actual certified off-band cargo
+and simultaneous physical blockers. Verification: 9 cargo tests, 17 mover tests,
+10 streaming tests and 5 focused density/camping/Beta checks pass (41 total).
+Mover quotas, 25.08 px cab width, 15 px row-local visual gap, and >=6 px connected
+clearance at 30/60/120 Hz are retained. Full-suite and final human acceptance
+have not been claimed for this checkpoint.
+
+## Earlier Recovery Checkpoint: 7 November
+
+The unaccepted hard pair-camping selector, sweep-template experiment, speculative
+cargo cache and late Level 2 witness changes were removed. The dense baseline,
+sector-driven cargo values, opposite-edge premium placements, 2,000 m / 3,000 m
+campaign pacing and certified mover exclusions remain. Recovery verification:
+9 cargo tests, 17 controlled-mover tests, 10 route-stream tests, 6 focused
+density/Beta/feedback checks and 2 camping-diagnostic checks passed (44 total).
+The full repository suite was not rerun for this checkpoint.
+
+The four-row single-lane/adjacent-pair camping check is diagnostic only. It counts
+actual certified off-band cargo and simultaneous physical blockers, not intended
+destinations or blockers at different times. Strict anti-camping enforcement and
+late Level 2 gameplay-density tuning remain unresolved; this is not final human
+acceptance or a claim that every sampled camping window is eliminated.
+
 **Date:** 1 November 2026. **Audit checkpoint status:** cleanup and verification complete;
 full suite retains 45 pre-existing failures, with zero changed test outcomes.
 This report was created before removals and updated with actual

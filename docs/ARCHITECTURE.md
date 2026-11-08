@@ -58,7 +58,7 @@ the 10 px drag deadband and fixed navigation. No new scene/save/generator owner.
 | [gameBalance.js](../src/game/data/gameBalance.js) | Sole live balance/geometry/progression/price configuration; frozen derived route fields |
 | [challengeProfiles.js](../src/game/data/challengeProfiles.js) | Immutable structural hazard, filler and Beta families selected by route/sector challengeProfileId; no visual imports |
 | [catalog.js](../src/game/data/catalog.js), [sectors.js](../src/game/core/sectors.js) | Implemented sector identities; full design catalog is not a playable feature inventory |
-| [trackGenerator.js](../src/game/core/trackGenerator.js) | One seeded stream, encounter composition, quotas, continuations and certification requests |
+| [trackGenerator.js](../src/game/core/trackGenerator.js) | One seeded stream, shared Normal sweep baseline, local mover crossing/recovery courses, quotas, continuations and certification requests |
 | [trackValidation.js](../src/game/core/trackValidation.js), [steering.js](../src/game/core/steering.js) | Shared connected physical movement/clearance; no renderer or DOM dependencies |
 | [hazards.js](../src/game/core/hazards.js) | Physical footprints, guardrail contact/lifetime, canonical mover positions and pressure accounting |
 | [cargo.js](../src/game/core/cargo.js), [magnet.js](../src/game/core/magnet.js) | Cargo accounting/replacement, cosmetic bounded trail math, attraction |

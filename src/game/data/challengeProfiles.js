@@ -1,4 +1,15 @@
+export const MOTIF_SLALOM = Object.freeze([0b0011, 0b1100, 0b0011]);
+export const MOTIF_FUNNEL = Object.freeze([0b1001, 0b0110, 0b0110]);
+export const MOTIF_DOORWAY = Object.freeze([0b0111, 0b1110, 0b0111]);
+export const MOTIF_BASELINE_SWEEP = Object.freeze([0b0110, 0b1100, 0b0011]);
+export const TRACK_MOTIFS = Object.freeze([
+  Object.freeze({id: 'slalom', masks: MOTIF_SLALOM}),
+  Object.freeze({id: 'funnel', masks: MOTIF_FUNNEL}),
+  Object.freeze({id: 'doorway', masks: MOTIF_DOORWAY}),
+]);
+
 const profile = (hazardFamilies, fillerHazardFamilies = []) => Object.freeze({
+  motifs: TRACK_MOTIFS,
   hazardFamilies: Object.freeze([...new Set([...hazardFamilies, ...fillerHazardFamilies,
     'sideRail', 'sideWall', 'sweeper'])]),
   fillerHazardFamilies: Object.freeze(fillerHazardFamilies),

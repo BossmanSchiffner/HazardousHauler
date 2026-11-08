@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {advanceCargoTrail, createCargoTrail, cargoOffer, cargoPickupForRoll, cargoTotals, collectCargo, damageCargo} from '../src/game/core/cargo.js';
 import {createTrackGenerator, createTrackStream} from '../src/game/core/trackGenerator.js';
-import {steeringMultiplier} from '../src/game/core/economy.js';
+import {steeringMultiplier, METERS_PER_PIXEL} from '../src/game/core/economy.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS} from '../src/game/core/sectors.js';
 import {SECTOR_CARGO} from '../src/game/data/catalog.js';
+import {difficultyStepAtDistance} from '../src/game/core/sectors.js';
+import {sampleRoute} from '../scripts/route-audit.mjs';
 import {balance} from '../src/game/data/balance.js';
 
 const coin = value => ({kind: 'coin', mass: 1, slots: 1, value});
@@ -115,7 +117,7 @@ test('replacement searches for a feasible item, respects both slots/mass, and ne
 
 test('sector-weighted tiers restrict all road cargo without changing pickup cadence', () => {
   assert.deepEqual(cargoPickupForRoll(0, 0), {...coin(5), kind: 'coinStack'});
-  assert.deepEqual(cargoPickupForRoll(1799, 0.5), coin(5));
+  assert.deepEqual(cargoPickupForRoll(IMPLEMENTED_SECTORS[1].startsAt + 100, 0.5), {...coin(10), kind: 'coinStack'});
   assert.deepEqual(cargoPickupForRoll(FINISH, 0), freight(25), 'Normal past the finish keeps the final sector tiers');
   for (const [index, {distance, mode}] of STEP_SAMPLES.slice(1).entries()) {
     const maximum = [10, 20, 25][index];
@@ -124,9 +126,9 @@ test('sector-weighted tiers restrict all road cargo without changing pickup cade
     assert.deepEqual(cargoPickupForRoll(IMPLEMENTED_LEVELS.level2[index + 1].startsAt, 0, 'level2', mode),
       freight(maximum), 'cargo tiers follow sector position, not the Dustlands theme');
     const lightest = SECTOR_CARGO[STEP_SAMPLES[index + 1].step].filter(tier => tier.weight > 0).at(-1).value;
-    assert.equal(cargoPickupForRoll(distance, 0.199, 'level1', mode).value, lightest,
-      'top of the stack band selects the lightest weighted tier');
-    assert.deepEqual(cargoPickupForRoll(distance, 0.9, 'level1', mode), coin(5));
+    assert.equal(cargoPickupForRoll(distance, 0.999, 'level1', mode).value, lightest,
+      'top of the full pickup roll selects the lightest weighted tier');
+    assert.deepEqual(cargoPickupForRoll(distance, 0.5, 'level1', mode), {...coin(maximum), kind: 'coinStack'});
   }
   for (const sector of STEP_SAMPLES) {
     const counts = new Map();
@@ -139,17 +141,16 @@ test('sector-weighted tiers restrict all road cargo without changing pickup cade
       assert.ok(table.some(t => t.value === pickup.value), `${sector.id}/${pickup.value}`);
       counts.set(pickup.value, (counts.get(pickup.value) ?? 0) + 1);
       if (pickup.kind !== 'coin') stacks++;
-      if (pickup.kind === 'coinStack') lightTiers.add(pickup.value);
+      if (pickup.mass === 1) lightTiers.add(pickup.value);
       if (pickup.kind === 'freight') heavy++;
     }
-    assert.equal(stacks, 2000, 'new tiers never add pickup or premium rolls');
+    assert.equal(stacks, sector.step === 0 ? 2000 : 10000 - (counts.get(5) ?? 0));
     assert.equal(heavy, sector.step === 0 ? 0 : 400);
     for (const tier of table) {
-      const expected = (tier.value === 5 ? 8000 : 0) + 2000 * tier.weight;
+      const expected = 10000 * tier.weight;
       assert.ok(Math.abs((counts.get(tier.value) ?? 0) - expected) <= 1, `${sector.id}/${tier.value}`);
       if (tier.weight > 0) assert.ok(lightTiers.has(tier.value), 'every weighted tier also appears as a mass-1 stack');
     }
-    assert.ok(counts.get(5) >= 8000);
   }
   for (let seed = 0; seed < 100; seed++) {
     const early = createTrackGenerator(seed);
@@ -162,10 +163,39 @@ test('sector-weighted tiers restrict all road cargo without changing pickup cade
     }
   }
   const stream = createTrackStream(42);
-  const rows = Array.from({length: 200}, () => stream.nextRow(5500, true));
-  assert.ok(rows.some(row => row.pickups.some(pickup => pickup.kind === 'freight')));
+  const rows = [];
+  let distance = IMPLEMENTED_SECTORS[1].startsAt;
+  while (distance < FINISH) {
+    const row = stream.nextRow(distance);
+    if (!row) break;
+    rows.push(row);
+    distance = row.plannedDistance + row.spacingPx * METERS_PER_PIXEL;
+  }
+  const freightGenerator = createTrackGenerator(42);
+  freightGenerator.nextCargoPickup = distance => cargoPickupForRoll(distance, 0);
+  assert.equal(freightGenerator.nextRowPickups([0, 3], IMPLEMENTED_SECTORS[1].startsAt)[0].kind, 'freight');
   for (const row of rows) assert.ok(row.pickups.every(pickup => row.safeLanes.includes(pickup.lane)));
   assert.ok(steeringMultiplier(11, 11) < steeringMultiplier(1, 11), 'full hold still slows handling');
+});
+
+test('a full Sector 1 hold upgrades through later-sector cargo without increasing mass', () => {
+  let items = Array.from({length: 11}, () => cargoPickupForRoll(0, 0.5));
+  assert.deepEqual(cargoTotals(items), {mass: 11, slots: 11, value: 55});
+  let previousValue = 5;
+  for (const [index, sector] of IMPLEMENTED_SECTORS.slice(1).entries()) {
+    const distance = sector.startsAt;
+    const value = [10, 20, 25][index];
+    for (let index = 0; index < 11; index++) {
+      const result = collectCargo(items, cargoPickupForRoll(distance, 0.5), 11);
+      assert.equal(result.accepted, true);
+      assert.equal(result.replaced, true);
+      items = result.items;
+      assert.deepEqual(cargoTotals(items), {mass: 11, slots: 11,
+        value: (10 - index) * previousValue + (index + 1) * value});
+    }
+    assert.equal(cargoTotals(items).value, 11 * value);
+    previousValue = value;
+  }
 });
 
 test('damage jettisons lowest value and applies insured minimum loss with exact integer ledger totals', () => {
@@ -187,12 +217,61 @@ test('damage jettisons lowest value and applies insured minimum loss with exact 
   assert.throws(() => damageCargo(items, NaN), /Invalid/);
 });
 
+test('premium cargo follows certified decision waypoints or alternates opposite road edges', () => {
+  for (const seed of [1, 153, 2330762723]) {
+    const rows = sampleRoute(seed, FINISH, false, 'level1', 'normal');
+    const premiums = rows.flatMap(row => row.pickups.filter(pickup => pickup.value > 5)
+      .map(pickup => ({row, pickup})));
+    assert.ok(premiums.length >= Math.ceil(FINISH * 6 / 4000),
+      `${seed}: premium cargo was starved by placement restrictions`);
+    assert.ok(rows.some(row => row.motifId === 'cargo_crossroad' || row.motifId === 'baseline_sweep' ||
+      row.motifId?.startsWith('road_sweep_')));
+    for (const [index, {row, pickup}] of premiums.entries()) {
+      if (Number.isInteger(row.riskCargoLane)) assert.equal(pickup.lane, row.riskCargoLane);
+      else {
+        assert.ok([0, 3].includes(pickup.lane));
+        if (index && !Number.isInteger(premiums[index - 1].row.riskCargoLane))
+          assert.equal(Math.abs(pickup.lane - premiums[index - 1].pickup.lane), 3);
+      }
+      const table = SECTOR_CARGO[difficultyStepAtDistance(row.plannedDistance)];
+      assert.ok(table.some(tier => tier.value === pickup.value && tier.weight > 0));
+      assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6));
+      assert.ok(row.certificates.every(proof =>
+        proof.exits.some(exit => exit.lanes[row.phase + 1] === pickup.lane)));
+    }
+  }
+});
+
+test('decision cargo has independent safe and cargo branches that survive the common rejoin', () => {
+  const rows = sampleRoute(1, FINISH, false, 'level1', 'normal');
+  const decisions = rows.filter(row => row.decisionBranch);
+  assert.ok(decisions.length >= 4, 'optional decisions must recur, not appear only once');
+  for (const row of decisions) {
+    const segment = rows.filter(candidate => candidate.chunkId === row.chunkId);
+    const cargo = row.pickups[0];
+    assert.equal(cargo.lane, row.riskCargoLane);
+    for (const proof of row.certificates) {
+      assert.ok(proof.completed && proof.clearance >= 6);
+      const safeLane = cargo.lane === 0 ? 3 : 0;
+      const safe = proof.exits.filter(exit => exit.lanes[row.phase + 1] === safeLane);
+      const risky = proof.exits.filter(exit => exit.lanes[row.phase + 1] === cargo.lane);
+      assert.ok(safe.length && risky.length, 'both routes must survive Beta augmentation');
+      assert.ok(safe.some(bypass => risky.some(branch => branch.lane === bypass.lane)),
+        'safe and cargo routes must independently reach a common exit');
+    }
+    for (const source of segment) for (const lane of [0, 1, 2, 3]) {
+      assert.ok(source.intermediates.filter(hazard => hazard.lane === lane).length <= 2,
+        'decision corridors must not acquire a three-Beta wall');
+    }
+  }
+});
+
 test('premium cargo offers an optional outer commitment without adding rolls or changing rewards', () => {
   let upgrades = 0, saferSingles = 0;
   for (const distance of IMPLEMENTED_SECTORS.slice(1).map(sector => sector.startsAt))
     for (const lanes of [[0, 1], [2, 3]]) {
     const risky = createTrackGenerator(153), control = createTrackGenerator(153);
-    for (let row = 0; row < 1000; row++) {
+    for (let row = 0; row < 2000; row++) {
       const offers = risky.nextRowPickups(lanes, distance);
       const ordinary = control.nextRowPickups([1, 2], distance);
       assert.equal(offers.length, ordinary.length);

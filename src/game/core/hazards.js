@@ -1,6 +1,6 @@
 import {GAME_BALANCE} from '../data/gameBalance.js';
-import {METERS_PER_PIXEL, routeTimeAtDistance} from './economy.js';
-import {HAZARD_TRAVEL_PX} from '../data/route.js';
+import {METERS_PER_PIXEL, routeTimeAtDistance, routeSpeedAtDistance} from './economy.js';
+import {HAZARD_TRAVEL_PX, SHIP_Y, SPAWN_Y} from '../data/route.js';
 
 export const LANE_CENTERS = GAME_BALANCE.routes.track.laneCentersPx;
 const footprint = (x, y, halfWidth, halfHeight) => Object.freeze({x, y, halfWidth, halfHeight});
@@ -241,6 +241,50 @@ export function hazardBlockedIntervals(hazard) {
     : [[x + minMotion - spec.hitX, x + maxMotion + spec.hitX]];
 }
 
+export function obstacleLaneMask(hazards) {
+  const intervals = hazards.flatMap(hazardBlockedIntervals);
+  return LANE_CENTERS.reduce((mask, center, lane) =>
+    intervals.some(([left, right]) => center > left && center < right)
+      ? mask | (1 << lane) : mask, 0);
+}
+
+export function moverReservation(hazard, sourceDistance, levelId = 'level2', mode = 'normal') {
+  if (!hazard.movement) return null;
+  const geometry = hazardGeometry(hazard);
+  const startX = hazardBaseX(hazard) + (hazard.movement.minOffsetPx ?? 0);
+  const endX = hazardBaseX(hazard) + (hazard.movement.maxOffsetPx ?? 0);
+  const sweptMinX = Math.min(startX, endX) - geometry.width / 2 - 4;
+  const sweptMaxX = Math.max(startX, endX) + geometry.width / 2 + 4;
+  const speed = routeSpeedAtDistance(sourceDistance, levelId, mode);
+  const sweptMinY = SPAWN_Y + (hazard.offsetY ?? 0) - (hazard.movement.warningSeconds ?? 0) * speed;
+  const sweptMaxY = SHIP_Y + geometry.height / 2 + 4;
+  const affectedMask = obstacleLaneMask([hazard]);
+  const bypassLanes = LANE_CENTERS.map((_, lane) => lane)
+    .filter(lane => !(affectedMask & (1 << lane)));
+  if (!bypassLanes.length) return null;
+  const fromDistance = sourceDistance + (SHIP_Y - sweptMaxY) * METERS_PER_PIXEL;
+  const toDistance = sourceDistance + (SHIP_Y - sweptMinY) * METERS_PER_PIXEL;
+  return {fromDistance, toDistance, affectedMask, bypassLane: bypassLanes[0],
+    sourceDistance, sweptMinX, sweptMaxX, sweptMinY, sweptMaxY,
+    affectedLanes: LANE_CENTERS.map((_, lane) => lane).filter(lane => affectedMask & (1 << lane)),
+    fromSeconds: routeTimeAtDistance(Math.max(0, fromDistance), levelId, mode),
+    toSeconds: routeTimeAtDistance(toDistance, levelId, mode)};
+}
+
+export function staticIntersectsMoverReservation(hazard, sourceDistance, reservation) {
+  if (hazard.movement || hazard.motionBounds) return false;
+  const geometry = hazardGeometry(hazard);
+  const x = hazardBaseX(hazard);
+  const physical = hazardBlockedIntervals(hazard);
+  const left = Math.min(x - geometry.width / 2, ...physical.map(interval => interval[0]));
+  const right = Math.max(x + geometry.width / 2, ...physical.map(interval => interval[1]));
+  const center = sourceDistance + (HAZARD_TRAVEL_PX - hazardRouteOffsetY(hazard)) * METERS_PER_PIXEL;
+  const halfRange = Math.max(geometry.height / (2 * hazardScrollScale(hazard)),
+    hazardRouteGeometry(hazard).hitY) * METERS_PER_PIXEL;
+  return left < reservation.sweptMaxX && right > reservation.sweptMinX &&
+    center - halfRange < reservation.toDistance && center + halfRange > reservation.fromDistance;
+}
+
 export function usesPotentialMoverLanes(hazard) {
   const moving = GAME_BALANCE.routes.movingHazards;
   return moving.chicane.validation === 'potential-lanes' && hazard.routeValidation === 'three-center-potential' &&
@@ -349,6 +393,7 @@ export function projectPhysicalEvents(rows, {levelId = 'level1', mode = 'normal'
       events.push({distance, from: distance - halfWindowPx * METERS_PER_PIXEL,
         to: distance + halfWindowPx * METERS_PER_PIXEL,
         placement, encounter, rowIndex: index, sourceDistance,
+        ...(row.moverReservedMask ? {reservedLaneMask: row.moverReservedMask} : {}),
         ownerIds: owners.map(hazard => ids.get(hazard))});
     };
     add(0, 'alpha', alpha, row.hazards);
@@ -442,8 +487,14 @@ export function eventPressure(event, bodies, {levelId = 'level1', mode = 'normal
   });
   const threatenedLanes = LANE_CENTERS.map((_, lane) => masks.some(mask => mask[lane]));
   const simultaneousMasks = [...new Set(masks.map(mask => mask.map(Number).join('')))];
+  const reservedBypassMask = active.reduce((mask, body) => {
+    const reservation = body.hazard.moverReservation;
+    return reservation ? mask | (1 << reservation.bypassLane) |
+      (reservation.paired ? reservation.affectedMask : 0) : mask;
+  }, event.reservedLaneMask ?? 0);
   return {meaningful: threatenedLanes.some(Boolean), threatenedLanes,
-    simultaneousMulti: masks.some(mask => mask.filter(Boolean).length > 1), simultaneousMasks};
+    simultaneousMulti: masks.some(mask => mask.filter(Boolean).length > 1), simultaneousMasks,
+    reservedBypassMask};
 }
 
 export function advancePressureHistory(history, events, {mode = 'normal'} = {}) {
@@ -464,6 +515,10 @@ export function advancePressureHistory(history, events, {mode = 'normal'} = {}) 
     else groups.push([event]);
   }
   for (const group of groups) for (let lane = 0; lane < streaks.length; lane++) {
+    if (group.some(event => (event.reservedBypassMask ?? 0) & (1 << lane))) {
+      streaks[lane] = 0;
+      continue;
+    }
     const threat = group.find(event => event.threatenedLanes[lane]);
     if (threat && streaks[lane] > 0 && streaks[lane] < minimum) {
       violations.push({distance: threat.distance, lane, streak: streaks[lane], short: true,

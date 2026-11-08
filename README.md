@@ -30,7 +30,7 @@ Level 1 completion. Levels 3-5 Coming Soon cards are not playable.
 
 | Document | Responsibility |
 | --- | --- |
-| [GAME_DESIGN](docs/GAME_DESIGN.md) | Implemented rules, four-sector 4,000 m routes, economy, equipment and presentation |
+| [GAME_DESIGN](docs/GAME_DESIGN.md) | Implemented rules, four-sector 2,000 m / 3,000 m routes, economy, equipment and presentation |
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | State/code ownership, persistence, lifecycle, assets and local setup |
 | [TEST_PLAN](docs/TEST_PLAN.md) | Active regression matrix, commands, URL inspection and pending V1-V4 human checks |
 | [DECISIONS](docs/DECISIONS.md) | Current overrides, unfinished specification conflicts and gated backlog |

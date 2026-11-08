@@ -9,7 +9,7 @@ export const BP_TO_COINS = GAME_BALANCE.rewards.blueprintToCoins;
 export const SINGLE_COIN_PAYOUT = GAME_BALANCE.cargo.singleCoinValue;
 export const COIN_STACK_PAYOUT = GAME_BALANCE.cargo.stackCoinValue;
 export const COIN_STACK_CHANCE = GAME_BALANCE.cargo.stackChance;
-/** A pickup appears every 2–4 track rows: steady rhythm, never a long empty stretch. */
+/** A pickup is requested every 1–2 track rows, deferred until a certified cargo branch is available. */
 export const COIN_ROW_GAP_MIN = GAME_BALANCE.cargo.pickupRowGap.min;
 export const COIN_ROW_GAP_MAX = GAME_BALANCE.cargo.pickupRowGap.max;
 export const SLOT_RULES = Object.freeze(Object.fromEntries(

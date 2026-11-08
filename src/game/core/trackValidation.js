@@ -218,8 +218,15 @@ export function validateTrackSequence(rows, speed, options = {}) {
       }
 
     }
-    paths = rows[i].safeLanes.map(lane => candidates.filter(p => p.lane === lane)
-      .sort((a, b) => b.clearance - a.clearance)[0]).filter(Boolean);
+    const branchRows = (options.preserveBranchesAtRows ?? []).filter(index => index <= i);
+    paths = rows[i].safeLanes.flatMap(lane => {
+      const groups = new Map();
+      for (const path of candidates.filter(candidate => candidate.lane === lane)) {
+        const key = branchRows.map(index => path.lanes[index]).join(':');
+        if (!groups.has(key) || groups.get(key).clearance < path.clearance) groups.set(key, path);
+      }
+      return [...groups.values()];
+    });
     if (!paths.length) return {completed: false, clearance: -Infinity, lanes: []};
   }
   const best = paths.sort((a, b) => b.clearance - a.clearance)[0];

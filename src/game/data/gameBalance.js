@@ -46,7 +46,7 @@ const balance = {
       depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40},
     level1: {
       challengeProfileId: 'industrial',
-      sectorEndsMeters: [1000, 2000, 3000, 4000],
+      sectorEndsMeters: [500, 1000, 1500, 2000],
       sectorThemeIds: ['industrial', 'industrial', 'industrial', 'industrial'],
       speed: {startPxPerSecond: 320, endPxPerSecond: 410, sectorStartsPxPerSecond: [320, 350, 380, 410]},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
@@ -58,9 +58,9 @@ const balance = {
     },
     level2: {
       challengeProfileId: 'dustlands',
-      sectorEndsMeters: [1000, 2000, 3000, 4000],
+      sectorEndsMeters: [500, 1000, 2000, 3000],
       sectorThemeIds: ['dustlands', 'dustlands', 'dustlands', 'dustlands'],
-      openingSpeedSource: {levelId: 'level1', distanceMeters: 1000},
+      openingSpeedSource: {levelId: 'level1', distanceMeters: 500},
       speed: {startPxPerSecond: 350, endPxPerSecond: 440, sectorStartsPxPerSecond: [350, 380, 410, 440]},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
@@ -106,7 +106,8 @@ const balance = {
       // plus this reaction padding. Stock trucks are expected to fail, upgrade and retry.
       rowReactionSeconds: 0.5,
       maxLaneChangesPerRow: 1,
-      betaSlots: [0.55, 0.75],
+      betaSlots: [1 / 3, 1 / 2, 2 / 3],
+      continuousBetaSlots: [0.55, 0.75],
       // Owner rule: a lane that opens stays open 2..3 consecutive rows before it is threatened again.
       minimumClearEvents: {normal: 2, continuous: 2},
       maximumClearEvents: {normal: 3, continuous: 3},
@@ -130,9 +131,9 @@ const balance = {
       routeValidation: {
         baseline: {vehicleId: 'standard', loadFraction: 0.5},
         // 'geometric': certify only that an open corridor exists (>= minimumClearancePx); no steering model.
-        certification: 'geometric',
+        certification: 'connected',
         edgeMarginPx: 30, simulationHz: 120,
-        sampleHz: [120], minimumClearancePx: 6, handlingCases: [0, 0.32],
+        sampleHz: [30, 60, 120], minimumClearancePx: 6, handlingCases: [0, 0.32],
         hazardClearDistancePx: 40,
       },
     },
@@ -167,7 +168,7 @@ const balance = {
     stackCoinValue: 5,
     stackChance: 0.2,
     freightChance: 0.04,
-    pickupRowGap: {min: 2, max: 4},
+    pickupRowGap: {min: 1, max: 2},
     pickupCollisionRadiusPx: 30,
     pickupTriggerScale: 1.2,
     singleCoinMass: 1,

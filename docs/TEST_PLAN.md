@@ -1,18 +1,19 @@
 # Hazardous Haul - Active Test Plan
 
-Updated 4 November 2026. This is the current testing/acceptance authority.
-Live topology is [four equal 1,000 m sectors with 4,000 m finishes](GAME_DESIGN.md#levels-sectors-and-modes).
+Updated 7 November 2026. This is the current testing/acceptance authority.
+Live topology is [four sectors with 2,000 m / 3,000 m finishes](GAME_DESIGN.md#levels-sectors-and-modes).
 The hygiene audit did **not** edit test expectations to fit it. The subsequent
 explicit owner repair task reconciles approved stale topology/economy/progression
 fixtures only; generator safety, pressure and occupancy thresholds remain active.
 Exact fresh results, failures, durations and bundle sizes are in
 [AUDIT_REPORT](../AUDIT_REPORT.md). Engineering and human acceptance are distinct.
-Latest repo-wide status: **516 PASS / 2 FAIL of 518**; production build **PASS**.
+Last recorded repo-wide status: **516 PASS / 2 FAIL of 518**; production build **PASS**.
 The audit report identifies the two deferred route-quality findings.
 
-Latest topology follow-up: both implemented levels now use boundaries 0/1,000/
-2,000/3,000/4,000 m. Normal finish clearance removes roadway hazards at 3,990 m
-and blocks hazard spawns thereafter; pickups are unchanged. Focused check:
+Latest topology follow-up: Level 1 boundaries are 0/500/1,000/1,500/2,000 m;
+Level 2 boundaries are 0/500/1,000/2,000/3,000 m. Normal finish clearance removes
+roadway hazards at 1,990 m / 2,990 m and blocks hazard spawns thereafter.
+Pickups are unchanged. Focused check:
 
 ```powershell
 node --test --test-name-pattern="approved route boundaries|Level 1 has four data-driven|Level 2 has independent|Normal finish clears hazards" tests\gameBalance.test.js tests\progression.test.js tests\sectors.test.js tests\sceneLifecycle.test.js

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CHUNK_REGISTRIES, prepareTrackChunk, createTrackStream, encounterDensityAtDistance,
-  hazardsBeforeDepot, rowSpacingAtSpeed, trackEncounterSignature,
+  hazardsBeforeDepot, rowSpacingAtSpeed, trackEncounterSignature, chunkCollisionCoverage,
+  maximumObstacleGapSeconds,
 } from '../src/game/core/trackGenerator.js';
 import {routeSpeedAtDistance, METERS_PER_PIXEL, MAX_TRACK_SPEED} from '../src/game/core/economy.js';
 import {HAZARD_TRAVEL_PX} from '../src/game/data/route.js';
@@ -25,6 +26,40 @@ const baselineOptions = {geometric: true,
 const warningContactEnd = (hazard, spawnDistance) => spawnDistance + (HAZARD_TRAVEL_PX -
   hazardRouteOffsetY(hazard) + Math.max(HAZARD_ROW_ENVELOPE_PX / 2, hazardRouteGeometry(hazard).hitY)) *
   METERS_PER_PIXEL;
+
+test('static baseline retains certified Beta pressure throughout every Level 1 sector', () => {
+  for (const seed of [1, 153, 2330762723]) {
+    const rows = sampleRoute(seed, GAME_BALANCE.routes.level1.finishDistanceMeters, false, 'level1', 'normal');
+    const emitted = rows.filter(row => row.emitted);
+    assert.ok(emitted.every(row => row.hazards.length > 0));
+    assert.ok(emitted.every(row => row.hazards.every(hazard => !hazard.movement)));
+    assert.ok(emitted.filter(row => row.motifId).length > emitted.length / 2);
+    assert.ok(emitted.every(row => row.certificates.every(proof => proof.completed && proof.clearance >= 6)));
+    for (const [index, start] of GAME_BALANCE.routes.level1.sectorStartsMeters.entries()) {
+      const end = GAME_BALANCE.routes.level1.sectorEndsMeters[index];
+      const sector = emitted.filter(row => row.plannedDistance >= start && row.plannedDistance < end);
+      assert.ok(sector.flatMap(row => row.intermediates).length >= sector.length / 2,
+        `${seed}/${start}: static baseline lost its Beta obstacles`);
+    }
+    const actual = chunkCollisionCoverage(rows);
+    assert.ok(actual.occupiedSeconds / actual.routeSeconds >= 1 / 3,
+      `${seed}: physical obstacle occupancy regressed below the sampled baseline target`);
+    assert.ok(new Set(emitted.flatMap(row => row.hazards).map(hazard => hazard.kind)).size >= 3,
+      `${seed}: static formations lost their hazard variety`);
+    const groups = [];
+    let group = null;
+    for (const row of rows) {
+      if (!row.emitted) { group = null; continue; }
+      if (!group) { group = []; groups.push(group); }
+      group.push(row);
+    }
+    assert.ok(groups.every(rows => maximumObstacleGapSeconds(rows) <= 1.55),
+      `${seed}: non-Depot obstacle cadence regressed`);
+    const alphaOnly = chunkCollisionCoverage(rows.map(row => ({...row, intermediates: []})));
+    assert.ok(actual.occupiedSeconds > alphaOnly.occupiedSeconds * 1.35,
+      `${seed}: Betas must add meaningful physical occupancy, not merely row labels`);
+  }
+});
 
 test('connected coverage: actual collision-free time stays distinct from padded gap guards and continuation counts', () => {
   const distance = 100;

@@ -64,22 +64,16 @@ const FREIGHT_CHANCE = GAME_BALANCE.cargo.freightChance;
 export function cargoPickupForRoll(distance, roll, levelId = 'level1', mode = 'normal') {
   if (!Number.isFinite(roll) || roll < 0 || roll >= 1) throw new Error('Invalid cargo roll');
   const step = difficultyStepAtDistance(distance, levelId, mode);
-  if (roll >= COIN_STACK_CHANCE) return {
-    kind: 'coin',
-    mass: GAME_BALANCE.cargo.singleCoinMass,
-    slots: GAME_BALANCE.cargo.singleCoinSlots,
-    value: SINGLE_COIN_PAYOUT,
-  };
-  let tierRoll = roll / COIN_STACK_CHANCE;
+  let tierRoll = roll;
   const table = SECTOR_CARGO[step];
   const tier = table.find(({weight}) => {
     tierRoll -= weight;
     return tierRoll < 0;
   }) ?? table.at(-1);
-  const withinTier = (tierRoll + tier.weight) / tier.weight;
-  const heavy = step > 0 && withinTier < FREIGHT_CHANCE / COIN_STACK_CHANCE;
+  const heavy = step > 0 && roll < FREIGHT_CHANCE;
+  const stack = tier.value > SINGLE_COIN_PAYOUT || roll < COIN_STACK_CHANCE;
   return {
-    kind: heavy ? 'freight' : 'coinStack',
+    kind: heavy ? 'freight' : stack ? 'coinStack' : 'coin',
     mass: heavy ? GAME_BALANCE.cargo.freightMass : GAME_BALANCE.cargo.singleCoinMass,
     slots: GAME_BALANCE.cargo.pickupSlots,
     value: tier.value,

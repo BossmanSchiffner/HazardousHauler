@@ -5,17 +5,17 @@ This plan preserves its original scope and dated execution notes. Older gate
 counts below are historical; the latest status is in the owner checkpoint and
 [AUDIT_REPORT](../AUDIT_REPORT.md).
 
-> **Instructions for Coding Agent**:
+> **Instructions for Coding Agent**: 
 > You are polishing and completing Levels 1 & 2 of *Hazardous Haul*, a top-down cargo runner built with Phaser 3 and Vite.
 > This prompt is strictly grounded in the **November 1, 2026 Architecture Health Report**:
 > - **Original prompt topology, superseded 4 November:** both implemented levels now use four 1,000 m sectors and finish at 4,000 m.
 > - **Scene Architecture:** All gameplay, garage tabs, and upgrade menus live in `src/game/scenes/RoutePrototypeScene.js` (assisted by `src/game/core/menuLayout.js` and `src/game/rendering/industrial.js`). Do not invent separate GarageScene files.
 > - **Recent Upgrades Already Implemented:** Cargo trailer spring physics/shadows, sprite-only obstacle remapping, 4-preset lighting (Dawn/Mid-Day/Dusk/High Noon), Sweeper amber beacon & 3-lane opening, road cargo value labels removed, 5% collectible visual scale, and mobile menu peek/Y-accumulator padding.
 > - **Original gate status:** The 417 PASS / 24 FAIL / 441 total count was the status when this prompt was written; it is not the current result.
->
+> 
 > **Execution Guardrails**:
 > 1. Execute in the **6 sequential slices** below.
-> 2. Run **only each slice's targeted test command** to verify before advancing.
+> 2. Run **only each slice's targeted test command** to verify before advancing. 
 > 3. Preserve confirmed economy numbers: First Cargo Capacity rank = 150 Coins, Swift Blueprint = 6 Blueprints, Crash Consolation Cap = 50 Coins.
 
 ---

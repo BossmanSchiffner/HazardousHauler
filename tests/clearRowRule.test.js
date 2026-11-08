@@ -7,7 +7,7 @@ import {HAZARD_TRAVEL_PX, SHIP_Y} from '../src/game/data/route.js';
 import {METERS_PER_PIXEL, routeTimeAtDistance, routeSpeedAtDistance} from '../src/game/core/economy.js';
 import {createTrackStream, trackEncounterSignature, rowSpacingAtSpeed, ROW_REACTION_SECONDS,
   hazardsBeforeDepot, chunkCollisionSpan, chunkCollisionCoverage, createSeededRandom,
-  shouldSuppressBetaBetweenAlpha, betaIsSandwichedByAlpha} from '../src/game/core/trackGenerator.js';
+  shouldSuppressBetaBetweenAlpha, betaIsSandwichedByAlpha, campingWindows} from '../src/game/core/trackGenerator.js';
 import {advancePressureHistory, projectPhysicalEvents, physicalPressureMetrics,
   hazardDefinition, hazardGeometry, hazardHits, hazardX, hazardBlockedIntervals,
   movingHazardOffset, canonicalMotionAge, sideHazardQuota, hazardSweptArtOverlaps,
@@ -104,6 +104,36 @@ function collisionEvents(rows, options) {
     event.distance < (options.endDistance ?? Infinity))
     .sort((left, right) => left.distance - right.distance);
 }
+
+test('camping diagnostic credits only actual certified off-pair cargo, not intended destinations', () => {
+  const rows = Array.from({length: 4}, (_, index) => ({plannedDistance: 100 + index * 20,
+    phase: 0, emitted: true, spacingPx: 300,
+    hazards: [{kind: 'divider', lane: 2, offsetX: 0, offsetY: 0}], intermediates: [],
+    pickups: [], cargoDestination: 3,
+    certificates: [{completed: true, clearance: 6, exits: [{lanes: [1, 3]}]}]}));
+  assert.ok(campingWindows(rows).some(violation => violation.band === 0b0011));
+  rows[3].pickups = [{lane: 3, value: 10}];
+  assert.ok(!campingWindows(rows).some(violation => violation.band === 0b0011));
+  rows[3].certificates = [];
+  assert.ok(campingWindows(rows).some(violation => violation.band === 0b0011));
+});
+
+test('camping diagnostic does not combine sequential Alpha and Beta blockers into a pair closure', () => {
+  const rows = Array.from({length: 4}, (_, index) => ({plannedDistance: 100 + index * 30,
+    phase: 0, emitted: true, spacingPx: 500,
+    hazards: [{kind: 'divider', lane: 0, offsetX: 0, offsetY: 0}],
+    intermediates: [{kind: 'divider', lane: 1, offsetX: 0, offsetY: -150}], pickups: []}));
+  assert.ok(campingWindows(rows).some(violation => violation.band === 0b0011));
+});
+
+test('Normal baseline prevents four-row lane and adjacent-pair camping across both complete levels', () => {
+  for (const levelId of ['level1', 'level2']) for (const seed of [0, 1, 7, 42, 153, 1234, 98765, 2330762723]) {
+    const rows = sampleRoute(seed, GAME_BALANCE.routes[levelId].finishDistanceMeters, false, levelId, 'normal');
+    assert.deepEqual(campingWindows(rows, {levelId}), [], `${levelId}/${seed}: four-row camping window`);
+    assert.ok(rows.filter(row => row.emitted).every(row => row.certificates.every(proof =>
+      proof.completed && proof.clearance >= 6)));
+  }
+});
 
 test('clear-row rule: Normal and Continuous allow three clear events but the next event fails', () => {
   assert.deepEqual(GAME_BALANCE.routes.track.maximumClearEvents, {normal: 3, continuous: 3});
@@ -213,8 +243,10 @@ test('clear-row rule: Beta uses the last open lane between adjacent Alpha rows b
         if (sharedAlphaBlockedLanes.length && previous.intermediates.length) {
           const lastOpenLane = previous.safeLanes.filter(lane => current.safeLanes.includes(lane))
             .sort((a, b) => a - b).at(-1);
-          assert.ok(Number.isInteger(lastOpenLane));
-          assert.ok(previous.intermediates.every(hazard => hazard.lane === lastOpenLane),
+            if (previous.intermediates.some(hazard => !hazard.filler ||
+              !sharedAlphaBlockedLanes.includes(hazard.lane))) assert.ok(Number.isInteger(lastOpenLane));
+          assert.ok(previous.intermediates.every(hazard => hazard.lane === lastOpenLane ||
+            hazard.filler && sharedAlphaBlockedLanes.includes(hazard.lane)),
             `${seed}: constrained Beta should use last open lane ${lastOpenLane}`);
           constrainedBetas += previous.intermediates.length;
         }

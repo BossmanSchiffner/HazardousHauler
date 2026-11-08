@@ -13,18 +13,18 @@ test('runtime consumers use the single frozen balance source and owner-approved 
   assert.deepEqual(LANE_CENTERS, GAME_BALANCE.routes.track.laneCentersPx);
   assert.equal(ROUTE_END_DISTANCE_M, GAME_BALANCE.routes.level1.finishDistanceMeters);
   assert.equal(GAME_BALANCE.routes.finishClearanceMeters, 10);
-  assert.equal(GAME_BALANCE.routes.level1.finishDistanceMeters, 4000);
-  assert.deepEqual(GAME_BALANCE.routes.level1.sectorEndsMeters, [1000, 2000, 3000, 4000]);
-  assert.deepEqual(GAME_BALANCE.routes.level1.sectorStartsMeters, [0, 1000, 2000, 3000]);
+  assert.equal(GAME_BALANCE.routes.level1.finishDistanceMeters, 2000);
+  assert.deepEqual(GAME_BALANCE.routes.level1.sectorEndsMeters, [500, 1000, 1500, 2000]);
+  assert.deepEqual(GAME_BALANCE.routes.level1.sectorStartsMeters, [0, 500, 1000, 1500]);
   assert.equal(GAME_BALANCE.progression.sectorsPerLevel, 4);
-  assert.equal(GAME_BALANCE.routes.level1.sectorStartsMeters[GAME_BALANCE.progression.checkpointSector - 1], 2000,
+  assert.equal(GAME_BALANCE.routes.level1.sectorStartsMeters[GAME_BALANCE.progression.checkpointSector - 1], 1000,
     'the checkpoint follows Sector 2 completion');
   assert.equal(routeSpeedAtDistance(0), GAME_BALANCE.routes.level1.speed.startPxPerSecond);
   assert.equal(routeSpeedAtDistance(99_999), GAME_BALANCE.routes.level1.speed.endPxPerSecond);
-  assert.deepEqual(GAME_BALANCE.routes.level2.openingSpeedSource, {levelId: 'level1', distanceMeters: 1000});
-  assert.equal(routeSpeedAtDistance(0, 'level2'), routeSpeedAtDistance(1000, 'level1'));
-  assert.equal(GAME_BALANCE.routes.level2.finishDistanceMeters, 4000);
-  assert.deepEqual(GAME_BALANCE.routes.level2.sectorEndsMeters, [1000, 2000, 3000, 4000]);
+  assert.deepEqual(GAME_BALANCE.routes.level2.openingSpeedSource, {levelId: 'level1', distanceMeters: 500});
+  assert.equal(routeSpeedAtDistance(0, 'level2'), routeSpeedAtDistance(500, 'level1'));
+  assert.equal(GAME_BALANCE.routes.level2.finishDistanceMeters, 3000);
+  assert.deepEqual(GAME_BALANCE.routes.level2.sectorEndsMeters, [500, 1000, 2000, 3000]);
   assert.equal(LEVEL2_SECTORS.length, 4);
   assert.deepEqual(SECTORS.map(sector => sector.themeId), ['industrial', 'industrial', 'industrial', 'industrial']);
   assert.deepEqual(LEVEL2_SECTORS.map(sector => sector.themeId), ['dustlands', 'dustlands', 'dustlands', 'dustlands']);

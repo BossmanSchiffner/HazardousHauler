@@ -18,13 +18,13 @@ const unlockDistance = ({levelId, sector, event}) => event === 'complete'
   ? ROUTES[levelId].sectorEndsMeters[sector - 1]
   : ROUTES[levelId].sectorStartsMeters[sector - 1];
 
-test('approved route boundaries: both levels use four 1,000 m sectors and finish at 4,000 m', () => {
-  assert.deepEqual(L1.sectorStartsMeters, [0, 1000, 2000, 3000]);
-  assert.deepEqual(L1.sectorEndsMeters, [1000, 2000, 3000, 4000]);
-  assert.deepEqual(L2.sectorStartsMeters, [0, 1000, 2000, 3000]);
-  assert.deepEqual(L2.sectorEndsMeters, [1000, 2000, 3000, 4000]);
-  assert.equal(L1.finishDistanceMeters, 4000);
-  assert.equal(L2.finishDistanceMeters, 4000);
+test('approved route boundaries give Level 1 a 2000 m finish and Level 2 a 3000 m finish', () => {
+  assert.deepEqual(L1.sectorStartsMeters, [0, 500, 1000, 1500]);
+  assert.deepEqual(L1.sectorEndsMeters, [500, 1000, 1500, 2000]);
+  assert.deepEqual(L2.sectorStartsMeters, [0, 500, 1000, 2000]);
+  assert.deepEqual(L2.sectorEndsMeters, [500, 1000, 2000, 3000]);
+  assert.equal(L1.finishDistanceMeters, 2000);
+  assert.equal(L2.finishDistanceMeters, 3000);
 });
 
 test('equipment gates use the specified Level, Sector and event at exact route boundaries', () => {

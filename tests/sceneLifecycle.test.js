@@ -173,6 +173,65 @@ test('startup save recovery warning uses the error toast only after world and me
   }
 });
 
+test('title video fits completely in portrait and wide viewports and refits when metadata arrives', () => {
+  for (const bounds of [{x: 0, y: 0, width: 390, height: 844},
+    {x: -200, y: 0, width: 1200, height: 700}, {x: 0, y: 0, width: 360, height: 640}]) {
+    const scene = new Scene();
+    const handlers = new Map();
+    const video = {video: {videoWidth: 0, videoHeight: 0}, width: 256, height: 256,
+      setDepth() { return this; }, setOrigin() { return this; },
+      setPosition(x, y) { this.x = x; this.y = y; return this; },
+      setDisplaySize(width, height) { this.displayWidth = width; this.displayHeight = height; return this; },
+      on(event, handler) { handlers.set(event, handler); return this; },
+      play(loop) { this.loop = loop; return this; }};
+    scene.add = {rectangle: (x, y, width, height, fill) => {
+      assert.equal(fill, 0x0b101a);
+      return {setDepth() { return this; }};
+    }, video: () => video};
+    scene.cameras = {main: {setBackgroundColor: color => assert.equal(color, '#0b101a')}};
+    scene.clearOverlay = () => { scene.overlayObjects = []; };
+    scene.setWorldVisible = () => {};
+    scene.cameraViewportBounds = () => bounds;
+    scene.showTitleScreen();
+    const assertFit = () => {
+      assert.ok(video.displayWidth <= bounds.width + 1e-8);
+      assert.ok(video.displayHeight <= bounds.height + 1e-8);
+      assert.ok(Math.abs(video.displayWidth - bounds.width) < 1e-8 ||
+        Math.abs(video.displayHeight - bounds.height) < 1e-8);
+      assert.equal(video.x, bounds.x + bounds.width / 2);
+      assert.equal(video.y, bounds.y + bounds.height / 2);
+      assert.ok(Math.abs(video.displayWidth / video.displayHeight - 9 / 16) < 1e-8);
+    };
+    assertFit();
+    video.video.videoWidth = 360;
+    video.video.videoHeight = 640;
+    handlers.get('play')();
+    assertFit();
+    handlers.get('created')();
+    assertFit();
+    assert.equal(video.video.muted, true);
+    assert.equal(video.loop, true);
+  }
+});
+
+test('cargo feedback distinguishes crate value from the net gain when replacing cheaper cargo', () => {
+  const scene = new Scene();
+  scene.ship = {x: 195, y: 684};
+  scene.hud = {cargo: {}};
+  scene.time = {now: 1000};
+  scene.feedback = {cargoPickup() {}};
+  scene.coinBurst = {explode() {}};
+  scene.pulse = () => {};
+  const values = [];
+  const messages = [];
+  scene.floatCurrency = (value, y, color, size, suffix) => values.push(`${value}${suffix}`);
+  scene.floatText = (x, y, message) => messages.push(message);
+  scene.playPickupFeedback({kind: 'coinStack', value: 10, sprite: {x: 159, y: 684}},
+    {gain: 5, replaced: true});
+  assert.deepEqual(values, ['10 CARGO']);
+  assert.deepEqual(messages, ['HOLD +5']);
+});
+
 test('ordinary startup shows the title screen and first input records its device class', () => {
   const scene = new Scene();
   scene.profile = defaultProfile();
@@ -183,11 +242,16 @@ test('ordinary startup shows the title screen and first input records its device
   assert.equal(titleScreens, 1);
   for (const inputType of ['touch', 'mouse', 'keyboard']) {
     scene.phase = 'title';
-    scene.titleVideo = {stopped: false, stop() { this.stopped = true; }};
+    const video = {stopped: false, destroyed: false, stop() { this.stopped = true; },
+      destroy() { this.destroyed = true; }};
+    scene.titleVideo = video;
+    scene.overlayObjects = [video];
     scene.showMenu = () => { scene.phase = 'menu'; };
     scene.startTitleScreen(inputType);
     assert.equal(scene.initialInputType, inputType);
-    assert.equal(scene.titleVideo.stopped, true);
+    assert.equal(video.stopped, true);
+    assert.equal(video.destroyed, true);
+    assert.equal(scene.titleVideo, null);
     assert.equal(scene.phase, 'menu');
   }
 });

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import titleVideoUrl from '../../../art-direction/LoadIn_Screen.mp4?url';
-import runMusicUrl from '../../../art-direction/BG_Music.mp3?url';
-import logoUrl from '../../../art-direction/GameLogo.svg?url';
+import titleVideoUrl from '../../../../art-direction/LoadIn_Screen.mp4?url';
+import runMusicUrl from '../../../../art-direction/BG_Music.mp3?url';
+import logoUrl from '../../../../art-direction/GameLogo.svg?url';
 import {BUILD_ID} from '../data/build.js';
 import {loadProfile, saveProfile} from '../core/save.js';
 import {DEPOT_APPROACH_HINT_M, HINTS, hintForEvent, markHintSeen} from '../core/onboarding.js';
@@ -267,18 +267,26 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.phase = 'title';
     this.setScreenRenderer(() => this.showTitleScreen());
     this.setWorldVisible(false);
+    this.cameras?.main?.setBackgroundColor?.('#0b101a');
     const viewport = this.cameraViewportBounds();
     const matte = this.add.rectangle(viewport.x + viewport.width / 2,
-      viewport.y + viewport.height / 2, viewport.width, viewport.height, PALETTE.background).setDepth(149);
+      viewport.y + viewport.height / 2, viewport.width, viewport.height, 0x0b101a).setDepth(149);
     this.overlayObjects.push(matte);
     const video = this.add.video(viewport.x + viewport.width / 2,
       viewport.y + viewport.height / 2, 'title_screen_video').setDepth(150).setOrigin(0.5);
     if (video.video) video.video.muted = true;
+    const applyScale = () => {
+      const bounds = this.cameraViewportBounds();
+      const mediaWidth = video.video?.videoWidth || 720;
+      const mediaHeight = video.video?.videoHeight || 1280;
+      const safeScale = Math.min(bounds.width / mediaWidth, bounds.height / mediaHeight);
+      video.setPosition(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      video.setDisplaySize(mediaWidth * safeScale, mediaHeight * safeScale);
+    };
+    video.on('play', applyScale);
+    video.on('created', applyScale);
+    applyScale();
     video.play(true);
-    const mediaWidth = video.video?.videoWidth || 720;
-    const mediaHeight = video.video?.videoHeight || 1280;
-    const fitScale = Math.min(viewport.width / mediaWidth, viewport.height / mediaHeight);
-    video.setScale(fitScale);
     this.titleVideo = video;
     this.overlayObjects.push(video);
   }
@@ -287,8 +295,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
     if (this.phase !== 'title') return;
     this.initialInputType = inputType;
     this.titleVideo?.stop?.();
-    if (this.profile.tutorialCompleted) this.showMenu();
-    else this.beginRookieTrial(inputType);
+    this.clearOverlay();
+    this.titleVideo = null;
+    this.showMenu();
   }
 
   beginRookieTrial(inputType = this.initialInputType) {
@@ -657,13 +666,14 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.tweens.add({targets: target, scale: baseScale * scale, duration, yoyo: true, ease: 'Quad.easeOut'});
   }
 
-  playPickupFeedback(item) {
+  playPickupFeedback(item, {gain = item.value, replaced = false} = {}) {
     this.feedback?.cargoPickup(this.time.now / 1000);
     if (this.tutorialRun) this.floatText(this.ship.x, this.ship.y - 72,
       'CARGO ATTACHED // +15% MASS INERTIA', '#f2c474', 11);
     const isStack = item.kind === 'coinStack';
     this.coinBurst.explode(isStack ? 22 : 9, item.sprite.x, item.sprite.y);
-    this.floatCurrency(`+${item.value}`, this.ship.y - 48, '#ffe6a1', isStack ? 24 : 18);
+    this.floatCurrency(`${item.value}`, this.ship.y - 48, '#ffe6a1', isStack ? 24 : 18, ' CARGO');
+    if (replaced) this.floatText(this.ship.x, this.ship.y - 24, `HOLD +${gain}`, '#6fe6bc', 11);
     this.pulse(this.ship, isStack ? 1.18 : 1.1);
     this.pulse(this.hud.cargo, 1.08, 110);
   }
@@ -2770,7 +2780,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.objects.push({...record, sprite, shadow, roadsideBase, cautionLights});
     }
     for (const pickup of row.pickups) {
-      const x = LANE_CENTERS[pickup.lane];
+      const x = LANE_CENTERS[pickup.lane] + (pickup.offsetX ?? 0);
       const {sprite, pickupGlow} = this.addCargoPickupVisual(x, spawnY, pickup.value);
       this.objects.push({
         sprite, pickupGlow, type: 'cargo', kind: pickup.kind,
@@ -3102,7 +3112,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
           this.cargoItems = collected.items;
           this.syncCargoTotals();
           this.refreshDeveloperReadout();
-          this.playPickupFeedback({...item, value: collected.gain});
+          this.playPickupFeedback(item, {gain: collected.gain, replaced: collected.replaced});
           if (collected.replaced) this.showToast('Cargo upgraded. Your Cargo Value increased.', 'warning');
           if (!this.developerRun) this.triggerHint(item.kind === 'coin' ? 'coinPickup' : 'stackPickup');
           this.removeObjectAt(i);

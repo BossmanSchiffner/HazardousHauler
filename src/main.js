@@ -5,11 +5,11 @@ import {RoutePrototypeScene} from './game/scenes/RoutePrototypeScene.js';
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  backgroundColor: '#0a1222',
+  backgroundColor: '#05080f',
   width: 390,
   height: 844,
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   render: {pixelArt: false, antialias: true},

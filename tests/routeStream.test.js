@@ -156,7 +156,8 @@ test('background route stream stays a bounded distance ahead of consumption', as
       }
       await new Promise(resolve => setTimeout(resolve, 50));
       assert.ok(stream.bufferedRows <= ROUTE_STREAM_AHEAD_ROWS);
-      assert.ok(stream.bufferedRows >= ROUTE_STREAM_AHEAD_ROWS - 1);
+      assert.ok(stream.bufferedRows >= ROUTE_STREAM_AHEAD_ROWS - 1,
+        JSON.stringify({buffered: stream.bufferedRows, failure: stream.failure, stats: stream.stats}));
     } finally {
       stream.destroy();
     }

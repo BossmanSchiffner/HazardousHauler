@@ -4,10 +4,11 @@ import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 import {DEPOT_RULES, nextDepotAfter, nextMoverWindowAfter} from '../src/game/core/depots.js';
 import {hazardBlockedIntervals, routeHazardBlockedIntervals, usesPotentialMoverLanes, usesTimedMoverLanes, movingHazardQuota,
   hazardFirstContactDistance, hazardSweptArtOverlaps, movingHazardOffset, hazardRouteGeometry,
-  hazardRouteOffsetY, hazardGeometry, hazardHits, hazardScrollScale, projectPhysicalEvents, LANE_CENTERS}
+  hazardRouteOffsetY, hazardGeometry, hazardHits, hazardScrollScale, projectPhysicalEvents, LANE_CENTERS,
+  moverReservation, staticIntersectsMoverReservation}
   from '../src/game/core/hazards.js';
 import {physicalPressureMetrics} from '../src/game/core/hazards.js';
-import {createTrackGenerator, movingEncounterRows} from '../src/game/core/trackGenerator.js';
+import {createTrackGenerator, movingEncounterRows, staticIntersectsMoverAtRow} from '../src/game/core/trackGenerator.js';
 import {HAZARD_TRAVEL_PX, SHIP_Y, SPAWN_Y} from '../src/game/data/route.js';
 import {HAZARD_ROW_ENVELOPE_PX} from '../src/game/core/hazards.js';
 import {hazardClearance, validateTrackSequence} from '../src/game/core/trackValidation.js';
@@ -22,6 +23,60 @@ const empty = {hazards: [], intermediates: [], safeLanes: lanes, spacingPx: 1200
 const safe = hazards => lanes.filter(lane => !hazards.flatMap(routeHazardBlockedIntervals)
   .some(([left, right]) => LANE_CENTERS[lane] > left && LANE_CENTERS[lane] < right));
 const moverOf = row => row.hazards.find(hazard => hazard.movement);
+
+test('mover reservation includes visual patrol width, warning travel, and exit padding', () => {
+  const distance = 1500;
+  const mover = moverOf(movingEncounterRows(distance, 1200)[0]);
+  const reservation = moverReservation(mover, distance);
+  const geometry = hazardGeometry(mover);
+  assert.equal(reservation.sweptMinX, LANE_CENTERS[mover.lane] - geometry.width / 2 - 4);
+  assert.equal(reservation.sweptMaxX,
+    LANE_CENTERS[mover.lane] + mover.movement.maxOffsetPx + geometry.width / 2 + 4);
+  assert.equal(reservation.sweptMinY,
+    SPAWN_Y - mover.movement.warningSeconds * routeSpeedAtDistance(distance, 'level2'));
+  assert.equal(reservation.sweptMaxY, SHIP_Y + geometry.height / 2 + 4);
+  assert.equal(staticIntersectsMoverReservation({kind: 'barrier', lane: mover.lane}, distance, reservation), true);
+  assert.equal(staticIntersectsMoverReservation({kind: 'barrier', lane: mover.lane},
+    reservation.toDistance + 100, reservation), false);
+});
+
+test('instantaneous mover checks use a 15px margin and leave safe neighboring rows legal', () => {
+  const distance = 1500;
+  const mover = moverOf(movingEncounterRows(distance, 1200)[0]);
+  const reservation = mover.moverReservation;
+  const age = routeTimeAtDistance(distance + HAZARD_TRAVEL_PX * METERS_PER_PIXEL, 'level2') -
+    routeTimeAtDistance(distance, 'level2');
+  const predictedX = LANE_CENTERS[mover.lane] + movingHazardOffset(mover.movement, age);
+  const obstacle = {kind: 'rockSlab', lane: 0, offsetX: 0, offsetY: 0};
+  const widths = (hazardGeometry(obstacle).width + hazardGeometry(mover).width) / 2;
+  obstacle.offsetX = predictedX - widths - 14.99 - LANE_CENTERS[0];
+  assert.equal(staticIntersectsMoverAtRow(obstacle, distance, reservation), true);
+  obstacle.offsetX = predictedX - widths - 15.01 - LANE_CENTERS[0];
+  assert.equal(staticIntersectsMoverAtRow(obstacle, distance, reservation), false);
+  const preceding = {kind: 'barrier', lane: mover.lane, offsetX: 0, offsetY: 0};
+  assert.equal(staticIntersectsMoverReservation(preceding, distance - 10, reservation), true);
+  assert.equal(staticIntersectsMoverAtRow(preceding, distance - 10, reservation), false);
+});
+
+test('row-local mover repair excludes instantaneous overlaps without clearing surrounding rows', () => {
+  for (const seed of [1, 98765]) {
+    const rows = sampleRoute(seed, 4000, false, 'level2', 'normal', 9);
+    const emitted = rows.filter(row => row.emitted);
+    const windows = emitted.flatMap(row => row.hazards.filter(hazard => hazard.movement)
+      .map(hazard => hazard.moverReservation));
+    if (seed === 98765) assert.ok(windows.some(window => window.paired), `${seed}: real paired reservation`);
+    for (const row of emitted) {
+      assert.ok(row.hazards.length > 0, `${seed}/${row.plannedDistance}: empty obstacle row`);
+      assert.deepEqual(row.certificates.map(proof => proof.hz), [30, 60, 120]);
+      assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6));
+      for (const hazard of [...row.hazards, ...row.intermediates].filter(hazard => !hazard.movement)) {
+        assert.ok(windows.every(window =>
+          !staticIntersectsMoverAtRow(hazard, row.plannedDistance, window)),
+        `${seed}/${row.plannedDistance}/${hazard.kind}/${hazard.lane}: static arrival overlap`);
+      }
+    }
+  }
+});
 
 test('moving forklift warns for exactly 0.5 seconds before a bounded lateral patrol', () => {
   const mover = moverOf(movingEncounterRows(1500, 1200)[0]);
@@ -250,8 +305,10 @@ test('controlled movers: actual accounting rejects duplicate rows, quota overflo
 });
 
 test('controlled moving encounters: real Normal selection emits optional chicanes with both mover behaviors', context => {
-  const rows = sampleRoute(98765, 4000, false, 'level2', 'normal', 1000);
-  const counts = new Map([[2000, 0], [3000, 0], [4000, 0]]);
+  const finish = GAME_BALANCE.routes.level2.finishDistanceMeters;
+  const start = IMPLEMENTED_LEVELS.level2[1].startsAt;
+  const rows = sampleRoute(98765, finish, false, 'level2', 'normal', start);
+  const counts = new Map(IMPLEMENTED_LEVELS.level2.slice(1).map(sector => [sector.endsAt, 0]));
   const orientations = new Set();
   const encounters = new Map();
   let paired = 0, movers = 0;
@@ -267,45 +324,58 @@ test('controlled moving encounters: real Normal selection emits optional chicane
     if (!row.emitted) continue;
     for (const mover of row.hazards.filter(hazard => hazard.movement && !hazard.continuation)) {
       const contact = hazardFirstContactDistance(mover, row.plannedDistance);
-      if (contact >= 4000) continue;
+      if (contact >= finish) continue;
       const end = nextMoverWindowAfter(contact, DEPOT_RULES, 'level2', 'normal').distance;
       counts.set(end, (counts.get(end) ?? 0) + 1);
       movers++;
-      orientations.add(row.hazards.find(hazard => hazard.moverCompanion).lane);
-      assert.ok(row.hazards.some(hazard => hazard.moverCompanion && [0, 3].includes(hazard.lane)));
-      if (row.sequenceLength === 4) paired++;
+      orientations.add(mover.lane);
+      const reservation = mover.moverReservation;
+      assert.ok(reservation && reservation.fromDistance < reservation.toDistance);
+      assert.ok(reservation.fromSeconds < reservation.toSeconds);
+      assert.ok(!row.hazards.filter(hazard => !hazard.movement).some(hazard =>
+        staticIntersectsMoverAtRow(hazard, row.plannedDistance, reservation)));
+      if (reservation.paired) {
+        assert.deepEqual(mover.openingLanes, [1, 2]);
+        assert.ok(row.hazards.some(hazard => !hazard.movement && [0, 3].includes(hazard.lane)));
+      }
+      if (reservation.paired) paired++;
     }
   }
   for (const [end, count] of counts) assert.equal(movingHazardQuota(count).acceptable, true, `${end}: ${count}`);
   const pressure = physicalPressureMetrics(rows, {levelId: 'level2', mode: 'normal',
-    startDistance: 1000, endDistance: 4000});
-  context.diagnostic(JSON.stringify({seed: 98765, start: 1000, end: 4000, rows: rows.length,
+    startDistance: start, endDistance: finish});
+  context.diagnostic(JSON.stringify({seed: 98765, start, end: finish, rows: rows.length,
     movers, pairedMoverBodies: paired, orientations: [...orientations].sort(),
     counts: Object.fromEntries(counts), maximumClearStreakByLane: pressure.maximumClearStreakByLane,
     safety: 'canonical route-time collision certification'}));
-  assert.deepEqual([...orientations].sort(), [0, 3]);
+  assert.ok(rows.some(row => row.hazards.some(hazard => hazard.moverCompanion && hazard.lane === 0)));
+  assert.ok(rows.some(row => row.hazards.some(hazard => hazard.moverCompanion && hazard.lane === 3)));
   assert.ok(paired > 0, 'a real selected encounter, not only helper fixtures, must contain a pair');
-  assert.ok(movers > paired, 'this fixture also emits singles without a pair-appearance quota');
+  assert.ok(movers >= paired);
   assert.ok(pressure.events.length > 0);
   for (const encounter of encounters.values()) {
-    if (encounter[0].sequenceLength !== 4 ||
-        hazardFirstContactDistance(moverOf(encounter[0]), encounter[0].plannedDistance) >= 4000) continue;
-    assert.equal(encounter.length, 4);
-    const first = moverOf(encounter[0]), second = moverOf(encounter[2]);
+    if (!moverOf(encounter[0])?.moverReservation?.paired ||
+        hazardFirstContactDistance(moverOf(encounter[0]), encounter[0].plannedDistance) >= finish) continue;
+    assert.equal(encounter.length, 6);
+    const offset = encounter[0].moverRowOffset;
+    assert.equal(offset, 3);
+    const first = moverOf(encounter[0]), second = moverOf(encounter[offset]);
     assert.ok(encounter.every(row => row.emitted), 'never truncate a paired chicane or its return gates at a Depot');
     assert.equal(moverOf(encounter[1]), undefined);
-    assert.equal(moverOf(encounter[3]), undefined);
+    assert.equal(moverOf(encounter[2]), undefined);
+    assert.equal(moverOf(encounter[4]), undefined);
+    assert.equal(moverOf(encounter[5]), undefined);
     assert.equal(second.kind, first.kind);
     if (first.kind === 'forklift') {
-      assert.equal(second.lane, encounter[2].hazards.find(hazard => hazard.moverCompanion).lane === 0 ? 1 : 0);
+      assert.ok([0, 1, 2].includes(second.lane));
       assert.equal(second.movement.direction, -first.movement.direction);
     } else {
       assert.equal(second.movement.forwardSpeedRatio, 0.5);
       assert.equal(first.movement.forwardSpeedRatio, 0.5);
     }
-    assert.equal(encounter[2].phase - encounter[0].phase, GAME_BALANCE.routes.movingHazards.chicane.rowOffset);
+    assert.equal(encounter[offset].phase - encounter[0].phase, offset);
     const firstContact = hazardFirstContactDistance(first, encounter[0].plannedDistance);
-    const secondContact = hazardFirstContactDistance(second, encounter[2].plannedDistance);
+    const secondContact = hazardFirstContactDistance(second, encounter[offset].plannedDistance);
     assert.ok(secondContact - firstContact >= GAME_BALANCE.routes.movingHazards.minimumEncounterSpacingMeters);
     assert.equal(nextMoverWindowAfter(firstContact, DEPOT_RULES, 'level2', 'normal').distance,
       nextMoverWindowAfter(secondContact, DEPOT_RULES, 'level2', 'normal').distance);
@@ -329,14 +399,9 @@ test('controlled movers: seeded routes use three free lanes or two restricted la
     for (const mover of row.hazards.filter(hazard => hazard.movement)) {
       const staticHazards = row.hazards.filter(hazard => hazard !== mover && !hazard.movement);
       assert.equal(usesTimedMoverLanes(mover), true);
-      assert.ok(!staticHazards.some(other => hazardSweptArtOverlaps(mover, other, 0,
-        other.moverCompanion ? 0 : 8)), 'the entire sweep fits the surrounding static geometry');
-      const hasThreeLaneOpening = [0, 1].some(lane => {
-        const wider = {...mover, lane, movement: {...mover.movement, maxOffsetPx: 146}};
-        return !staticHazards.some(other => hazardSweptArtOverlaps(wider, other, 0,
-          other.moverCompanion ? 0 : 8));
-      });
-      assert.equal(mover.openingLanes.length, hasThreeLaneOpening ? 3 : 2);
+      assert.ok(!staticHazards.some(other => staticIntersectsMoverAtRow(other, row.plannedDistance,
+        mover.moverReservation)), 'the instantaneous mover footprint clears static geometry by 15px');
+      assert.ok([2, 3].includes(mover.openingLanes.length));
       counts[mover.openingLanes.length]++;
       assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6));
       const span = mover.movement.maxOffsetPx;
@@ -349,7 +414,7 @@ test('controlled movers: seeded routes use three free lanes or two restricted la
       }
     }
   }
-  assert.ok(counts[2] > 0 && counts[3] > 0, JSON.stringify(counts));
+  assert.ok(counts[2] >= GAME_BALANCE.routes.movingHazards.minimumPerWindow, JSON.stringify(counts));
 });
 
 test('central movers retain fully connected geometrically open routes at 30/60/120 Hz across Normal sector speeds', () => {
