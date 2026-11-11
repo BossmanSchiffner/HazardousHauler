@@ -9,7 +9,7 @@ sites first, with mobile secondary; not a packaged mobile release.
 From this project folder in PowerShell:
 
 ```powershell
-npm.cmd run dev
+npm.cmd start
 npm.cmd test
 npm.cmd run build
 ```
@@ -17,6 +17,14 @@ npm.cmd run build
 Use a Node version supported by Vite 7. Install dependencies only on a fresh
 setup or an actual missing-dependency failure. Open Vite's printed URL, normally
 http://localhost:5173/; do not open index.html directly.
+
+## Cloudflare Pages
+
+Connect the repository root as the project root, use `npm run build` as the build
+command, and `dist` as the build output directory. `npm start` is the local Vite
+development server; Cloudflare Pages must serve the built static files instead
+of running a Node start process. The app entrypoint loads the game directly to
+the Main Menu and does not request or play a load-in video.
 
 Desktop: move the mouse over the road, or use A/D or Left/Right. Touch: press and
 drag. Garage cards scroll; purchases require the existing confirmation.
