@@ -23,7 +23,7 @@ moverReservation as sweptMoverReservation} from './hazards.js';
 import {driveTrackTransition, validateTrackSequence} from './trackValidation.js';
 import {DEPOT_RULES, MOVER_WINDOW_RULES, depotApproachMeters, nextDepotAfter, nextMoverWindowAfter} from './depots.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
-import {challengeProfile, MOTIF_BASELINE_SWEEP} from '../data/challengeProfiles.js';
+import {challengeProfile, MOTIF_BASELINE_SWEEP, STATIC_CHICANE} from '../data/challengeProfiles.js';
 export {MAX_TRACK_SPEED} from '../data/gameBalance.js';
 
 const routeBalance = GAME_BALANCE.routes.level1;
@@ -42,6 +42,16 @@ export const DENSITY_TARGETS = routeBalance.densityTargets;
 const BETA_HAZARD_KIND = 'divider';
 const BETA_SLOTS = trackBalance.betaSlots;
 const STRAIGHT_RUN_ROWS = 4;
+
+function hasStaticChicanePinchReversal(rows) {
+  if (rows.length !== 2) return false;
+  const pinches = rows.map(row => row.hazards.filter(hazard =>
+    hazard.pinch && hazard.kind === 'sideRail' && hazard.sideObstacle));
+  if (pinches.some(rowPinches => rowPinches.length !== 1)) return false;
+  const [entry, exit] = pinches.map(rowPinches => rowPinches[0].lane);
+  const left = [STATIC_CHICANE.entry.pinchLane, STATIC_CHICANE.exit.pinchLane];
+  return left.includes(entry) && exit === 3 - entry;
+}
 
 export function campingWindows(rows, {levelId = 'level1', mode = 'normal'} = {}) {
   const threats = new Map();
@@ -1402,16 +1412,21 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       lengthPx: guardrailMinimumLength('sideRail'), spanRows: 1, sideObstacle: true, pinch: true});
     if (['side_squeeze', 'narrow_corridor', 'static_chicane'].includes(family)) {
       const source = family === 'static_chicane'
-        ? [industrialRow([[mirror ? 2 : 1, 'divider']], [mirror ? 1 : 2]),
-          industrialRow([[mirror ? 1 : 2, 'divider']], [mirror ? 2 : 1])]
+        ? [STATIC_CHICANE.entry, STATIC_CHICANE.exit].map(({pinchLane, dividerLane}) => {
+          const side = mirror ? 3 - pinchLane : pinchLane;
+          const divider = mirror ? 3 - dividerLane : dividerLane;
+          return industrialRow([[divider, 'divider']], TRACK_LANES.filter(lane =>
+            lane !== divider && lane !== side));
+        })
         : [0, 1].map(() => ({hazards: [], safeLanes: [1, 2], cargoLanes: [1, 2]}));
       return source.map((row, index) => ({...row, spacingPx: spacing +
         (family === 'static_chicane' && index === 0 ? GAME_BALANCE.routes.sideObstacles.chicaneTransitionExtraPx : 0),
         intermediates: [],
         hazards: [...row.hazards.map(h => ({...h, placement: 'alpha'})),
-          pinch(index === 0 ? (mirror ? 3 : 0) : (mirror ? 0 : 3),
+          ...(family === 'static_chicane' ? [pinch(mirror ? 3 - STATIC_CHICANE[index === 0 ? 'entry' : 'exit'].pinchLane
+            : STATIC_CHICANE[index === 0 ? 'entry' : 'exit'].pinchLane,
             family === 'static_chicane' && index === 1
-              ? -spacing * (GAME_BALANCE.routes.sideObstacles.chicaneStaggerRows - 1) : 0)]
+              ? -spacing * (GAME_BALANCE.routes.sideObstacles.chicaneStaggerRows - 1) : 0)] : [])]
           .map(h => ({...h, placement: 'alpha'}))}));
     }
     const gate = opening => industrialRow(TRACK_LANES.filter(blocked => blocked !== opening)
@@ -1583,6 +1598,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   const compose = (source, distance, family, variant, addSide, sideVariant = 0,
     ordinalStart = rowOrdinal, bodies = structures) => {
     if (family === 'moving_intercept') addSide = false;
+    if (family === 'static_chicane' && !hasStaticChicanePinchReversal(source)) return null;
     const positions = [];
     let cursor = distance;
     for (const row of source) {
@@ -1783,6 +1799,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         hazardLanes: TRACK_LANES.filter(lane => !safeLanes.includes(lane)), intermediates: [],
         moverReservedMask: hazards.some(hazard => hazard.movement) && paired ? 0b0110 : 0});
     }
+    if (family === 'static_chicane' && !hasStaticChicanePinchReversal(rows)) return null;
     const moverReservations = [...preemptiveReservations];
     for (const [phase, row] of rows.entries()) {
       for (const hazard of row.hazards.filter(hazard => hazard.movement)) {
@@ -1963,14 +1980,13 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         ? [...gates, ...singles] : pacing !== 'recovery'
           ? gates.flatMap((gate, index) => [gate, singles[index]]) : [...singles, ...gates];
       if (mode === 'normal' && levelId === 'level1' && !schedule.due)
-        bridgeVariants.unshift(['static_chicane', 0, false,
-        baselineSweep(distance, spacing, ordinal, states)]);
+        bridgeVariants.unshift(['static_chicane', 0, false]);
       for (const [family, lane, mirror, sweep] of bridgeVariants) {
         if (family === lastFamily) continue;
         if (attempts >= candidateBudget) break;
         attempts++;
         const variant = lane + (mirror ? TRACK_LANES.length : 0);
-        const source = sweep ?? recipe(family, lane, mirror, spacing);
+        const source = sweep ?? recipe(family, lane, mirror, spacing, distance);
         let bridge = compose(source, distance, family, variant, false, 0, ordinal, bodies);
         if (!bridge || history.includes(signatureFor(family, bridge.rows))) continue;
         bridge = finishNative(bridge, family, distance, approach, states, context, `encounter:${ordinal}`);
@@ -2346,13 +2362,26 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         if (mode === 'normal' && levelId !== 'level2' && !schedule.due && !structures.length) {
         const priorPacing = pacing;
         pacing = 'normal';
-        const sweepSource = baselineSweep(distance, spacing, rowOrdinal);
-        const sweepHazards = countChunkHazards({rows: sweepSource});
+        const chicaneMirror = random() >= 0.5;
+        const chicaneSource = recipe('static_chicane', 0, chicaneMirror, spacing, distance);
+        const sweepHazards = countChunkHazards({rows: chicaneSource});
         const wantSweepSide = sideBodiesFit && before.sideObstacles <
           GAME_BALANCE.routes.sideObstacles.targetShare * (before.obstacles + sweepHazards);
-        let sweep = proposal('static_chicane', 0, false, 0, wantSweepSide, sweepSource);
+        const variant = chicaneMirror ? TRACK_LANES.length : 0;
+        let sweep = proposal('static_chicane', 0, chicaneMirror, variant, wantSweepSide, chicaneSource);
         if (!sweep && wantSweepSide && levelId !== 'level2')
-          sweep = proposal('static_chicane', 0, false, 0, false, sweepSource);
+          sweep = proposal('static_chicane', 0, chicaneMirror, variant, false, chicaneSource);
+        if (sweep?.counts.sideObstacles) {
+          const quota = sideHazardQuota(before.obstacles + sweep.counts.obstacles,
+            before.sideObstacles + sweep.counts.sideObstacles);
+          const without = sideHazardQuota(
+            before.obstacles + sweep.counts.obstacles - 1,
+            before.sideObstacles + sweep.counts.sideObstacles - 1);
+          if (before.sideObstacles >= quota.targetShare *
+                (before.obstacles + sweep.counts.obstacles) ||
+              (quota.share > quota.maximumShare && Math.abs(quota.share - quota.targetShare) >=
+                Math.abs(without.share - quota.targetShare))) sweep = null;
+        }
         if (sweep && (!schedule.due || levelId !== 'level2' ||
                 sweep.rows.some(row => row.moverOverlay))) {
           candidate = {family: 'static_chicane', signature: signatureFor('static_chicane', sweep.rows),
@@ -2393,16 +2422,16 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             spacingPx: phase === masks.length - 1 ? spacing : motifSpacing, intermediates: [],
             motifId: cargoCrossroad ? 'cargo_crossroad' : motif.id, motifPhase: phase,
           }));
-          const composed = proposal('static_chicane', 0, false, 0, false, source);
+          const composed = proposal('track_motif', 0, false, 0, false, source);
           if (!composed || opensStraightRun([composed, ...(composed.witness ?? [])])) continue;
-          const signature = signatureFor('static_chicane', composed.rows);
+          const signature = signatureFor('track_motif', composed.rows);
           if (recent.includes(signature)) continue;
           const crossRoad = needsCrossRoad && composed.rows.some((row, phase) => row.cargoLanes.length &&
             row.safeLanes.some(lane => lane === cargoDestination && composed.results.every(result =>
               result.exits.some(exit => exit.lanes[phase + 1] === lane))));
           if (candidate && (bestCrossRoad || !crossRoad)) continue;
           bestCrossRoad = crossRoad;
-          candidate = {family: 'static_chicane', signature,
+          candidate = {family: 'track_motif', signature,
             ...composed, fallback: false};
           certificates = composed.results;
         }
@@ -2437,8 +2466,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             structures.every(body => body.endOrdinal < rowOrdinal + 1)) {
           mirror = wallUse[0] > wallUse[1];
         }
-        const anticipated = family === 'moving_intercept' ||
-          (levelId === 'level2' && mode === 'normal' && family === 'static_chicane')
+        const anticipated = family === 'moving_intercept'
           ? baselineSweep(distance, spacing, rowOrdinal, exits)
           : recipe(family, lane, mirror, spacing);
         // Recipe rows only estimate the composed demand; once a backup exists, skip proving
