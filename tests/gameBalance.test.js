@@ -56,7 +56,7 @@ test('runtime consumers use the single frozen balance source and owner-approved 
     }
   });
   assert.deepEqual(GAME_BALANCE.routes.sideObstacles, {
-    minimumShare: 0.03, maximumShare: 0.06, targetShare: 0.045,
+    minimumShare: 0.0225, maximumShare: 0.06, targetShare: 0.045,
     minimumSpanRows: 3, maximumSpanRows: 4, accountingWindowMeters: 600,
     chicaneStaggerRows: 1.5, chicaneTransitionExtraPx: 54,
   });

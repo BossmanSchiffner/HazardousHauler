@@ -2389,8 +2389,10 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           certificates = sweep.results;
         } else pacing = priorPacing;
       }
-            if (!candidate && mode === 'normal' && (levelId === 'level2' || pacing !== 'recovery') &&
-                !schedule.due && !structures.length) {
+      const belowMinimumSideQuota = before.obstacles > 0 &&
+        before.sideObstacles < GAME_BALANCE.routes.sideObstacles.minimumShare * before.obstacles;
+      if (!candidate && mode === 'normal' && (levelId === 'level2' || pacing !== 'recovery') &&
+          !schedule.due && !structures.length && !belowMinimumSideQuota) {
         const motifs = challengeProfile(sector.challengeProfileId).motifs;
         const palette = challengeProfile(sector.challengeProfileId).fillerHazardFamilies;
               const offset = levelId === 'level2' ? Math.floor(rowOrdinal / 3) % motifs.length

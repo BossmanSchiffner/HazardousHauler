@@ -17,17 +17,19 @@ const lanes = [86, 159, 232, 305];
 const {playerHalfWidthPx: CAB_HALF_WIDTH, playerHalfHeightPx: CAB_HALF_HEIGHT} = GAME_BALANCE.hazards;
 
 test('side hazard quota accepts only the approved inclusive physical-instance range', () => {
-  for (const side of [3, 4, 5, 6]) {
-    const result = sideHazardQuota(100, side);
-    assert.equal(result.acceptable, true, `${side}%`);
-    assert.equal(result.share, side / 100);
-    assert.equal(result.minimumShare, 0.03);
+  for (const [obstacles, side] of [[10_000, 225], [10_000, 226], [100, 3], [100, 4], [100, 5], [100, 6]]) {
+    const result = sideHazardQuota(obstacles, side);
+    assert.equal(result.acceptable, true, `${100 * side / obstacles}%`);
+    assert.equal(result.share, side / obstacles);
+    assert.equal(result.minimumShare, GAME_BALANCE.routes.sideObstacles.minimumShare);
     assert.equal(result.maximumShare, 0.06);
     assert.equal(result.targetShare, 0.045);
   }
-  for (const side of [0, 2, 7, 100]) assert.equal(sideHazardQuota(100, side).acceptable, false);
-  assert.equal(sideHazardQuota(1_000_001, 30_000).acceptable, false,
-    'rounding to 3.00% must not waive a below-minimum result');
+  for (const [obstacles, side] of [[100, 0], [10_000, 224], [100, 7], [100, 100]]) {
+    assert.equal(sideHazardQuota(obstacles, side).acceptable, false);
+  }
+  assert.equal(sideHazardQuota(1_000_000, 22_499).acceptable, false,
+    'rounding to 2.25% must not waive a below-minimum result');
   assert.equal(sideHazardQuota(999_999, 60_000).acceptable, false,
     'rounding to 6.00% must not waive an above-maximum result');
   assert.equal(sideHazardQuota(0, 0).acceptable, false, 'an empty route is not quota evidence');

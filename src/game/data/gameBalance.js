@@ -88,7 +88,7 @@ const balance = {
       recoverySecondsBySector: [1.8, 1.2, 1.2, 1.2],
     },
     sideObstacles: {
-      minimumShare: 0.03,
+      minimumShare: 0.0225,
       maximumShare: 0.06,
       targetShare: 0.045,
       minimumSpanRows: 3,
