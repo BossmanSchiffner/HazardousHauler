@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
+import {CAMPAIGN_SPEEDS, GAME_BALANCE, MAX_TRACK_SPEED, ROUTE_TOPOLOGY} from '../src/game/data/gameBalance.js';
 import {LEVEL2_SECTORS, SECTOR_CARGO, SECTORS, VEHICLES} from '../src/game/data/catalog.js';
 import {MODULE_DEFS} from '../src/game/core/modules.js';
 import {HAZARDS, LANE_CENTERS, hazardX, guardrailLayout, guardrailMinimumLength} from '../src/game/core/hazards.js';
@@ -8,6 +8,31 @@ import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../src/game/core/depots.js';
 import {ROUTE_END_DISTANCE_M, routeSpeedAtDistance} from '../src/game/core/economy.js';
 
 test('runtime consumers use the single frozen balance source and owner-approved tuning', () => {
+  assert.equal(MAX_TRACK_SPEED, 720);
+  assert.deepEqual(CAMPAIGN_SPEEDS, {
+    level1: [320, 350, 380, 410],
+    level2: [350, 380, 410, 440],
+    level3: [380, 410, 440, 470],
+    level4: [410, 440, 470, 500],
+  });
+  assert.deepEqual(ROUTE_TOPOLOGY, {
+    level1: {
+      finishDistance: 2000, depotDistances: [500, 1000, 1500],
+      checkpointDistance: 1000, sectorEnds: [500, 1000, 1500, 2000],
+    },
+    level2: {
+      finishDistance: 3000, depotDistances: [500, 1000, 2000],
+      checkpointDistance: 1000, sectorEnds: [500, 1000, 2000, 3000],
+    },
+    level3: {
+      finishDistance: 4000, depotDistances: [500, 1500, 2500],
+      checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+    },
+    level4: {
+      finishDistance: 4000, depotDistances: [500, 1500, 2500],
+      checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+    },
+  });
   assert.ok(Object.isFrozen(GAME_BALANCE));
   assert.ok(Object.isFrozen(GAME_BALANCE.routes.track));
   assert.deepEqual(LANE_CENTERS, GAME_BALANCE.routes.track.laneCentersPx);

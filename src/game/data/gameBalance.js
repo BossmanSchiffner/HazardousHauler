@@ -15,7 +15,33 @@
  * New calculations use the new balance; saved ownership is retained and past purchases are
  * never refunded automatically. Moving-hazard bounds and speed live beside their route.
  */
-export const MAX_TRACK_SPEED = 680;
+export const MAX_TRACK_SPEED = 720;
+
+export const CAMPAIGN_SPEEDS = deepFreeze({
+  level1: [320, 350, 380, 410],
+  level2: [350, 380, 410, 440],
+  level3: [380, 410, 440, 470],
+  level4: [410, 440, 470, 500],
+});
+
+export const ROUTE_TOPOLOGY = deepFreeze({
+  level1: {
+    finishDistance: 2000, depotDistances: [500, 1000, 1500],
+    checkpointDistance: 1000, sectorEnds: [500, 1000, 1500, 2000],
+  },
+  level2: {
+    finishDistance: 3000, depotDistances: [500, 1000, 2000],
+    checkpointDistance: 1000, sectorEnds: [500, 1000, 2000, 3000],
+  },
+  level3: {
+    finishDistance: 4000, depotDistances: [500, 1500, 2500],
+    checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+  },
+  level4: {
+    finishDistance: 4000, depotDistances: [500, 1500, 2500],
+    checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+  },
+});
 
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -46,10 +72,27 @@ const balance = {
       depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40},
     level1: {
       challengeProfileId: 'industrial',
-      sectorEndsMeters: [500, 1000, 1500, 2000],
+      sectorEndsMeters: ROUTE_TOPOLOGY.level1.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level1.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level1.checkpointDistance,
       sectorThemeIds: ['industrial', 'industrial', 'industrial', 'industrial'],
-      speed: {startPxPerSecond: 320, endPxPerSecond: 410, sectorStartsPxPerSecond: [320, 350, 380, 410]},
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level1[0], endPxPerSecond: CAMPAIGN_SPEEDS.level1.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level1},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
+      densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
+      densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
+      sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
+    },
+    level4: {
+      challengeProfileId: 'neon',
+      sectorEndsMeters: ROUTE_TOPOLOGY.level4.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level4.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level4.checkpointDistance,
+      sectorThemeIds: ['neon', 'neon', 'neon', 'neon'],
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level4[0], endPxPerSecond: CAMPAIGN_SPEEDS.level4.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level4},
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
       challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
@@ -58,10 +101,13 @@ const balance = {
     },
     level2: {
       challengeProfileId: 'dustlands',
-      sectorEndsMeters: [500, 1000, 2000, 3000],
+      sectorEndsMeters: ROUTE_TOPOLOGY.level2.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level2.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level2.checkpointDistance,
       sectorThemeIds: ['dustlands', 'dustlands', 'dustlands', 'dustlands'],
       openingSpeedSource: {levelId: 'level1', distanceMeters: 500},
-      speed: {startPxPerSecond: 350, endPxPerSecond: 440, sectorStartsPxPerSecond: [350, 380, 410, 440]},
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level2[0], endPxPerSecond: CAMPAIGN_SPEEDS.level2.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level2},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
@@ -285,6 +331,7 @@ const balance = {
       exitLengthPerWidth: 321 / 335,
     },
     collision: {
+      energy_orb: {texture: 'hazard_energy_orb', width: 24, height: 24, hitX: 24, hitY: 28},
       rockSlab: {width: 60, height: 46, hitX: 40, hitY: 36, footprint: [[0, 0, 28, 20]]},
       wreckage: {width: 60, height: 58, hitX: 40, hitY: 41, footprint: [[-9, 0, 19, 25], [19, 10, 9, 15]]},
       signalCabinet: {width: 40, height: 58, hitX: 30, hitY: 43, footprint: [[0, 0, 18, 27]]},
@@ -354,9 +401,11 @@ const balance = {
 };
 
 balance.routes.level1.sectorStartsMeters = [0, ...balance.routes.level1.sectorEndsMeters.slice(0, -1)];
-balance.routes.level1.finishDistanceMeters = balance.routes.level1.sectorEndsMeters.at(-1);
+balance.routes.level1.finishDistanceMeters = ROUTE_TOPOLOGY.level1.finishDistance;
 balance.routes.level2.sectorStartsMeters = [0, ...balance.routes.level2.sectorEndsMeters.slice(0, -1)];
-balance.routes.level2.finishDistanceMeters = balance.routes.level2.sectorEndsMeters.at(-1);
+balance.routes.level2.finishDistanceMeters = ROUTE_TOPOLOGY.level2.finishDistance;
+balance.routes.level4.sectorStartsMeters = [0, ...balance.routes.level4.sectorEndsMeters.slice(0, -1)];
+balance.routes.level4.finishDistanceMeters = ROUTE_TOPOLOGY.level4.finishDistance;
 balance.routes.track.laneSpacingPx =
   balance.routes.track.laneCentersPx[1] - balance.routes.track.laneCentersPx[0];
 balance.routes.track.routeValidation.loadedCapacity = balance.cargoProgression.capacityByRank.at(-1);

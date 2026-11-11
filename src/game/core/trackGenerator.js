@@ -373,8 +373,8 @@ function composeTrackIntermediates(rows, distance, random, levelId, mode, speed,
       const centralMoverWindow = movers.length > 0 && movers.every(usesTimedMoverLanes);
       const filler = allowFillers && (slot === 0 || previous.baselineRhythm || mode === 'normal') &&
         (!movers.length || centralMoverWindow);
-      const palette = filler
-        ? challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId).fillerHazardFamilies : [];
+      const activeProfile = challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId);
+      const palette = filler ? activeProfile.obstaclePalette ?? activeProfile.fillerHazardFamilies : [];
       const firstKind = Math.floor(roll * palette.length);
       const kinds = palette.length
         ? [palette[firstKind], BETA_HAZARD_KIND, ...palette.slice(firstKind + 1), ...palette.slice(0, firstKind)]
@@ -1087,6 +1087,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   // Read-only liveness signal for background planners; it never influences choices or RNG.
   const progress = typeof onPlanningProgress === 'function' ? onPlanningProgress : () => {};
   let random = createSeededRandom(seed);
+  let orbRandom = createSeededRandom(seed ^ 0x4f524231);
+  let nextOrbDistance = null;
   const planningSpacing = distance => {
     const speed = routeSpeedAtDistance(distance, levelId, mode);
     const spacing = rowSpacingAtSpeed(speed, mode, distance) + speed * ROW_REACTION_SECONDS;
@@ -1450,7 +1452,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   const baselineSweep = (distance, spacing, ordinal, entryStates = exits) => {
     const entryX = entryStates[0].reduce((sum, entry) => sum + entry.x, 0) / entryStates[0].length;
     const mirrored = entryX > (LANE_CENTERS[1] + LANE_CENTERS[2]) / 2;
-    const palette = challengeProfile(sectorAtDistance(distance, levelId, mode).challengeProfileId).fillerHazardFamilies;
+    const activeProfile = challengeProfile(sectorAtDistance(distance, levelId, mode).challengeProfileId);
+    const palette = activeProfile.obstaclePalette ?? activeProfile.fillerHazardFamilies;
     const cues = [0, 1, 2, 3].map((phase, index) => cargoPickupForRoll(distance + phase * spacing * METERS_PER_PIXEL,
       createSeededRandom(seed ^ Math.imul(ordinal + index + 1, 0x9e3779b9))(), levelId, mode));
     const valuable = item => item.value > SINGLE_COIN_PAYOUT ||
@@ -2167,12 +2170,14 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   const capturePlanningState = () => ({
     previousRow, exits, previousFamily, recent, recentRows, familyUse, pending, obligations,
     reservations, structures, movingIntervals, plannedPressure, wallUse, planningDistance,
-    rowOrdinal, structureOrdinal, steering, openLaneHistory,
+    rowOrdinal, structureOrdinal, steering, openLaneHistory, nextOrbDistance,
+    orbRandomState: orbRandom.snapshot(),
   });
   const installPlanningState = state => {
     ({previousRow, exits, previousFamily, recent, recentRows, familyUse, pending, obligations,
       reservations, structures, movingIntervals, plannedPressure, wallUse, planningDistance,
-      rowOrdinal, structureOrdinal, steering, openLaneHistory} = state);
+      rowOrdinal, structureOrdinal, steering, openLaneHistory, nextOrbDistance} = state);
+    orbRandom = createSeededRandom(state.orbRandomState);
   };
   const successorPool = (choice, commitment) => {
     const state = capturePlanningState();
@@ -2393,8 +2398,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         before.sideObstacles < GAME_BALANCE.routes.sideObstacles.minimumShare * before.obstacles;
       if (!candidate && mode === 'normal' && (levelId === 'level2' || pacing !== 'recovery') &&
           !schedule.due && !structures.length && !belowMinimumSideQuota) {
-        const motifs = challengeProfile(sector.challengeProfileId).motifs;
-        const palette = challengeProfile(sector.challengeProfileId).fillerHazardFamilies;
+        const activeProfile = challengeProfile(sector.challengeProfileId);
+        const motifs = activeProfile.motifs;
+        const palette = activeProfile.obstaclePalette ?? activeProfile.fillerHazardFamilies;
               const offset = levelId === 'level2' ? Math.floor(rowOrdinal / 3) % motifs.length
                 : Math.floor(random() * motifs.length);
               const mirrorMotif = levelId === 'level2' && Math.floor(rowOrdinal / 3) % 2 === 1;
@@ -2746,6 +2752,25 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         candidate.body?.endOrdinal ?? rowOrdinal);
       rowOrdinal += candidate.rows.length;
       planningDistance = candidate.endDistance;
+      for (const row of candidate.rows) {
+        const rowDistance = row.plannedDistance;
+        const rowProfile = challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId);
+        if (!rowProfile.allowEnergyOrb || !fitsDepot(row, rowDistance) ||
+            rowDistance >= route.finishDistanceMeters) continue;
+        const [minimum, maximum] = rowProfile.orbSpawnIntervalM;
+        if (nextOrbDistance === null) nextOrbDistance = rowDistance + minimum +
+          orbRandom() * (maximum - minimum);
+        if (rowDistance < nextOrbDistance) continue;
+        row.energyOrbs = [{
+          kind: 'energy_orb',
+          distanceMeters: rowDistance,
+          initialX: orbRandom() > 0.5 ? 75 : 315,
+          direction: orbRandom() > 0.5 ? 1 : -1,
+          sweepSpeed: 45,
+          color: 0x00f0ff,
+        }];
+        nextOrbDistance = rowDistance + minimum + orbRandom() * (maximum - minimum);
+      }
       // Only a selected, fully certified candidate may bind subsequent choices.
       // The exact seeded sources and proof results are reused without new modifiers.
       obligations.push(...(candidate.witness ?? []));

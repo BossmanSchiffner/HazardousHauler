@@ -4,7 +4,7 @@ import {rowSpacingAtSpeed} from '../core/trackGenerator.js';
 import {SPAWN_Y} from '../data/route.js';
 
 const {routes} = GAME_BALANCE;
-const minimumSpeed = Math.min(...['level1', 'level2'].flatMap(id =>
+const minimumSpeed = Math.min(...['level1', 'level2', 'level4'].flatMap(id =>
   routes[id].speed.sectorStartsPxPerSecond), routes.continuous.startSpeedPxPerSecond);
 const minimumSpacing = Math.min(rowSpacingAtSpeed(minimumSpeed), rowSpacingAtSpeed(MAX_TRACK_SPEED));
 const maximumGap = rowSpacingAtSpeed(MAX_TRACK_SPEED) +
@@ -27,7 +27,7 @@ const imagesPerRow = routes.track.lanes.length * Math.max(5, maximumParts * 2 + 
 
 /** Conservative descriptor bounds, independent of route seed, quotas and visual theme. */
 export const ROUTE_VISUAL_CAPACITY = Object.freeze({
-  images: residentRows * imagesPerRow + 5 + 4 + 4, // Cab/trailer shadows, two facilities, four skid segments.
+  images: residentRows * imagesPerRow + 5 + 4 + 4 + 32, // Includes 16 orb and 16 glow slots.
   containers: residentRows * routes.track.lanes.length + 2,
   tiles: 4,
 });

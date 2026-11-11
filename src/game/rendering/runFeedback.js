@@ -262,6 +262,20 @@ export class RunFeedback {
     this.addVoice(source, this.context.createGain(), filter, start, 0.12, 0.12);
   }
 
+  energyOrbNearMiss() {
+    if (!this.ready) return;
+    const start = this.context.currentTime;
+    const source = this.context.createOscillator();
+    source.type = 'sine';
+    source.frequency.setValueAtTime(175, start);
+    source.frequency.exponentialRampToValueAtTime(196, start + 0.32);
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(420, start);
+    filter.Q.setValueAtTime(7, start);
+    this.addVoice(source, this.context.createGain(), filter, start, 0.34, 0.075);
+  }
+
   playDepotWhoosh() {
     if (!this.ready) return;
     const start = this.context.currentTime;

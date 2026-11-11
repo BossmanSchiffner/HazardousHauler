@@ -34,7 +34,7 @@ test('depot schedules follow campaign transitions or each global continuous 1000
       assert.equal(next.transition, true);
       distance = next.distance;
     }
-    assert.deepEqual(normal, levelId === 'level1' ? [500, 1000, 1500] : [500, 1000, 2000]);
+    assert.deepEqual(normal, GAME_BALANCE.routes[levelId].sectorEndsMeters.slice(0, -1));
     assert.equal(nextDepotAfter(normal.at(-1), DEPOT_RULES, levelId, 'normal').distance, Infinity);
   }
   let at = 0;
@@ -44,7 +44,8 @@ test('depot schedules follow campaign transitions or each global continuous 1000
     endless.push(next.distance);
     at = next.distance;
   }
-  assert.deepEqual(endless, [1000, 2000, 3000, 4000, 5000]);
+  assert.deepEqual(endless, Array.from({length: 5}, (_, index) =>
+    (index + 1) * GAME_BALANCE.routes.continuous.depotIntervalMeters));
   assert.throws(() => nextDepotAfter(1000, DEPOT_RULES, 'level2', 'continuous'), /per-level/);
   assert.throws(() => nextDepotAfter(-1), /Invalid Depot schedule/);
   assert.throws(() => nextDepotAfter(0, {...DEPOT_RULES, loopMeters: 0}), /Invalid Depot schedule/);
@@ -59,15 +60,19 @@ test('moving windows align with banking and include the final Normal settlement 
     found.push(next.distance);
     at = next.distance;
   }
-  assert.deepEqual(found, [500, 1000, 1500, 2000]);
-  assert.equal(nextMoverWindowAfter(499.99).distance, 500);
-  assert.equal(nextMoverWindowAfter(500).distance, 1000);
-  assert.equal(nextMoverWindowAfter(1500).distance, 2000);
-  assert.equal(nextMoverWindowAfter(2000).distance, Infinity);
-  assert.equal(nextMoverWindowAfter(500, MOVER_WINDOW_RULES, 'level2').distance, 1000);
-  assert.equal(nextMoverWindowAfter(2000, MOVER_WINDOW_RULES, 'level2').distance, 3000);
-  assert.equal(nextMoverWindowAfter(3000, MOVER_WINDOW_RULES, 'level2').distance, Infinity);
-  assert.equal(nextMoverWindowAfter(5000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 6000);
+  const level1Ends = GAME_BALANCE.routes.level1.sectorEndsMeters;
+  const level2Ends = GAME_BALANCE.routes.level2.sectorEndsMeters;
+  assert.deepEqual(found, level1Ends);
+  assert.equal(nextMoverWindowAfter(level1Ends[0] - 0.01).distance, level1Ends[0]);
+  assert.equal(nextMoverWindowAfter(level1Ends[0]).distance, level1Ends[1]);
+  assert.equal(nextMoverWindowAfter(level1Ends[2]).distance, level1Ends[3]);
+  assert.equal(nextMoverWindowAfter(level1Ends.at(-1)).distance, Infinity);
+  assert.equal(nextMoverWindowAfter(level2Ends[0], MOVER_WINDOW_RULES, 'level2').distance, level2Ends[1]);
+  assert.equal(nextMoverWindowAfter(level2Ends.at(-2), MOVER_WINDOW_RULES, 'level2').distance, level2Ends.at(-1));
+  assert.equal(nextMoverWindowAfter(level2Ends.at(-1), MOVER_WINDOW_RULES, 'level2').distance, Infinity);
+  const continuousInterval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+  assert.equal(nextMoverWindowAfter(5 * continuousInterval, MOVER_WINDOW_RULES, 'level1', 'continuous').distance,
+    6 * continuousInterval);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 10000);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').startDistance, 9000);
   assert.throws(() => nextMoverWindowAfter(-1), /Invalid Depot schedule/);
@@ -245,6 +250,8 @@ function tacticalDepotScene(mode = 'normal', rank = 3) {
   const scene = new DepotScene();
   Object.assign(scene, {
     phase: 'running', levelId: 'level1', runMode: mode, profile: defaultProfile(),
+    _scratchPlayerRect: new Rectangle(), _scratchDepotRect: new Rectangle(),
+    _scratchIntersectionRect: new Rectangle(),
     distance: mode === 'continuous' ? 1000 : 500,
     stats: {shieldCapacity: rank, capacity: 11, handling: 0, loadRelief: 0},
     shieldCharges: 0, hull: 2, maxHull: 3, depotCount: 0, invulnerable: 0, holdFullCooldown: 0,
@@ -440,7 +447,7 @@ test('depot Endless stopped Skip alone restores equipped shields without banking
     assert.equal(scene.runEconomy.continuousPassedDepots, 1);
     assert.equal(scene.runEconomy.depotsSkipped, 1);
     assert.equal(scene.runEconomy.depotsReached, 1);
-    assert.equal(scene.nextDepotDistance, 2000);
+    assert.equal(scene.nextDepotDistance, 2 * GAME_BALANCE.routes.continuous.depotIntervalMeters);
     assert.equal(scene.invulnerable, 1);
   }
 });

@@ -3,8 +3,14 @@ import {depotPaletteStep} from '../core/depots.js';
 export const ROAD_SURFACE_PRESETS = Object.freeze({
   industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
   dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
-  neon: Object.freeze({roadTexture: 'neon_road', subRoadTexture: 'subroad_neon', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  neon: Object.freeze({roadTexture: 'road_neon_hex', subRoadTexture: 'overlay_neon_haze', blendMode: 'ADD', overlayAlpha: 0.10}),
   foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+});
+
+export const LEVEL_LIGHTING_PRESETS = Object.freeze({
+  level1: Object.freeze(['dawn', 'dawn', 'midday', 'midday']),
+  level2: Object.freeze(['dawn', 'midday', 'midday', 'dusk']),
+  level4: Object.freeze(['dusk', 'dusk', 'night', 'night']),
 });
 
 export const SECTOR_LIGHTING = Object.freeze([
@@ -13,10 +19,19 @@ export const SECTOR_LIGHTING = Object.freeze([
   Object.freeze({name: 'DUSK TRANSIT', tint: 0x8c6b9e, headlights: true}),
   Object.freeze({name: 'NIGHT SHIFT', tint: 0x46516a, headlights: true}),
 ]);
-export const LEVEL_SECTOR_LIGHTING = Object.freeze({
-  level1: Object.freeze([SECTOR_LIGHTING[0], SECTOR_LIGHTING[0], SECTOR_LIGHTING[1], SECTOR_LIGHTING[1]]),
-  level2: Object.freeze([SECTOR_LIGHTING[0], SECTOR_LIGHTING[1], SECTOR_LIGHTING[1], SECTOR_LIGHTING[2]]),
+const LIGHTING_BY_PRESET = Object.freeze({
+  dawn: SECTOR_LIGHTING[0], midday: SECTOR_LIGHTING[1],
+  dusk: SECTOR_LIGHTING[2], night: SECTOR_LIGHTING[3],
 });
+const NEON_LIGHTING_BY_PRESET = Object.freeze({
+  dusk: Object.freeze({...SECTOR_LIGHTING[2], tint: 0xb090d0}),
+  night: Object.freeze({...SECTOR_LIGHTING[3], tint: 0x403060}),
+});
+export const LEVEL_SECTOR_LIGHTING = Object.freeze(Object.fromEntries(
+  Object.entries(LEVEL_LIGHTING_PRESETS).map(([levelId, presets]) => [levelId,
+    Object.freeze(presets.map(preset => levelId === 'level4'
+      ? NEON_LIGHTING_BY_PRESET[preset] : LIGHTING_BY_PRESET[preset]))]),
+));
 export const OVERDRIVE_LIGHTING = Object.freeze({name: 'HIGH NOON', tint: 0xffffff, headlights: false});
 export const ENVIRONMENT_VISUALS = Object.freeze({
   subRoadSpeed: 0.7, ambientBlendSeconds: 1.8,
@@ -61,7 +76,7 @@ export const ENVIRONMENTS = Object.freeze({
   dustlands: environment('dustlands_road', ['rocks', 'wreckage', 'exposed-conduits'],
     ['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'],
     [0xffffff, 0xf3e4cb, 0xe5d4c1, 0xe9dfce]),
-  neon: environment('neon_road', ['service-facades', 'signal-signs', 'energy-conduits'],
+  neon: environment('road_neon_hex', ['service-facades', 'signal-signs', 'energy-conduits'],
     ['divider', 'signalCabinet', 'neonConduit', 'signGantry'],
     [0xffffff, 0xdde8ff, 0xefdbf8, 0xd5edf2]),
   reactor: environment('reactor_road', ['containment-walls', 'cooling-conduits', 'reactor-panels'],
@@ -72,6 +87,18 @@ export const ENVIRONMENTS = Object.freeze({
     [0xffffff, 0xe4d7ef, 0xd8e2ed, 0xece0dc]),
 });
 
+export const THEMES = Object.freeze({
+  neon: Object.freeze({
+    roadKey: 'road_neon_hex',
+    overlayKey: 'overlay_neon_haze',
+    overlayBlend: 'ADD',
+    overlayAlpha: 0.10,
+    ambientTint: Object.freeze({dusk: 0xb090d0, night: 0x403060}),
+    headlightIntensity: 1.25,
+    hazardGlowIntensity: 1.4,
+  }),
+});
+
 /** Visual themes are keyed by sector theme, so every Industrial/Dustlands sector shares that look. */
 const visualThemes = new Map(Object.entries(ENVIRONMENTS).map(([themeId, environment]) => [themeId, Object.freeze({
   id: themeId,
@@ -80,6 +107,7 @@ const visualThemes = new Map(Object.entries(ENVIRONMENTS).map(([themeId, environ
   roadTints: environment.roadTints,
   surfacePreset: ROAD_SURFACE_PRESETS[themeId === 'reactor' ? 'foundry'
     : themeId === 'overdrive' ? 'neon' : themeId],
+  ...THEMES[themeId],
 })]));
 const warnedVisualThemes = new WeakSet();
 

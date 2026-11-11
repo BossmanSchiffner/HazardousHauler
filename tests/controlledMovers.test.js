@@ -60,7 +60,8 @@ test('instantaneous mover checks use a 15px margin and leave safe neighboring ro
 
 test('row-local mover repair excludes instantaneous overlaps without clearing surrounding rows', () => {
   for (const seed of [1, 98765]) {
-    const rows = sampleRoute(seed, 4000, false, 'level2', 'normal', 9);
+    const rows = sampleRoute(seed, GAME_BALANCE.routes.level2.finishDistanceMeters,
+      false, 'level2', 'normal', 9);
     const emitted = rows.filter(row => row.emitted);
     const windows = emitted.flatMap(row => row.hazards.filter(hazard => hazard.movement)
       .map(hazard => hazard.moverReservation));

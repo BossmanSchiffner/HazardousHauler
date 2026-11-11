@@ -68,6 +68,7 @@ import {
   createBarrierLights,
   createHaulerEffects,
   playImpactSparks,
+  playEnergyOrbSparks,
   createIndustrialTextures,
   stopHaulerExhaust,
   preloadStandardHauler,
@@ -186,6 +187,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.routeVisualPool = new RouteVisualPool(this);
     warmRouteStreamWorkers();
     this.buildWorld();
+    this.createTransientTextPool();
+    this._scratchPlayerRect = new Phaser.Geom.Rectangle();
+    this._scratchDepotRect = new Phaser.Geom.Rectangle();
+    this._scratchIntersectionRect = new Phaser.Geom.Rectangle();
     this.events.once('shutdown', () => {
       this.trackStream?.destroy?.();
       this.trackStream = null;
@@ -470,6 +475,68 @@ export class RoutePrototypeScene extends Phaser.Scene {
     return {fontFamily: 'Arial, sans-serif', fontSize: `${fontSize}px`, color, align: 'center'};
   }
 
+  createTransientTextPool() {
+    this.transientTextPool = [];
+    this.transientTextEntries = new WeakMap();
+    for (let index = 0; index < 32; index++) {
+      const text = this.add.text(0, 0, '', {
+        ...this.textStyle(18),
+        fontStyle: 'bold',
+        stroke: '#08101f',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(22);
+      const icon = this.add.image(0, 0, 'cargo_coin').setVisible(false);
+      const container = this.add.container(0, 0, [icon, text]).setDepth(22).setVisible(false);
+      const entry = {container, text, icon, active: false, persistent: false, lastUsed: 0};
+      this.transientTextPool.push(entry);
+      this.transientTextEntries.set(container, entry);
+    }
+    this.transientTextUseCount = 0;
+  }
+
+  acquireTransientText(x, y, message, color, size, currency = false, persistent = false, depth = 22) {
+    let entry = null;
+    for (const candidate of this.transientTextPool) {
+      if (!candidate.active) {
+        entry = candidate;
+        break;
+      }
+      if (!candidate.persistent && (!entry || candidate.lastUsed < entry.lastUsed)) entry = candidate;
+    }
+    if (!entry || (entry.active && entry.persistent)) {
+      throw new Error('Transient text pool is exhausted by persistent labels');
+    }
+    if (entry.active) this.releaseTransientText(entry.container);
+    entry.active = true;
+    entry.persistent = persistent;
+    entry.lastUsed = ++this.transientTextUseCount;
+    entry.text.setText(message).setFontSize(size).setColor(color).setAlpha(1);
+    entry.icon.setVisible(currency);
+    if (currency) {
+      const iconSize = (size + 2) * SPRITE_ART_SCALE;
+      const width = iconSize + 6 + entry.text.width;
+      const left = -width / 2;
+      entry.text.setOrigin(0, 0.5).setPosition(left + iconSize + 6, 0);
+      entry.icon.setPosition(left + iconSize / 2, 0).setDisplaySize(iconSize, iconSize);
+    } else {
+      entry.text.setOrigin(0.5).setPosition(0, 0);
+    }
+    entry.container.setPosition(x, y).setDepth(depth).setAlpha(1).setVisible(true);
+    return entry.container;
+  }
+
+  releaseTransientText(node) {
+    const entry = this.transientTextEntries?.get(node);
+    if (!entry) {
+      node?.destroy?.();
+      return;
+    }
+    this.tweens?.killTweensOf(node);
+    entry.active = false;
+    entry.persistent = false;
+    node.setAlpha(1).setVisible(false);
+  }
+
   buildHud() {
     this.hudBacking = addHudBacking(this, W);
     const text = (label, x, y, size = 10, color = '#8ab4f8', centered = false) =>
@@ -596,20 +663,16 @@ export class RoutePrototypeScene extends Phaser.Scene {
     else this.showToast(HINTS[id], 'hint');
   }
 
-  floatText(x, y, message, color, size = 18, {rise = 56, duration = 750} = {}) {
-    const txt = this.add.text(x, y, message, {
-      ...this.textStyle(size, color),
-      fontStyle: 'bold',
-      stroke: '#08101f',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(22);
-    this.tweens.add({targets: txt, y: y - rise, alpha: 0, duration, ease: 'Cubic.easeOut', onComplete: () => txt.destroy()});
+  floatText(x, y, message, color, size = 18, rise = 56, duration = 750) {
+    const node = this.acquireTransientText(x, y, message, color, size);
+    this.tweens.add({targets: node, y: y - rise, alpha: 0, duration, ease: 'Cubic.easeOut',
+      onComplete: () => this.releaseTransientText(node)});
   }
 
   floatCurrency(value, y, color, size, suffix = '') {
-    const node = this.addCurrency(value, this.ship.x, y, {size, color, depth: 22, overlay: false, suffix});
+    const node = this.acquireTransientText(this.ship.x, y, `${value}${suffix}`, color, size, true);
     this.tweens.add({targets: node, y: y - 56, alpha: 0, duration: 750,
-      ease: 'Cubic.easeOut', onComplete: () => node.destroy()});
+      ease: 'Cubic.easeOut', onComplete: () => this.releaseTransientText(node)});
   }
 
   pulse(target, scale = 1.15, duration = 90) {
@@ -2666,7 +2729,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
     releaseRouteVisual(this, item.roadsideBase);
     releaseRouteVisual(this, item.blueprintGlow);
     releaseRouteVisual(this, item.pickupGlow);
-    item.valueText?.destroy();
+    releaseRouteVisual(this, item.orbGlow);
+    this.releaseTransientText(item.valueText);
     this.objects.splice(index, 1);
   }
 
@@ -2737,6 +2801,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const shadow = syncSilhouetteShadow(createSilhouetteShadow(this, sprite), sprite, true);
       this.objects.push({...record, sprite, shadow, roadsideBase, cautionLights});
     }
+    for (const orb of emitted ? row.energyOrbs ?? [] : []) {
+      const sprite = routeImage(this, orb.initialX,
+        SPAWN_Y + (this.distance - orb.distanceMeters) / METERS_PER_PIXEL - frameScroll,
+        'hazard_energy_orb').setDepth(8).setTint(orb.color);
+      const orbGlow = routeImage(this, sprite.x, sprite.y, 'glow_orb_radial')
+        .setDepth(7.5).setBlendMode('ADD').setAlpha(0.4);
+      this.objects.push({type: 'hazard', kind: 'energy_orb', ...orb, sprite, orbGlow,
+        plannedDistance: orb.distanceMeters, nearMissPlayed: false});
+    }
     for (const pickup of row.pickups) {
       const x = LANE_CENTERS[pickup.lane] + (pickup.offsetX ?? 0);
       const {sprite, pickupGlow} = this.addCargoPickupVisual(x, spawnY, pickup.value);
@@ -2758,11 +2831,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const blueprintGlow = converted ? null
         : scaleSpriteArt(routeImage(this, sprite.x, sprite.y, 'cargo_blueprint_glow'))
           .setDepth(4.5).setBlendMode('ADD');
-      const valueText = converted
-        ? this.addCurrency(`+${blueprint.amount * BP_TO_COINS}`, sprite.x, spawnY + 26 * SPRITE_ART_SCALE,
-          {size: 11, depth: 6, overlay: false, suffix: ' banked'})
-        : this.add.text(sprite.x, spawnY + 32 * SPRITE_ART_SCALE, `+${blueprint.amount} BP`,
-          this.textStyle(11, colorText(PALETTE.cyanLight))).setOrigin(0.5).setDepth(6);
+      const valueText = this.acquireTransientText(sprite.x,
+        spawnY + (converted ? 26 : 32) * SPRITE_ART_SCALE,
+        converted ? `+${blueprint.amount * BP_TO_COINS} banked` : `+${blueprint.amount} BP`,
+        converted ? '#ffdf7c' : colorText(PALETTE.cyanLight), 11, converted, true, 6);
       if (blueprintGlow) syncBlueprintVisuals(sprite, blueprintGlow, this.time.now);
       this.objects.push({sprite, valueText, blueprintGlow, type: 'blueprint', reward: blueprint});
     }
@@ -3002,6 +3074,18 @@ export class RoutePrototypeScene extends Phaser.Scene {
         item.motionAge = canonicalMotionAge(item.plannedDistance, this.distance, this.levelId, this.runMode);
         item.movementOffsetPx = movingHazardOffset(item.movement, item.motionAge);
         item.sprite.setX(hazardX(item));
+      } else if (item.kind === 'energy_orb') {
+        const nextX = item.sprite.x + item.direction * item.sweepSpeed * (delta / 1000);
+        if (nextX >= 315) {
+          item.sprite.setX(315);
+          item.direction = -1;
+        } else if (nextX <= 75) {
+          item.sprite.setX(75);
+          item.direction = 1;
+        } else {
+          item.sprite.setX(nextX);
+        }
+        item.orbGlow.setPosition(item.sprite.x, item.sprite.y);
       }
       item.roadsideBase?.setY(item.sprite.y);
       if (item.shadow) syncSilhouetteShadow(item.shadow, item.sprite, true);
@@ -3043,6 +3127,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
           : item.type === 'cargo' ? cargoPickupHits(item.sprite.x, item.sprite.y, this.ship.x, this.ship.y)
             : Math.abs(item.sprite.x - this.ship.x) < CARGO_COLLISION_DISTANCE_PX &&
               Math.abs(item.sprite.y - this.ship.y) < VERTICAL_HIT_PX;
+      if (item.kind === 'energy_orb' && !hits && !item.nearMissPlayed &&
+          item.nearMiss.resolved && item.nearMiss.minimumGap > 0 && item.nearMiss.minimumGap <= 40) {
+        item.nearMissPlayed = true;
+        this.feedback?.energyOrbNearMiss();
+      }
       if (hits && item.type === 'blueprint') {
         if (this.tutorialRun) {
           this.tutorialBlueprintsCollected = 1;
@@ -3086,6 +3175,26 @@ export class RoutePrototypeScene extends Phaser.Scene {
             this.invulnerable = GAME_BALANCE.physics.collision.hitInvulnerabilitySeconds;
             this.playHitFeedback(x, y, 0, false, true);
           }
+          continue;
+        }
+        if (item.kind === 'energy_orb') {
+          if (this.invulnerable > 0) continue;
+          closeCallHit = true;
+          this.runEconomy.closeCallBonusPercent = 0;
+          this.removeObjectAt(i);
+          playEnergyOrbSparks(this.haulerEffects, x, y);
+          if (this.shieldCharges > 0) {
+            this.shieldCharges--;
+            this.absorbWithShield(x, y, GAME_BALANCE.physics.collision.shieldInvulnerabilitySeconds);
+            continue;
+          }
+          this.hull = Math.max(1, this.hull - GAME_BALANCE.hazards.hullDamagePerHit);
+          this.runContext.damagingHits++;
+          this.invulnerable = GAME_BALANCE.physics.collision.hitInvulnerabilitySeconds;
+          this.feedback?.impact();
+          this.cameras.main.shake(100, 0.012);
+          this.pulse(this.hud.hull, 1.15, 120);
+          this.floatText(this.ship.x, this.ship.y - 52, 'PLASMA HIT • NONFATAL', '#7ffaff', 16);
           continue;
         }
         const collision = resolveHazardCollision({
@@ -3295,10 +3404,16 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const crossingX = priorShipX + (this.ship.x - priorShipX) * fraction;
     if (!this.debugManager?.flags.bot &&
         depotEntryAllowed({...this.nextDepot, distance: entryDistance}, this.distance, crossingX,
-          Math.min(priorDistance, entryDistance), (player, bay) =>
-            Phaser.Geom.Rectangle.Intersection(
-              new Phaser.Geom.Rectangle(player.x, player.y, player.width, player.height),
-              new Phaser.Geom.Rectangle(bay.x, bay.y, bay.width, bay.height)))) {
+          Math.min(priorDistance, entryDistance), (player, bay) => {
+            this._scratchPlayerRect.setTo(player.x, player.y, player.width, player.height);
+            this._scratchDepotRect.setTo(bay.x, bay.y, bay.width, bay.height);
+            const left = Math.max(this._scratchPlayerRect.x, this._scratchDepotRect.x);
+            const top = Math.max(this._scratchPlayerRect.y, this._scratchDepotRect.y);
+            const right = Math.min(this._scratchPlayerRect.right, this._scratchDepotRect.right);
+            const bottom = Math.min(this._scratchPlayerRect.bottom, this._scratchDepotRect.bottom);
+            return this._scratchIntersectionRect.setTo(left, top,
+              Math.max(0, right - left), Math.max(0, bottom - top));
+          })) {
       this.ship.x = crossingX;
       this.beginDocking();
     } else if (this.distance >= this.nextDepotDistance) {
@@ -3392,7 +3507,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.runEconomy = award.run;
     this.floatText(this.ship.x, this.ship.y - 52,
       `+${GAME_BALANCE.physics.collision.closeCall.bonusStepPercent}% CLOSE CALL!`, '#ffe6a1', 18,
-      {rise: 30, duration: 400});
+      30, 400);
   }
 
   applyMagnet(item, dt) {

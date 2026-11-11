@@ -12,12 +12,18 @@ export const TRACK_MOTIFS = Object.freeze([
   Object.freeze({id: 'doorway', masks: MOTIF_DOORWAY}),
 ]);
 
-const profile = (hazardFamilies, fillerHazardFamilies = []) => Object.freeze({
+const profile = (hazardFamilies, fillerHazardFamilies = [], options = {}) => Object.freeze({
   motifs: TRACK_MOTIFS,
   hazardFamilies: Object.freeze([...new Set([...hazardFamilies, ...fillerHazardFamilies,
-    'sideRail', 'sideWall', 'sweeper'])]),
+    'sideRail', 'sideWall', ...(options.allowSweeper === false ? [] : ['sweeper'])])]),
   fillerHazardFamilies: Object.freeze(fillerHazardFamilies),
   betaHazardFamilies: Object.freeze(['divider', ...fillerHazardFamilies]),
+  ...(options.obstaclePalette ? {obstaclePalette: Object.freeze([...options.obstaclePalette])} : {}),
+  ...(options.allowSweeper !== undefined ? {allowSweeper: options.allowSweeper} : {}),
+  ...(options.allowForklift !== undefined ? {allowForklift: options.allowForklift} : {}),
+  ...(options.allowEnergyOrb !== undefined ? {allowEnergyOrb: options.allowEnergyOrb} : {}),
+  ...(options.orbSpawnIntervalM ? {orbSpawnIntervalM: Object.freeze([...options.orbSpawnIntervalM])} : {}),
+  ...(options.baseGapRange ? {baseGapRange: Object.freeze([...options.baseGapRange])} : {}),
 });
 
 export const CHALLENGE_PROFILES = Object.freeze({
@@ -25,6 +31,22 @@ export const CHALLENGE_PROFILES = Object.freeze({
     'pipeAssembly', 'roadsideMachine', 'cargoDock', 'serviceBoom'], ['barrier', 'rockSlab', 'signalCabinet']),
   dustlands: profile(['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'], ['rockSlab']),
   neon: profile(['divider', 'signalCabinet', 'neonConduit', 'signGantry'], ['signalCabinet']),
+  level4_neon_s1: profile(['barrier', 'signalCabinet', 'rockSlab'], ['barrier', 'signalCabinet', 'rockSlab'], {
+    obstaclePalette: ['barrier', 'signalCabinet', 'rockSlab'], allowSweeper: false, allowForklift: false,
+    allowEnergyOrb: true, orbSpawnIntervalM: [180, 260], baseGapRange: [170, 210],
+  }),
+  level4_neon_s2: profile(['barrier', 'signalCabinet', 'rockSlab'], ['barrier', 'signalCabinet', 'rockSlab'], {
+    obstaclePalette: ['barrier', 'signalCabinet', 'rockSlab'], allowSweeper: false, allowForklift: false,
+    allowEnergyOrb: true, orbSpawnIntervalM: [180, 260], baseGapRange: [150, 190],
+  }),
+  level4_neon_s3: profile(['barrier', 'signalCabinet', 'rockSlab'], ['barrier', 'signalCabinet', 'rockSlab'], {
+    obstaclePalette: ['barrier', 'signalCabinet', 'rockSlab'], allowSweeper: false, allowForklift: false,
+    allowEnergyOrb: true, orbSpawnIntervalM: [180, 260], baseGapRange: [140, 180],
+  }),
+  level4_neon_s4: profile(['barrier', 'signalCabinet', 'rockSlab'], ['barrier', 'signalCabinet', 'rockSlab'], {
+    obstaclePalette: ['barrier', 'signalCabinet', 'rockSlab'], allowSweeper: false, allowForklift: false,
+    allowEnergyOrb: true, orbSpawnIntervalM: [180, 260], baseGapRange: [130, 160],
+  }),
   reactor: profile(['divider', 'rockSlab', 'reactorPipe', 'containment'], ['rockSlab', 'divider']),
   overdrive: profile(['divider', 'rockSlab', 'signalCabinet', 'reactorPipe', 'signGantry', 'containment'],
     ['signalCabinet', 'rockSlab']),

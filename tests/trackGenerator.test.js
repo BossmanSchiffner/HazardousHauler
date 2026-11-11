@@ -334,6 +334,33 @@ test('actual emitted collision instances meet the side quota without counting sc
   }
 });
 
+test('Level 4 Energy Orbs spawn separately from connected static hazard proofs', () => {
+  const generator = createTrackGenerator(481516, 'level4');
+  const orbs = [];
+  let chunk = generator.nextChunk(0);
+  while (chunk.rows.at(-1).plannedDistance < 650) {
+    for (const certificate of chunk.certificates) {
+      assert.equal(certificate.completed, true);
+      assert.ok(certificate.clearance >= GAME_BALANCE.routes.track.routeValidation.minimumClearancePx);
+    }
+    for (const row of chunk.rows) {
+      assert.ok(row.hazards.every(hazard => hazard.kind !== 'energy_orb'),
+        'Energy Orbs must not enter static route proofs');
+      orbs.push(...(row.energyOrbs ?? []));
+    }
+    chunk = generator.nextChunk();
+  }
+  assert.ok(orbs.length > 0, 'the Level 4 route emits scheduled Energy Orbs');
+  for (const orb of orbs) {
+    assert.equal(orb.kind, 'energy_orb');
+    assert.ok(orb.distanceMeters >= 180 && orb.distanceMeters <= 650);
+    assert.ok([75, 315].includes(orb.initialX));
+    assert.ok([-1, 1].includes(orb.direction));
+    assert.equal(orb.sweepSpeed, 45);
+    assert.equal(orb.color, 0x00f0ff);
+  }
+});
+
 test('live instance accounting counts physical Alpha and Beta once after Depot filtering', () => {
   let continuations = 0, beta = 0, excluded = 0;
   for (const seed of [1, 153]) for (const levelId of ['level1', 'level2']) {

@@ -34,6 +34,12 @@ const hazardDefinitions = Object.fromEntries(Object.entries(GAME_BALANCE.hazards
   });
   return [kind, Object.freeze(geometry)];
 }));
+hazardDefinitions.energy_orb = Object.freeze({
+  ...GAME_BALANCE.hazards.collision.energy_orb,
+  kind: 'energy_orb', radius: 12,
+  isMover: true, moverType: 'roaming_lateral', lateralSpeed: 45,
+  minX: 75, maxX: 315, ignoresObstacles: true,
+});
 export const HAZARDS = Object.freeze(hazardDefinitions);
 const HAZARD_STAGGER_PX = GAME_BALANCE.hazards.staggerPx;
 // Imported roadside scenery can overhang the shoulder; guardrail collision bodies occupy one lane.
@@ -118,11 +124,28 @@ export function hazardGeometry(hazard) {
 }
 
 export function hazardHits(kind, hazardX, hazardY, shipX, shipY) {
-  const {hitX, hitY, footprint} = hazardGeometry(kind);
+  const {hitX, hitY, footprint, radius} = hazardGeometry(kind);
+  if (radius) {
+    const dx = Math.max(0, Math.abs(hazardX - shipX) - GAME_BALANCE.hazards.playerHalfWidthPx);
+    const dy = Math.max(0, Math.abs(hazardY - shipY) - GAME_BALANCE.hazards.playerHalfHeightPx);
+    return dx * dx + dy * dy < radius * radius;
+  }
   if (footprint) return footprint.some(part =>
     Math.abs(hazardX + part.x - shipX) < part.halfWidth + GAME_BALANCE.hazards.playerHalfWidthPx &&
     Math.abs(hazardY + part.y - shipY) < part.halfHeight + GAME_BALANCE.hazards.playerHalfHeightPx);
   return Math.abs(hazardX - shipX) < hitX && Math.abs(hazardY - shipY) < hitY;
+}
+
+export function energyOrbX(orb, elapsedSeconds) {
+  const {minX, maxX, lateralSpeed} = hazardDefinition('energy_orb');
+  if (![orb.initialX, orb.direction, elapsedSeconds].every(Number.isFinite) ||
+      ![-1, 1].includes(orb.direction) || elapsedSeconds < 0) {
+    throw new Error('Invalid energy orb trajectory');
+  }
+  const span = maxX - minX;
+  const distance = orb.initialX - minX + orb.direction * lateralSpeed * elapsedSeconds;
+  const phase = ((distance % (span * 2)) + span * 2) % (span * 2);
+  return minX + (phase <= span ? phase : span * 2 - phase);
 }
 
 export const isGuardrail = hazard => Boolean(hazardDefinition(typeof hazard === 'string' ? hazard : hazard.kind).elongated);

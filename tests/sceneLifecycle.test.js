@@ -435,16 +435,36 @@ function depotScene() {
   scene.lines = [];
   scene.dustSurface = {};
   scene.objects = [];
+  scene._scratchPlayerRect = new Rectangle();
+  scene._scratchDepotRect = new Rectangle();
+  scene._scratchIntersectionRect = new Rectangle();
   scene.time = {now: 0};
   scene.overlayObjects = [];
   scene.uiRows = [];
   scene.uiCurrency = [];
+  scene.add = {
+    image(x, y, key) {
+      return {
+        x, y, key, width: 390, height: 190, displayHeight: 190,
+        setDepth() { return this; },
+        setScale(scale) { this.displayHeight = this.height * scale; return this; },
+      };
+    },
+  };
   scene.addCard = () => {};
   scene.addStatRow = (label, value, y, options) => scene.uiRows.push({label, value, y, ...options});
   scene.addCurrency = (value, x, y, options) => {
     scene.uiCurrency.push({value, x, y, ...options});
     return {width: 50, displayWidth: 50, setAlpha() {}, setPosition() {}, setY() {}, destroy() {}};
   };
+  scene.acquireTransientText = (x, y, text) => ({
+    x, y, text,
+    setPosition(nextX, nextY) { this.x = nextX; this.y = nextY; return this; },
+    setVisible(value) { this.visible = value; return this; },
+    setAlpha(value) { this.alpha = value; return this; },
+    destroy() {},
+  });
+  scene.releaseTransientText = node => node?.destroy?.();
   for (const method of ['clearOverlay', 'setWorldVisible', 'refreshHud', 'triggerHint', 'showToast',
     'syncHaulerVisuals', 'panel', 'hideToast', 'addButton', 'createMenuScroll', 'finishMenuScroll']) {
     scene[method] = () => {};
@@ -470,6 +490,43 @@ function finishDocking(scene) {
   for (let frame = 0; frame < 31 && scene.phase === 'docking'; frame++) scene.updateStep(0, 50);
   assert.equal(scene.phase, 'depot');
 }
+
+test('transient text pool prewarms labels and reuses released entries', () => {
+  const scene = new Scene();
+  let created = 0;
+  const displayObject = (x = 0, y = 0, text = '') => ({
+    x, y, text, width: text.length * 8,
+    setOrigin() { return this; },
+    setDepth() { return this; },
+    setVisible(value) { this.visible = value; return this; },
+    setText(value) { this.text = value; this.width = value.length * 8; return this; },
+    setFontSize() { return this; },
+    setColor() { return this; },
+    setAlpha(value) { this.alpha = value; return this; },
+    setPosition(nextX, nextY) { this.x = nextX; this.y = nextY; return this; },
+    setDisplaySize() { return this; },
+    destroy() { throw new Error('pooled labels must not be destroyed'); },
+  });
+  scene.add = {
+    text(x, y, text) { created++; return displayObject(x, y, text); },
+    image(x, y) { return displayObject(x, y); },
+    container(x, y) {
+      const container = displayObject(x, y);
+      container.setDepth = () => container;
+      return container;
+    },
+  };
+  scene.tweens = {killTweensOf() {}};
+  scene.createTransientTextPool();
+  assert.equal(created, 32);
+  const first = scene.acquireTransientText(20, 30, 'PICKUP', '#ffffff', 18);
+  scene.releaseTransientText(first);
+  const reused = scene.acquireTransientText(40, 50, 'BANKED', '#ffdf7c', 14, true);
+  assert.equal(reused, first);
+  assert.equal(reused.visible, true);
+  assert.equal(reused.alpha, 1);
+  assert.equal(created, 32);
+});
 
 test('URL debug boots the exact implemented level and sector without recording progress', () => {
   for (const levelId of ['level1', 'level2']) for (const sectorNumber of [1, 2, 3, 4]) {

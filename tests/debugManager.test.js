@@ -5,6 +5,7 @@ import {defaultProfile} from '../src/game/core/save.js';
 import {hazardGeometry, hazardX, LANE_CENTERS, movingHazardOffset} from '../src/game/core/hazards.js';
 import {routeTimeAtDistance, SLOT_MAX} from '../src/game/core/economy.js';
 import {loadoutStats, MODULE_DEFS} from '../src/game/core/modules.js';
+import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 
 test('debug flags activate only on exact explicit true values or validated paired warp', () => {
   for (const search of ['', '?unrelated=true', '?god=false&bot=false&unlockAll=false&fast=false']) {
@@ -118,7 +119,8 @@ test('debug bot checks shared canonical mover motion through the complete predic
 test('approved debug 3.5x speed inspects both current full routes in under 60 simulated seconds', () => {
   const debug = new DebugManager('?fast=true');
   assert.equal(DEBUG_FAST_MULTIPLIER, 3.5);
-  for (const [levelId, end] of [['level1', 4000], ['level2', 5000]]) {
+  for (const levelId of ['level1', 'level2']) {
+    const end = GAME_BALANCE.routes[levelId].finishDistanceMeters;
     assert.equal(debug.inspectionSeconds(levelId), routeTimeAtDistance(end, levelId) / 3.5);
     assert.ok(debug.inspectionSeconds(levelId) < 60);
   }

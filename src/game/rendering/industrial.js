@@ -120,16 +120,20 @@ export const TEXTURE_SIZES = Object.freeze({
     ...(id === 'industrial' ? [] : [[`divider_${id}`, Object.freeze([64, 30])]]),
   ])),
   cargo_stack: Object.freeze([32, 30]),
+  hazard_energy_orb: Object.freeze([32, 32]),
+  glow_orb_radial: Object.freeze([64, 64]),
   cargo_spark: Object.freeze([8, 8]),
   module_util_impact_pulse: Object.freeze([40, 40]),
   industrial_road: Object.freeze([390, 1248]),
   level2_road: Object.freeze([390, 1248]),
   dustlands_road: Object.freeze([390, 1248]),
+  road_neon_hex: Object.freeze([390, 512]),
   neon_road: Object.freeze([390, 1248]),
   reactor_road: Object.freeze([390, 1248]),
   overdrive_road: Object.freeze([390, 1248]),
   ...Object.fromEntries(Object.values(ROAD_SURFACE_PRESETS).map(preset =>
     [preset.subRoadTexture, Object.freeze([390, 1248])])),
+  overlay_neon_haze: Object.freeze([512, 512]),
   road_decal_skid: Object.freeze([48, 64]),
   road_dawn_glints: Object.freeze([390, 312]),
   truck_headlight_cone: Object.freeze([ENVIRONMENT_VISUALS.headlightWidth, ENVIRONMENT_VISUALS.headlightLength]),
@@ -894,6 +898,113 @@ function drawSubRoad(g, preset) {
   }
 }
 
+function drawNeonRoad(g) {
+  const width = 390, height = 512;
+  const cyan = 0x00f0ff, magenta = 0xff007f;
+  g.fillStyle(0x0d1117, 1).fillRect(0, 0, width, height);
+
+  for (const [index, x] of [122.5, 195.5, 268.5].entries()) {
+    const color = index % 2 ? magenta : cyan;
+    g.lineStyle(7, color, 0.12).lineBetween(x, 0, x, height);
+    g.lineStyle(2, cyan, 0.6).lineBetween(x - 1.5, 0, x - 1.5, height);
+    g.lineStyle(2, magenta, 0.6).lineBetween(x + 1.5, 0, x + 1.5, height);
+  }
+
+  const radiusX = 10, radiusY = 9;
+  const corners = [
+    [-radiusX, 0], [-radiusX / 2, -radiusY], [radiusX / 2, -radiusY],
+    [radiusX, 0], [radiusX / 2, radiusY], [-radiusX / 2, radiusY],
+  ];
+  for (let row = -1; row < Math.ceil(height / (radiusY * 1.5)) + 1; row++) {
+    const centerY = row * radiusY * 1.5;
+    for (let column = -1; column < Math.ceil(width / (radiusX * 1.5)) + 1; column++) {
+      const centerX = column * radiusX * 1.5 + (row % 2 ? radiusX * 0.75 : 0);
+      for (let edge = 0; edge < corners.length; edge++) {
+        const [x1, y1] = corners[edge], [x2, y2] = corners[(edge + 1) % corners.length];
+        g.lineStyle(1, 0x1f2937, 0.92)
+          .lineBetween(centerX + x1, centerY + y1, centerX + x2, centerY + y2);
+      }
+    }
+  }
+  g.lineStyle(1, 0x374151, 0.8);
+  for (let y = -8; y < height + 12; y += radiusY * 3) {
+    g.lineBetween(44, y, 346, y);
+  }
+
+  for (const x of [0, 346]) {
+    g.fillStyle(0x1b222c, 1).fillRect(x, 0, 44, height);
+    g.fillStyle(0x374151, 1).fillRect(x + (x ? 0 : 40), 0, 4, height);
+    const channelX = x ? x + 6 : x + 34;
+    g.fillStyle(0x070b10, 1).fillRect(channelX, 0, 4, height);
+    g.fillStyle(cyan, 0.16).fillRect(channelX, 0, 4, height);
+    g.fillStyle(cyan, 0.6).fillRect(channelX + 1, 0, 2, height);
+  }
+}
+
+function bakeNeonHazeTexture(scene) {
+  const key = 'overlay_neon_haze';
+  if (scene.textures.exists(key)) return;
+  const size = 512;
+  const texture = scene.textures.createCanvas(key, size, size);
+  const context = texture.getContext();
+  const pixels = context.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = Math.min(x, size - 1 - x) / size;
+      const dy = Math.min(y, size - 1 - y) / size;
+      const cornerFade = Math.exp(-((dx * dx) + (dy * dy)) / 0.018);
+      const alpha = Math.round(cornerFade * 42);
+      const index = (y * size + x) * 4;
+      pixels.data[index] = 0x8b;
+      pixels.data[index + 1] = 0x5c;
+      pixels.data[index + 2] = 0xf6;
+      pixels.data[index + 3] = alpha;
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.setFilter(0);
+  texture.refresh();
+}
+
+function bakeOrbGlowTexture(scene) {
+  const key = 'glow_orb_radial';
+  if (scene.textures.exists(key)) return;
+  const size = 64;
+  const texture = scene.textures.createCanvas(key, size, size);
+  const context = texture.getContext();
+  const pixels = context.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const distance = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / (size / 2);
+      const falloff = Math.max(0, 1 - distance);
+      const index = (y * size + x) * 4;
+      pixels.data[index] = 0x18;
+      pixels.data[index + 1] = 0xb9;
+      pixels.data[index + 2] = 0xff;
+      pixels.data[index + 3] = Math.round(falloff * falloff * 190);
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.setFilter(0);
+  texture.refresh();
+}
+
+export function bakeNeonRoadTexture(scene) {
+  assertTextureBakingAllowed(scene);
+  if (!scene.textures.exists('road_neon_hex')) {
+    const [width, height] = TEXTURE_SIZES.road_neon_hex;
+    const graphics = scene.add.graphics();
+    try {
+      drawNeonRoad(graphics);
+      graphics.generateTexture('road_neon_hex', width, height);
+    } finally {
+      graphics.destroy();
+    }
+  }
+  bakeNeonHazeTexture(scene);
+  bakeOrbGlowTexture(scene);
+}
+
 function drawRoadDecal(g) {
   for (const x of [12, 32]) g.fillStyle(0x050a12).fillRect(x, 0, 4, 64);
 }
@@ -1036,6 +1147,7 @@ export function createIndustrialTextures(scene) {
   createVehicleTextures(scene, STANDARD_HAULER_ART, standardHaulerFrames());
   createStandaloneTextures(scene);
   createLightTextures(scene);
+  bakeNeonRoadTexture(scene);
   if (!scene.textures.exists('hazard_divider')) drawObstacleArt(scene, 'hazard_divider');
   for (const key of new Set(OBSTACLE_ART.flatMap(art => art.textures))) {
     if (!scene.textures.exists(key)) drawObstacleArt(scene, key);
@@ -1077,6 +1189,14 @@ export function createIndustrialTextures(scene) {
     ])),
     cargo_stack: drawCargoCapacityCrate,
     cargo_spark: graphics => graphics.fillStyle(PALETTE.white).fillCircle(4, 4, 4),
+    hazard_energy_orb: graphics => {
+      graphics.fillStyle(0x00f0ff, 0.14).fillCircle(16, 16, 15);
+      graphics.fillStyle(0x00f0ff, 0.3).fillCircle(16, 16, 11);
+      graphics.fillStyle(0x081b24, 1).fillCircle(16, 16, 8);
+      graphics.lineStyle(2, 0x7ffaff, 0.95).strokeCircle(16, 16, 8);
+      graphics.fillStyle(0xffffff, 1).fillCircle(16, 16, 4);
+      graphics.fillStyle(0xffffff, 0.8).fillCircle(16, 16, 6);
+    },
     hauler_gold_sparkle: graphics => {
       polygon(graphics, PALETTE.goldLight, [[6, 0], [7, 4], [12, 6], [7, 7],
         [6, 12], [4, 7], [0, 6], [4, 4]]);
@@ -1362,6 +1482,20 @@ function createGrindEmitter(scene) {
   return {emitter, anchor};
 }
 
+function createEnergyOrbEmitter(scene) {
+  const emitter = scene.add.particles(0, 0, PARTICLE_DOT_KEY, {
+    lifespan: {min: 110, max: 220}, speed: {min: 90, max: 220},
+    angle: {min: 0, max: 360}, scale: {start: 1.2, end: 0},
+    alpha: {start: 1, end: 0}, tint: [0x00f0ff, 0xb060ff, 0xffffff],
+    blendMode: 'ADD', emitting: false, maxAliveParticles: 20,
+  }).setDepth(16.3);
+  return emitter;
+}
+
+export function playEnergyOrbSparks(effects, x, y) {
+  effects?.orbSparks?.explode(14, x, y);
+}
+
 export function playImpactSparks(effects, ship, x, y) {
   const {emitter, anchor} = effects.grind;
   anchor.impactAngle = Math.atan2(ship.y - y, ship.x - x) * 180 / Math.PI;
@@ -1394,9 +1528,10 @@ export function createHaulerEffects(scene) {
   const exhaust = createExhaustEmitter(scene);
   const damageSmoke = createExhaustEmitter(scene, 0x20242a);
   const grind = createGrindEmitter(scene);
+  const orbSparks = createEnergyOrbEmitter(scene);
   const sparkles = [0, 1, 2].map(() => scene.add.image(0, 0, 'hauler_gold_sparkle')
     .setDepth(8).setVisible(false));
-  return {shadow, cargoShadows, rack, hitches, exhaust, damageSmoke, grind, sparkles};
+  return {shadow, cargoShadows, rack, hitches, exhaust, damageSmoke, grind, orbSparks, sparkles};
 }
 
 export function stopHaulerExhaust(effects) {
@@ -1404,6 +1539,8 @@ export function stopHaulerExhaust(effects) {
     emitter.emitting = false;
     emitter.killAll?.();
   });
+  effects.orbSparks?.stop?.();
+  effects.orbSparks?.killAll?.();
 }
 
 export function syncBlueprintVisuals(sprite, glow, time, glowOffsetY = 0) {

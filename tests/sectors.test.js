@@ -22,7 +22,7 @@ import {CHALLENGE_PROFILES, challengeProfile} from '../src/game/data/challengePr
 import {LEVEL_SECTOR_LIGHTING} from '../src/game/data/environments.js';
 
 const level2Routes = new Map();
-const level2Route = (seed, start = 9, end = 4000) => {
+const level2Route = (seed, start = 9, end = GAME_BALANCE.routes.level2.finishDistanceMeters) => {
   const key = `${seed}:${Math.max(9, start)}:${end}`;
   if (!level2Routes.has(key)) level2Routes.set(key, sampleRoute(seed, end, false, 'level2', 'normal', start));
   return level2Routes.get(key);
@@ -43,7 +43,7 @@ test('sector challenge identity is independent of visual metadata and gameplay o
     assert.equal(changedArt.difficultyStep, sector.difficultyStep);
     assert.equal(changedArt.challengeProfileId, sector.challengeProfileId);
     assert.equal(challengeProfile(changedArt.challengeProfileId),
-      CHALLENGE_PROFILES[GAME_BALANCE.routes[sector.id.split('-')[0]].challengeProfileId]);
+      CHALLENGE_PROFILES[changedArt.challengeProfileId]);
   }
   assert.ok(Object.isFrozen(CHALLENGE_PROFILES));
   for (const profile of Object.values(CHALLENGE_PROFILES)) {
@@ -60,15 +60,18 @@ test('sector challenge identity is independent of visual metadata and gameplay o
 
 test('Level 1 has four data-driven sector boundaries and difficulty steps up at each one', () => {
   assert.equal(sectorAtDistance(0).id, 'level1-sector1');
-  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.startsAt), [0, 500, 1000, 1500]);
-  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt), [500, 1000, 1500, 2000]);
+  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.startsAt),
+    GAME_BALANCE.routes.level1.sectorStartsMeters);
+  assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt),
+    GAME_BALANCE.routes.level1.sectorEndsMeters);
   assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.endsAt - sector.startsAt), [500, 500, 500, 500]);
   assert.deepEqual(IMPLEMENTED_SECTORS.map(sector => sector.themeId), ['industrial', 'industrial', 'industrial', 'industrial']);
   for (const [distance, step] of [[0, 0], [499.999, 0], [500, 1], [1000, 2], [1500, 3], [1999, 3], [2000, 3]]) {
     assert.equal(difficultyStepAtDistance(distance), step, `${distance} m`);
   }
   assert.equal(difficultyStepAtDistance(0, 'level1', 'continuous'), 1);
-  assert.equal(difficultyStepAtDistance(4000, 'level1', 'continuous'), 1,
+  assert.equal(difficultyStepAtDistance(
+    4 * GAME_BALANCE.routes.continuous.depotIntervalMeters, 'level1', 'continuous'), 1,
     'Continuous stays at the Sector 2 baseline independently of milestone speeds');
   for (let i = 1; i < IMPLEMENTED_SECTORS.length; i++) {
     const sector = IMPLEMENTED_SECTORS[i];
@@ -80,11 +83,26 @@ test('Level 1 has four data-driven sector boundaries and difficulty steps up at 
   for (const invalid of [NaN, Infinity, -1]) assert.throws(() => sectorAtDistance(invalid), /Invalid/);
 });
 
+test('Level 4 registers four Neon challenge sectors at the approved route boundaries', () => {
+  const sectors = IMPLEMENTED_LEVELS.level4;
+  assert.deepEqual(sectors.map(({startsAt, endsAt}) => [startsAt, endsAt]),
+    [[0, 500], [500, 1500], [1500, 2500], [2500, 4000]]);
+  assert.deepEqual(sectors.map(sector => sector.challengeProfileId),
+    ['level4_neon_s1', 'level4_neon_s2', 'level4_neon_s3', 'level4_neon_s4']);
+  assert.deepEqual(sectors.map(sector => sector.visualThemeId), ['neon', 'neon', 'neon', 'neon']);
+  assert.equal(sectorAtDistance(0, 'level4'), sectors[0]);
+  assert.equal(sectorAtDistance(500, 'level4'), sectors[1]);
+  assert.equal(sectorAtDistance(1500, 'level4'), sectors[2]);
+  assert.equal(sectorAtDistance(2500, 'level4'), sectors[3]);
+  assert.equal(sectorAtDistance(4000, 'level4'), sectors[3]);
+});
+
 test('Level 2 has independent four-sector progress and opens at its configured Level 1 speed', () => {
   const sectors = IMPLEMENTED_LEVELS.level2;
   assert.equal(sectors.length, 4);
-  assert.deepEqual(sectors.map(sector => sector.startsAt), [0, 500, 1000, 2000]);
-  assert.deepEqual(sectors.map(sector => sector.endsAt), [500, 1000, 2000, 3000]);
+  assert.deepEqual(sectors.map(sector => sector.startsAt),
+    [0, ...GAME_BALANCE.routes.level2.sectorEndsMeters.slice(0, -1)]);
+  assert.deepEqual(sectors.map(sector => sector.endsAt), GAME_BALANCE.routes.level2.sectorEndsMeters);
   assert.deepEqual(sectors.map(sector => sector.id),
     ['level2-sector1', 'level2-sector2', 'level2-sector3', 'level2-sector4']);
   assert.deepEqual(sectors.map(sector => sector.themeId), ['dustlands', 'dustlands', 'dustlands', 'dustlands']);
@@ -106,8 +124,12 @@ test('speed ladder interpolates approved sector starts and clamps every runtime 
         (sector.startsAt + sectors[index + 1].startsAt) / 2, levelId), (speeds[index] + speeds[index + 1]) / 2);
     }
     assert.equal(routeSpeedAtDistance(1e7, levelId), speeds.at(-1));
-    for (const mode of levelId === 'level1' ? ['normal', 'continuous'] : ['normal']) for (const distance of [0, 1000, 5000, 8000, 1e7]) {
-      assert.ok(routeSpeedAtDistance(distance, levelId, mode) <= MAX_TRACK_SPEED);
+    for (const mode of levelId === 'level1' ? ['normal', 'continuous'] : ['normal']) {
+      const route = GAME_BALANCE.routes[levelId];
+      for (const distance of [0, route.sectorEndsMeters[1], route.finishDistanceMeters,
+        route.finishDistanceMeters + 3 * GAME_BALANCE.routes.continuous.depotIntervalMeters, 1e7]) {
+        assert.ok(routeSpeedAtDistance(distance, levelId, mode) <= MAX_TRACK_SPEED);
+      }
     }
   }
   const elapsedSeconds = (start, end, levelId) => {
@@ -119,8 +141,10 @@ test('speed ladder interpolates approved sector starts and clamps every runtime 
   };
 
   for (const levelId of ['level1', 'level2']) {
-    for (const end of [1000, 4000, 8000]) assert.ok(Math.abs(
-      routeTimeAtDistance(end, levelId) - elapsedSeconds(0, end, levelId)) < 0.001);
+    const finish = GAME_BALANCE.routes[levelId].finishDistanceMeters;
+    for (const end of [1000, finish, finish + 2 * GAME_BALANCE.routes.continuous.depotIntervalMeters]) {
+      assert.ok(Math.abs(routeTimeAtDistance(end, levelId) - elapsedSeconds(0, end, levelId)) < 0.001);
+    }
   }
 });
 
@@ -173,7 +197,7 @@ test('Level 2 forklift variants keep open corridors and actual emitted connected
   }
   const representativeChunks = variants.filter((chunk, index) => index % 17 === 0);
   for (const chunk of representativeChunks) {
-    for (const distance of [1500, 4000]) {
+    for (const distance of [1500, GAME_BALANCE.routes.level2.finishDistanceMeters - 1]) {
       const rows = prepareTrackChunk(chunk, distance, () => 1, 'level2').rows;
       const speed = routeSpeedAtDistance(distance, 'level2');
       // Owner rule: certify an open corridor (geometry only); upgrades decide who can drive it.
@@ -239,7 +263,7 @@ test('Level 1 stays static and Level 2 introduces only lateral Forklifts from Se
     ['DAWN TRANSIT', 'DAWN TRANSIT', 'MID-DAY TRANSIT', 'MID-DAY TRANSIT']);
   assert.equal(LEVEL_SECTOR_LIGHTING.level2[3].name, 'DUSK TRANSIT');
   assert.equal(LEVEL_SECTOR_LIGHTING.level2[3].headlights, true);
-  const level1 = sampleRoute(153, 4000, false, 'level1', 'normal');
+  const level1 = sampleRoute(153, GAME_BALANCE.routes.level1.finishDistanceMeters, false, 'level1', 'normal');
   assert.ok(level1.every(row => [...row.hazards, ...row.intermediates].every(hazard => !hazard.movement)));
   const patrolLanes = new Set();
   for (const seed of [1, 153, 1234, 98765]) {
@@ -264,7 +288,8 @@ test('Level 1 stays static and Level 2 introduces only lateral Forklifts from Se
 });
 
 test('continuous speed milestones use a global Industrial Sector 2 baseline instead of per-level Overdrive stages', () => {
-  for (const distance of [0, 1000, 5000, 7000, 8000, 9000, 11000]) {
+  const continuousInterval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+  for (const distance of [0, ...[1, 5, 7, 8, 9, 11].map(milestone => milestone * continuousInterval)]) {
     assert.equal(routeSpeedAtDistance(distance, 'level1', 'continuous'), Math.min(680, 350 + Math.floor(distance / 1000) * 40));
     assert.equal(sectorAtDistance(distance, 'level1', 'continuous'), IMPLEMENTED_LEVELS.level1[1]);
     assert.equal(nextMoverWindowAfter(distance, MOVER_WINDOW_RULES, 'level1', 'continuous').distance,

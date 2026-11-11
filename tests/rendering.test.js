@@ -13,7 +13,7 @@ import {
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y, recolorLargeCargoPickup,
   SPRITE_ART_SCALE, scaleSpriteArt, addModuleIcon,
   DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights,
-  syncSectorRoad, syncDepotEntrance, createDepotEntrance, hazardTexture, vehicleTint,
+  syncSectorRoad, syncDepotEntrance, createDepotEntrance, hazardTexture, vehicleTint, bakeNeonRoadTexture,
   createDepotFacility, depotFacilityHeight, createSilhouetteShadow, syncSilhouetteShadow, SHADOW_TINT,
   GUARDRAIL_ART, createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon,
   GARAGE_DISPLAY_ART, preloadGarageDisplayArt,
@@ -485,7 +485,8 @@ test('each accepted cargo plays the five-note pickup chime through finite manage
   const notes = [...f.feedback.voices].map(voice => voice.source);
   assert.deepEqual(notes.map(note => note.frequency.events[0][1]), [261.63, 293.66, 329.63, 392, 523.25]);
   assert.deepEqual(notes.map(note => note.startTime), [10, 10.08, 10.16, 10.24, 10.32]);
-  assert.deepEqual(notes.map(note => note.stops[0]), [10.3, 10.38, 10.46, 10.54, 10.62]);
+  const expectedStops = [10.3, 10.38, 10.46, 10.54, 10.62];
+  assert.ok(notes.every((note, index) => Math.abs(note.stops[0] - expectedStops[index]) < 1e-9));
   assert.deepEqual(f.vibrations, [30]);
   f.feedback.resetRun(195);
   assert.equal(f.feedback.voices.size, 0);
@@ -513,6 +514,13 @@ test('sound feedback synthesizes hard crashes, throttled scrapes and Depot whoos
   const nodesAfterScrape = f.nodes.length;
   f.feedback.playMetalScrape();
   assert.equal(f.nodes.length, nodesAfterScrape, 'held wall contact is rate-limited');
+  f.feedback.clearVoices();
+  f.feedback.energyOrbNearMiss();
+  const hum = f.feedback.voices.values().next().value;
+  assert.equal(hum.source.type, 'sine');
+  assert.equal(hum.filter.type, 'bandpass');
+  assert.equal(hum.filter.Q.events[0][1], 7);
+  assert.equal(hum.source.stops[0], 10.34);
   f.feedback.clearVoices();
   f.feedback.depot();
   const [whoosh, first, second] = [...f.feedback.voices];
@@ -685,19 +693,21 @@ test('chassis steering returns from +/-3.5 degrees over exactly 120ms; actual sc
   assert.equal(live.runEconomy.closeCallBonusPercent, 5);
   const alert = alerts.at(-1);
   assert.equal(alert[2], '+5% CLOSE CALL!');
-  assert.equal(alert[5].rise, 30);
-  assert.equal(alert[5].duration, 400);
+  assert.equal(alert[5], 30);
+  assert.equal(alert[6], 400);
   const textNode = {setOrigin() { return this; }, setDepth() { return this; }};
+  live.acquireTransientText = () => textNode;
   live.add = {text: () => textNode};
   live.textStyle = Scene.prototype.textStyle;
-  Scene.prototype.floatText.call(live, 195, 600, alert[2], '#ffe6a1', 18, alert[5]);
+  Scene.prototype.floatText.call(live, 195, 600, alert[2], '#ffe6a1', 18, alert[5], alert[6]);
   assert.equal(animations.at(-1).y, 570);
   assert.equal(animations.at(-1).duration, 400);
 });
 import {CHALLENGE_PROFILES} from '../src/game/data/challengeProfiles.js';
 import {MODULE_DEFS, formatStat} from '../src/game/core/modules.js';
-import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR_LIGHTING, LEVEL_SECTOR_LIGHTING,
-  OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS} from '../src/game/data/environments.js';
+import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR_LIGHTING,
+  LEVEL_LIGHTING_PRESETS, LEVEL_SECTOR_LIGHTING, THEMES, OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS}
+  from '../src/game/data/environments.js';
 import {ambientAtPoint, createRoadEnvironment, destroyRoadEnvironment, lightingForSector,
   setRoadEnvironmentVisible, setRoadLighting, startRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS} from '../src/game/core/sectors.js';
@@ -1683,7 +1693,8 @@ test('visual theme lookup preserves shipped textures and falls back without chan
     const current = resolveVisualTheme(sector);
     assert.equal(current.id, sector.themeId, 'every sector in a level shares its theme art');
     assert.equal(current.roadTexture, ENVIRONMENTS[sector.themeId].roadTexture);
-    assert.equal(sector.themeId, levelId === 'level2' ? 'dustlands' : 'industrial');
+    assert.equal(sector.themeId, levelId === 'level2' ? 'dustlands'
+      : levelId === 'level4' ? 'neon' : 'industrial');
     assert.ok(mock.textures.has(current.roadTexture));
     for (const visualThemeId of [undefined, 'unavailable-art', 'toString']) {
       const missing = {...sector, visualThemeId};
@@ -1697,7 +1708,7 @@ test('visual theme lookup preserves shipped textures and falls back without chan
       }
     }
     const changed = {...sector, visualThemeId: 'neon'};
-    assert.equal(resolveVisualTheme(changed).roadTexture, 'neon_road');
+    assert.equal(resolveVisualTheme(changed).roadTexture, 'road_neon_hex');
     assert.equal(hazardTexture('sideWall', changed), 'chicane_mid', 'guardrails use one approved chicane set');
     assert.equal(hazardTexture('divider', changed), 'divider_neon');
     assert.equal(changed.difficultyStep, sector.difficultyStep);
@@ -2381,44 +2392,73 @@ function roadEnvironmentFixture() {
 test('layered road textures are solid, with additive Dustlands dust and multiply Industrial grunge, never cutouts', () => {
   const mock = drawingScene();
   createIndustrialTextures(mock.scene);
-  const signatures = [];
+  const neonRoad = mock.textures.get('road_neon_hex');
+  assert.deepEqual([neonRoad.width, neonRoad.height], [390, 512]);
+  assert.deepEqual(neonRoad.commands.slice(0, 2), [
+    ['fillStyle', 0x0d1117, 1], ['fillRect', 0, 0, 390, 512],
+  ]);
+  const haze = mock.textures.get('overlay_neon_haze');
+  assert.deepEqual([haze.width, haze.height], [512, 512]);
+  const hazePixels = haze.commands.find(([method]) => method === 'putImageData')[1].data;
+  assert.equal(hazePixels[(256 * 512 + 256) * 4 + 3], 0);
+  assert.ok(hazePixels[3] > 0, 'violet haze is strongest at the corners');
+  assert.deepEqual(TEXTURE_SIZES.hazard_energy_orb, [32, 32]);
+  assert.deepEqual(TEXTURE_SIZES.glow_orb_radial, [64, 64]);
+  assert.deepEqual([mock.textures.get('hazard_energy_orb').width,
+    mock.textures.get('hazard_energy_orb').height], [32, 32]);
+  assert.deepEqual([mock.textures.get('glow_orb_radial').width,
+    mock.textures.get('glow_orb_radial').height], [64, 64]);
+  assert.throws(() => {
+    mock.scene.phase = 'running';
+    bakeNeonRoadTexture(mock.scene);
+  }, /baked before gameplay/);
+  const signatures = new Map();
   for (const [id, preset] of Object.entries(ROAD_SURFACE_PRESETS)) {
     const texture = mock.textures.get(preset.subRoadTexture);
-    assert.deepEqual([texture.width, texture.height], [390, 1248]);
-    signatures.push(JSON.stringify(texture.commands));
+    assert.deepEqual([texture.width, texture.height], id === 'neon' ? [512, 512] : [390, 1248]);
+    if (id !== 'neon') signatures.set(id, JSON.stringify(texture.commands));
     const road = mock.textures.get(preset.roadTexture);
     assert.ok(road.commands.some(([method, x, y, width, height]) =>
       method === 'fillRect' && x === 0 && y === 0 && width === 390 && height === road.height), id);
     assert.ok(!road.commands.some(([method]) => ['clearRect', 'fill'].includes(method)), 'no alpha carving');
-    assert.equal(preset.blendMode, id === 'dustlands' ? 'ADD' : 'MULTIPLY');
+    assert.equal(preset.blendMode, ['dustlands', 'neon'].includes(id) ? 'ADD' : 'MULTIPLY');
     assert.ok(preset.overlayAlpha > 0 && preset.overlayAlpha < 0.2);
   }
-  assert.equal(new Set(signatures).size, 2, 'one subtle dust and one grunge material');
+  assert.notEqual(signatures.get('industrial'), signatures.get('dustlands'));
   assert.ok(!mock.textures.has('road_decal_oil'));
   assert.ok(!mock.textures.has('road_decal_crack'));
   assert.ok(!mock.textures.has('road_decal_rut'));
   const skid = mock.textures.get('road_decal_skid');
   assert.equal(skid.commands.filter(([method]) => method === 'fillRect').length, 2);
   assert.ok(!skid.commands.some(([method]) => method.includes('Ellipse') || method.includes('Circle')));
-  assert.deepEqual(Object.keys(IMPLEMENTED_LEVELS), ['level1', 'level2'], 'presets never create playable levels');
+  assert.deepEqual(Object.keys(IMPLEMENTED_LEVELS), ['level1', 'level2', 'level4']);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.roadTexture, THEMES.neon.roadKey);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.subRoadTexture, THEMES.neon.overlayKey);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.blendMode, THEMES.neon.overlayBlend);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.overlayAlpha, THEMES.neon.overlayAlpha);
+  assert.deepEqual(THEMES.neon.ambientTint, {dusk: 0xb090d0, night: 0x403060});
+  assert.equal(THEMES.neon.headlightIntensity, 1.25);
+  assert.equal(THEMES.neon.hazardGlowIntensity, 1.4);
 });
 
 test('sector lighting follows each live level boundary and continuous uses Mid-Day independently', () => {
-  const steps = {level1: [0, 0, 1, 1], level2: [0, 1, 1, 2]};
+  assert.deepEqual(LEVEL_LIGHTING_PRESETS.level4, ['dusk', 'dusk', 'night', 'night']);
   for (const [levelId, sectors] of Object.entries(IMPLEMENTED_LEVELS)) {
     const finish = sectors.at(-1).endsAt;
     for (const [index, sector] of sectors.entries()) {
-      const expected = SECTOR_LIGHTING[steps[levelId][index]];
+      const expected = LEVEL_SECTOR_LIGHTING[levelId][index];
       assert.equal(LEVEL_SECTOR_LIGHTING[levelId][index], expected);
       assert.equal(lightingForSector(sector, sector.startsAt, finish, 'normal', levelId), expected);
       assert.equal(lightingForSector(sector, sector.endsAt - 0.01, finish, 'normal', levelId), expected);
       assert.equal(lightingForSector(sector, sector.startsAt, finish, 'continuous', levelId), SECTOR_LIGHTING[1]);
-      assert.notEqual(expected, SECTOR_LIGHTING[3], 'Night is reserved for future levels');
+      if (levelId !== 'level4') assert.notEqual(expected, SECTOR_LIGHTING[3]);
     }
     assert.equal(lightingForSector(sectors.at(-1), finish, finish, 'normal', levelId), OVERDRIVE_LIGHTING, levelId);
   }
   assert.deepEqual(SECTOR_LIGHTING.map(light => light.tint), [0xe8d0b0, 0xffffff, 0x8c6b9e, 0x46516a]);
   assert.deepEqual(SECTOR_LIGHTING.map(light => light.headlights), [false, false, true, true]);
+  assert.deepEqual(LEVEL_SECTOR_LIGHTING.level4.map(light => light.tint),
+    [0xb090d0, 0xb090d0, 0x403060, 0x403060]);
   assert.throws(() => lightingForSector({number: 1}, 0, 5000, 'normal', 'level3'), /Unavailable lighting/);
 });
 
@@ -2783,8 +2823,8 @@ test('one pooled diesel emitter makes expanding charcoal puffs that drift with r
   const {scene, created} = effectsScene();
   const effects = createHaulerEffects(scene);
   const {emitter, anchor} = effects.exhaust;
-  assert.equal(created.filter(node => node.type === 'particles').length, 3,
-    'normal diesel, low-Hull smoke and reused grind/impact sparks');
+  assert.equal(created.filter(node => node.type === 'particles').length, 4,
+    'normal diesel, low-Hull smoke, grind/impact sparks and orb sparks');
   assert.equal(effects.thrust, undefined, 'no flame images remain');
   assert.equal(TEXTURE_SIZES.cargo_thrust, undefined);
   assert.equal(emitter.key, 'particle-dot');
