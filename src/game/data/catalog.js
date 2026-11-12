@@ -61,3 +61,4 @@ const levelSectors = levelId => GAME_BALANCE.routes[levelId].sectorThemeIds.map(
 });
 export const SECTORS = levelSectors('level1');
 export const LEVEL2_SECTORS = levelSectors('level2');
+export const LEVEL3_SECTORS = levelSectors('level3');

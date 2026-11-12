@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics,
+  upgradeTileContentMetrics, adaptiveCardMetrics,
 } from '../src/game/core/menuLayout.js';
 
 test('responsive viewport fills short portrait widths without shrinking the game to phone height', () => {
@@ -48,6 +49,29 @@ test('phone upgrade grid uses readable two-column cards without changing the gen
   assert.equal(grid.padding, 32, 'cards are inset from the industrial frame');
 });
 
+test('upgrade tile content keeps padded, non-overlapping rows and adapts to tile dimensions', () => {
+  for (const [width, height] of [[145, 180], [157, 194], [200, 240]]) {
+    const tile = upgradeTileContentMetrics(width, height);
+    const bounds = [
+      [tile.titleY - tile.titleHeight / 2, tile.titleY + tile.titleHeight / 2],
+      [tile.rankY - 6 * tile.scale, tile.rankY + 6 * tile.scale],
+      [tile.iconY - tile.iconSize / 2, tile.iconY + tile.iconSize / 2],
+      [tile.benefitY - tile.benefitHeight / 2, tile.benefitY + tile.benefitHeight / 2],
+      [tile.noteY - tile.noteHeight / 2, tile.noteY + tile.noteHeight / 2],
+      [tile.buttonY - tile.buttonHeight / 2, tile.buttonY + tile.buttonHeight / 2],
+    ];
+    assert.ok(bounds[0][0] >= 0);
+    for (let index = 1; index < bounds.length; index++) {
+      assert.ok(bounds[index][0] >= bounds[index - 1][1],
+        `${width}x${height}: tile content rows ${index - 1} and ${index} overlap`);
+    }
+    assert.ok(bounds.at(-1)[1] <= height);
+    assert.ok(tile.paddingX >= 8 && tile.paddingX <= 12);
+    assert.ok(tile.buttonHeight >= 42);
+  }
+  assert.throws(() => upgradeTileContentMetrics(0, 180), /Invalid upgrade tile/);
+});
+
 test('menu momentum decays consistently across frame rates and stops at both ends', () => {
   const run = hz => {
     let state = {offset: -100, velocity: -700};
@@ -83,4 +107,15 @@ test('mobile lists expose 35 percent of the next truck or upgrade row above the 
   }
   assert.throws(() => peekingCardMetrics(100, 100), /Invalid peeking-card/);
   assert.throws(() => peekingCardMetrics(100, 200, 1.5), /Invalid peeking-card/);
+});
+
+test('adaptive card metrics drop rows before shrinking cards below their readable minimum', () => {
+  const tall = adaptiveCardMetrics(200, 800, 196);
+  assert.equal(tall.rows, 2);
+  assert.ok(tall.height >= 196);
+  const short = adaptiveCardMetrics(200, 480, 196);
+  assert.equal(short.rows, 1);
+  assert.ok(short.height >= 196);
+  assert.equal(short.stride, short.height + short.gap);
+  assert.throws(() => adaptiveCardMetrics(0, 100, 0));
 });

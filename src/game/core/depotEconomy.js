@@ -123,9 +123,12 @@ export function passContinuousDepot(run) {
 export function bankCargo(profile, run, items) {
   if (run.mode === 'continuous') throw new Error('Continuous cargo can only be banked by terminal cash-out');
   const quote = bankingQuote(items, run);
-  const milestone = quote.cargo > 0 ? addMilestones(profile, [depotMilestoneId(run.levelId ?? 'level1')]) : {profile, added: []};
+  // Developer runs exercise the Depot flow but never pay the wallet or record milestones.
+  const developer = isDeveloperRun(run);
+  const milestone = quote.cargo > 0 && !developer
+    ? addMilestones(profile, [depotMilestoneId(run.levelId ?? 'level1')]) : {profile, added: []};
   return {
-    profile: {...milestone.profile, coins: profile.coins + quote.payout},
+    profile: developer ? profile : {...milestone.profile, coins: profile.coins + quote.payout},
     run: {...run, consecutiveSkips: 0, closeCallBonusPercent: 0,
       bankingEvents: run.bankingEvents + (quote.cargo > 0 ? 1 : 0),
       cargoCoins: run.cargoCoins + quote.cargo, bonusCoins: run.bonusCoins + quote.bonus,
@@ -144,7 +147,7 @@ export function repairPrice(distance, run) {
 
 export function repairOffer(profile, run, visit, hull, maxHull, distance) {
   if (run.mode === 'continuous') return {cost: 0, reason: 'Continuous Run has no repair service', enabled: false};
-  const cost = repairPrice(distance, run);
+  const cost = isDeveloperRun(run) ? 0 : repairPrice(distance, run);
   const reason = visit.repaired ? 'Repair used at this Depot'
     : hull >= maxHull ? 'Hull already full'
     : profile.coins < cost ? `Need ${cost - profile.coins} more Coins` : '';
@@ -260,6 +263,9 @@ export function settleRun(profile, run, items, distance, banked, completed = fal
   if (run.levelId === 'level1' && completed && levelProgress.level2) {
     levelProgress.level2 = {...levelProgress.level2, unlocked: true};
   }
+  if (run.levelId === 'level2' && completed && levelProgress.level3) {
+    levelProgress.level3 = {...levelProgress.level3, unlocked: true};
+  }
   const settledRun = {
     ...bank.run,
     distanceCoins: bank.run.distanceCoins + distanceCoins,
@@ -278,6 +284,9 @@ export function settleRun(profile, run, items, distance, banked, completed = fal
   return {
     profile: {...bank.profile, shipStates,
       coins: bank.profile.coins + distanceCoins + recordCoins + completionCoins + noDamageCoins,
+      completedLevels: completed
+        ? [...new Set([...(bank.profile.completedLevels ?? []), run.levelId])]
+        : bank.profile.completedLevels ?? [],
       bestDistance: run.checkpointStart ? profile.bestDistance
         : Math.max(profile.bestDistance, Math.floor(distance)),
       totalRuns: profile.totalRuns + 1, levelProgress, settledRunIds: nextRunIds},

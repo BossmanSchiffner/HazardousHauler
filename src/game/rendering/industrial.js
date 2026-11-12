@@ -3,7 +3,7 @@ import {guardrailLayout, HAZARDS, LANE_CENTERS} from '../core/hazards.js';
 import {advanceCargoTrail, createCargoTrail} from '../core/cargo.js';
 import {formatStat} from '../core/modules.js';
 import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS,
-  ENVIRONMENT_VISUALS, headlightFalloff, streetlightFalloff} from '../data/environments.js';
+  ENVIRONMENT_VISUALS, HAZARD_LIGHTS, headlightFalloff, streetlightFalloff} from '../data/environments.js';
 import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../core/depots.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
 import {balance} from '../data/balance.js';
@@ -93,6 +93,39 @@ function assertTextureBakingAllowed(scene) {
   }
 }
 
+/** Level 4 Neon art, rasterised from the approved Art Direction SVG exports and baked at preload. */
+export const NEON_THEME_ASSETS = Object.freeze({
+  ROAD_BASE: 'road_neon_base',
+  OVERLAY_HEX: 'overlay_neon_hex',
+  SIGN_APEX: 'neon_sign_apex',
+  SIGN_KANJI: 'neon_sign_kanji',
+});
+export const NEON_ART = Object.freeze([
+  {key: NEON_THEME_ASSETS.ROAD_BASE, url: new URL('../assets/sprites/neon-road-base.webp', import.meta.url).href},
+  {key: NEON_THEME_ASSETS.OVERLAY_HEX, url: new URL('../assets/sprites/neon-overlay-hex.webp', import.meta.url).href},
+  {key: NEON_THEME_ASSETS.SIGN_APEX, url: new URL('../assets/sprites/neon-sign-apex.webp', import.meta.url).href},
+  {key: NEON_THEME_ASSETS.SIGN_KANJI, url: new URL('../assets/sprites/neon-sign-kanji.webp', import.meta.url).href},
+].map(art => Object.freeze({...art, sourceKey: `neon_source_${art.key}`})));
+// Curb-to-curb span of the road art as fractions of its width; it maps onto ROAD_LEFT..ROAD_RIGHT.
+const NEON_ROAD_ART = Object.freeze({aspect: 1024 / 572, roadLeft: 100 / 572, roadRight: 464 / 572, seamPx: 72});
+const NEON_ROAD_DRAWN_WIDTH = (ROAD_RIGHT - ROAD_LEFT) / (NEON_ROAD_ART.roadRight - NEON_ROAD_ART.roadLeft);
+const NEON_ROAD_TEXTURE_HEIGHT = Math.floor(NEON_ROAD_DRAWN_WIDTH * NEON_ROAD_ART.aspect) - NEON_ROAD_ART.seamPx;
+// Hex cells sit at 70% of the original 430 px art tile; tiles repeat across so the grate still spans the road.
+const NEON_HEX_TILE_PX = Math.round(430 * 0.7);
+
+export function preloadNeonVisuals(scene) {
+  for (const art of NEON_ART) {
+    if (!scene.textures.exists(art.key) && !scene.textures.exists(art.sourceKey)) {
+      scene.load.image(art.sourceKey, art.url);
+    }
+  }
+}
+
+function neonSource(scene, key) {
+  const art = NEON_ART.find(entry => entry.key === key);
+  return scene.textures.exists(art.sourceKey) ? scene.textures.get(art.sourceKey).getSourceImage() : null;
+}
+
 // Keep legacy bake keys sized even when gameplay redirects their objects to modular tiles.
 export const TEXTURE_SIZES = Object.freeze({
   cargo_ship: Object.freeze([54, 65]),
@@ -120,16 +153,24 @@ export const TEXTURE_SIZES = Object.freeze({
     ...(id === 'industrial' ? [] : [[`divider_${id}`, Object.freeze([64, 30])]]),
   ])),
   cargo_stack: Object.freeze([32, 30]),
+  hazard_energy_orb: Object.freeze([64, 64]),
+  glow_orb_radial: Object.freeze([128, 128]),
+  vent_air_puff: Object.freeze([40, 40]),
+  glow_hazard_ring: Object.freeze([96, 96]),
   cargo_spark: Object.freeze([8, 8]),
   module_util_impact_pulse: Object.freeze([40, 40]),
   industrial_road: Object.freeze([390, 1248]),
   level2_road: Object.freeze([390, 1248]),
   dustlands_road: Object.freeze([390, 1248]),
+  road_neon_base: Object.freeze([390, NEON_ROAD_TEXTURE_HEIGHT]),
   neon_road: Object.freeze([390, 1248]),
   reactor_road: Object.freeze([390, 1248]),
   overdrive_road: Object.freeze([390, 1248]),
   ...Object.fromEntries(Object.values(ROAD_SURFACE_PRESETS).map(preset =>
     [preset.subRoadTexture, Object.freeze([390, 1248])])),
+  overlay_neon_hex: Object.freeze([390, NEON_HEX_TILE_PX]),
+  neon_sign_apex: Object.freeze([96, 188]),
+  neon_sign_kanji: Object.freeze([96, 188]),
   road_decal_skid: Object.freeze([48, 64]),
   road_dawn_glints: Object.freeze([390, 312]),
   truck_headlight_cone: Object.freeze([ENVIRONMENT_VISUALS.headlightWidth, ENVIRONMENT_VISUALS.headlightLength]),
@@ -399,9 +440,9 @@ export function recolorStandardHauler(pixels, width, trimId) {
 
 export const OBSTACLE_ART = Object.freeze([
   {id: 'fan', url: new URL('../assets/sprites/obstacle-fan.png', import.meta.url).href,
-    textures: ['hazard_roadsideMachine']},
+    textures: ['hazard_roadsideMachine', 'hazard_vent'], textureKinds: {hazard_vent: {kind: 'vent'}}},
   {id: 'grille', url: new URL('../assets/sprites/obstacle-grille.png', import.meta.url).href,
-    textures: ['hazard_roadsideMachine']},
+    textures: ['hazard_roadsideMachine', 'hazard_ventGrille'], textureKinds: {hazard_ventGrille: {kind: 'ventGrille'}}},
   {id: 'pipes1', url: new URL('../assets/sprites/obstacle-pipes-1.png', import.meta.url).href,
     textures: ['hazard_pipeAssembly']},
   {id: 'pipes2', url: new URL('../assets/sprites/obstacle-pipes-2.png', import.meta.url).href,
@@ -417,14 +458,19 @@ export const OBSTACLE_ART = Object.freeze([
   {id: 'signalCabinet', url: new URL('../assets/sprites/signal-cabinet.png', import.meta.url).href,
     textures: ['hazard_signalCabinet'], kind: 'signalCabinet',
     bounds: {x: 156, y: 154, width: 1484, height: 2091}},
-  {id: 'sweeper', url: new URL('../assets/sprites/sweeper-forklift.png', import.meta.url).href,
-    textures: ['hazard_forklift'], kind: 'sweeper',
+  {id: 'forklift', url: new URL('../assets/sprites/sweeper-forklift.png', import.meta.url).href,
+    textures: ['hazard_forklift'], kind: 'forklift',
     bounds: {x: 0, y: 0, width: 1676, height: 839}},
+  {id: 'sweeper', url: new URL('../assets/sprites/sweeper-truck.png', import.meta.url).href,
+    textures: ['hazard_sweeper'], kind: 'sweeper',
+    bounds: {x: 0, y: 0, width: 508, height: 866}},
   {id: 'serviceBoom', url: new URL('../assets/sprites/service-boom.png', import.meta.url).href,
-    textures: ['hazard_serviceBoom'], kind: 'serviceBoom',
+    textures: ['hazard_serviceBoom', 'hazard_boomLift'], kind: 'serviceBoom',
+    textureKinds: {hazard_boomLift: {kind: 'boomLift', rotation: 0}},
     bounds: {x: 329, y: 125, width: 1136, height: 2136}, rotation: Math.PI / 2},
 ].map(art => Object.freeze({...art, sourceKey: `obstacle_source_${art.id}`,
   ...(art.bounds ? {bounds: Object.freeze(art.bounds)} : {}),
+  ...(art.textureKinds ? {textureKinds: Object.freeze(art.textureKinds)} : {}),
   textures: Object.freeze(art.textures)})));
 
 export const GUARDRAIL_ART = Object.freeze([
@@ -469,8 +515,10 @@ function drawObstacleArt(scene, key) {
       image.width * scale, image.height * scale);
     context.restore();
   };
-  if (sources[0].kind) {
-    const kind = sources[0].id === 'barrier' && key !== 'cargo_hazard' ? 'divider' : sources[0].kind;
+  const override = sources[0].textureKinds?.[key];
+  if (sources[0].kind || override) {
+    const kind = override?.kind ??
+      (sources[0].id === 'barrier' && key !== 'cargo_hazard' ? 'divider' : sources[0].kind);
     const {width, height, footprint, scenery} = HAZARDS[kind];
     const body = footprint?.[0];
     const centerX = scenery?.anchorX ?? width / 2;
@@ -478,7 +526,7 @@ function drawObstacleArt(scene, key) {
     draw(sources[0], body ? centerX + body.x - body.halfWidth : 1,
       body ? centerY + body.y - body.halfHeight : 1,
       body ? body.halfWidth * 2 : width - 2,
-      body ? body.halfHeight * 2 : height - 2, sources[0].rotation);
+      body ? body.halfHeight * 2 : height - 2, override ? override.rotation ?? 0 : sources[0].rotation);
   } else {
     const kind = key === 'hazard_pipeAssembly' ? 'pipeAssembly' : 'roadsideMachine';
     const {width, height, scenery} = HAZARDS[kind];
@@ -894,6 +942,204 @@ function drawSubRoad(g, preset) {
   }
 }
 
+function drawNeonRoad(g, width = 390, height = TEXTURE_SIZES.road_neon_base[1]) {
+  const cyan = 0x00f0ff, magenta = 0xff007f;
+  g.fillStyle(0x0d1117, 1).fillRect(0, 0, width, height);
+
+  for (const [index, x] of [122.5, 195.5, 268.5].entries()) {
+    const color = index % 2 ? magenta : cyan;
+    g.lineStyle(7, color, 0.12).lineBetween(x, 0, x, height);
+    g.lineStyle(2, cyan, 0.6).lineBetween(x - 1.5, 0, x - 1.5, height);
+    g.lineStyle(2, magenta, 0.6).lineBetween(x + 1.5, 0, x + 1.5, height);
+  }
+
+  const radiusX = 10, radiusY = 9;
+  const corners = [
+    [-radiusX, 0], [-radiusX / 2, -radiusY], [radiusX / 2, -radiusY],
+    [radiusX, 0], [radiusX / 2, radiusY], [-radiusX / 2, radiusY],
+  ];
+  for (let row = -1; row < Math.ceil(height / (radiusY * 1.5)) + 1; row++) {
+    const centerY = row * radiusY * 1.5;
+    for (let column = -1; column < Math.ceil(width / (radiusX * 1.5)) + 1; column++) {
+      const centerX = column * radiusX * 1.5 + (row % 2 ? radiusX * 0.75 : 0);
+      for (let edge = 0; edge < corners.length; edge++) {
+        const [x1, y1] = corners[edge], [x2, y2] = corners[(edge + 1) % corners.length];
+        g.lineStyle(1, 0x1f2937, 0.92)
+          .lineBetween(centerX + x1, centerY + y1, centerX + x2, centerY + y2);
+      }
+    }
+  }
+  g.lineStyle(1, 0x374151, 0.8);
+  for (let y = -8; y < height + 12; y += radiusY * 3) {
+    g.lineBetween(44, y, 346, y);
+  }
+
+  for (const x of [0, 346]) {
+    g.fillStyle(0x1b222c, 1).fillRect(x, 0, 44, height);
+    g.fillStyle(0x374151, 1).fillRect(x + (x ? 0 : 40), 0, 4, height);
+    const channelX = x ? x + 6 : x + 34;
+    g.fillStyle(0x070b10, 1).fillRect(channelX, 0, 4, height);
+    g.fillStyle(cyan, 0.16).fillRect(channelX, 0, 4, height);
+    g.fillStyle(cyan, 0.6).fillRect(channelX + 1, 0, 2, height);
+  }
+}
+
+/** Opaque Neon roadbed: art scaled curb-to-curb onto the lanes, with its wrap crossfaded into a seamless tile. */
+function bakeNeonBaseRoad(scene) {
+  const key = NEON_THEME_ASSETS.ROAD_BASE;
+  if (scene.textures.exists(key)) return;
+  const [width, height] = TEXTURE_SIZES[key];
+  const source = neonSource(scene, key);
+  if (!source) {
+    const graphics = scene.add.graphics();
+    try {
+      drawNeonRoad(graphics, width, height);
+      graphics.generateTexture(key, width, height);
+    } finally {
+      graphics.destroy();
+    }
+    return;
+  }
+  const texture = scene.textures.createCanvas(key, width, height);
+  const context = texture.getContext();
+  const drawnWidth = NEON_ROAD_DRAWN_WIDTH;
+  const scale = drawnWidth / source.width;
+  const x = (ROAD_LEFT + ROAD_RIGHT) / 2 - (NEON_ROAD_ART.roadLeft + NEON_ROAD_ART.roadRight) / 2 * drawnWidth;
+  context.drawImage(source, x, 0, drawnWidth, drawnWidth * NEON_ROAD_ART.aspect);
+  // Rows past the tile height fade over the top band, so row height-1 flows straight into row 0.
+  const {seamPx} = NEON_ROAD_ART;
+  for (let row = 0; row < seamPx; row++) {
+    context.globalAlpha = 1 - (row + 0.5) / seamPx;
+    context.drawImage(source, 0, (height + row) / scale, source.width, 1 / scale, x, row, drawnWidth, 1);
+  }
+  context.globalAlpha = 1;
+  texture.refresh();
+}
+
+/** Hex steel grate keyed to its bright frames, confined to the carriageway so the shoulders stay clean. */
+function bakeNeonHexOverlay(scene) {
+  const key = NEON_THEME_ASSETS.OVERLAY_HEX;
+  if (scene.textures.exists(key)) return;
+  const [width, height] = TEXTURE_SIZES[key];
+  const texture = scene.textures.createCanvas(key, width, height);
+  const context = texture.getContext();
+  const source = neonSource(scene, key);
+  if (source) {
+    const tileWidth = source.width * height / source.height;
+    // Repeat from a centred tile outward so the grate stays symmetric and covers the full carriageway.
+    let x = (width - tileWidth) / 2;
+    while (x > 0) x -= tileWidth;
+    for (; x < width; x += tileWidth) context.drawImage(source, x, 0, tileWidth, height);
+  }
+  const pixels = context.getImageData(0, 0, width, height);
+  const {data} = pixels;
+  const fade = 6;
+  for (let x = 0; x < width; x++) {
+    const edge = Math.max(0, Math.min(1, (x - ROAD_LEFT) / fade, (ROAD_RIGHT - x) / fade));
+    for (let y = 0; y < height; y++) {
+      const index = (y * width + x) * 4;
+      const luminance = (data[index] * 0.3 + data[index + 1] * 0.59 + data[index + 2] * 0.11);
+      const frame = Math.max(0, Math.min(1, (luminance - 48) / 72));
+      data[index + 3] = Math.round(frame * frame * (3 - 2 * frame) * edge * 255);
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.refresh();
+}
+
+function bakeNeonSigns(scene) {
+  for (const key of [NEON_THEME_ASSETS.SIGN_APEX, NEON_THEME_ASSETS.SIGN_KANJI]) {
+    if (scene.textures.exists(key)) continue;
+    const [width, height] = TEXTURE_SIZES[key];
+    const texture = scene.textures.createCanvas(key, width, height);
+    const source = neonSource(scene, key);
+    if (source) texture.getContext().drawImage(source, 0, 0, width, height);
+    texture.refresh();
+  }
+}
+
+function bakeOrbGlowTexture(scene) {
+  const key = 'glow_orb_radial';
+  if (scene.textures.exists(key)) return;
+  const size = 128;
+  const texture = scene.textures.createCanvas(key, size, size);
+  const context = texture.getContext();
+  const pixels = context.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const distance = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / (size / 2);
+      const falloff = Math.max(0, 1 - distance);
+      const index = (y * size + x) * 4;
+      pixels.data[index] = 0xff;
+      pixels.data[index + 1] = Math.round(0x50 + 0x70 * falloff);
+      pixels.data[index + 2] = Math.round(0x40 * falloff * falloff);
+      pixels.data[index + 3] = Math.round(falloff * falloff * 210);
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.setFilter(0);
+  texture.refresh();
+}
+
+export function bakeNeonRoadTexture(scene) {
+  assertTextureBakingAllowed(scene);
+  bakeNeonBaseRoad(scene);
+  bakeNeonHexOverlay(scene);
+  bakeNeonSigns(scene);
+  for (const art of NEON_ART) {
+    if (scene.textures.exists(art.sourceKey)) scene.textures.remove(art.sourceKey);
+  }
+  bakeOrbGlowTexture(scene);
+  bakeVentAirTexture(scene);
+  bakeHazardRingTexture(scene);
+}
+
+// White soft-edged ring; tinted per obstacle so Neon hazards carry a halo without washing out their art.
+function bakeHazardRingTexture(scene) {
+  const key = HAZARD_LIGHTS.neonHalo.key;
+  if (scene.textures.exists(key)) return;
+  const [width, height] = TEXTURE_SIZES[key];
+  const texture = scene.textures.createCanvas(key, width, height);
+  const context = texture.getContext();
+  const pixels = context.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const distance = Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) / (width / 2);
+      const band = Math.max(0, 1 - Math.abs(distance - 0.72) / 0.28);
+      const index = (y * width + x) * 4;
+      pixels.data[index] = pixels.data[index + 1] = pixels.data[index + 2] = 0xff;
+      pixels.data[index + 3] = Math.round(band * band * (3 - 2 * band) * 200);
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.setFilter(0);
+  texture.refresh();
+}
+
+// Soft exhaust wisp that vents emit; pooled images drift and fade it over each vent.
+function bakeVentAirTexture(scene) {
+  const key = 'vent_air_puff';
+  if (scene.textures.exists(key)) return;
+  const [width, height] = TEXTURE_SIZES[key];
+  const texture = scene.textures.createCanvas(key, width, height);
+  const context = texture.getContext();
+  const pixels = context.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dx = (x + 0.5 - width / 2) / (width / 2);
+      const dy = (y + 0.5 - height / 2) / (height / 2);
+      const falloff = Math.max(0, 1 - Math.hypot(dx, dy * 0.85));
+      const index = (y * width + x) * 4;
+      pixels.data[index] = 0xe4;
+      pixels.data[index + 1] = 0xf1;
+      pixels.data[index + 2] = 0xff;
+      pixels.data[index + 3] = Math.round(falloff * falloff * 170);
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  texture.refresh();
+}
+
 function drawRoadDecal(g) {
   for (const x of [12, 32]) g.fillStyle(0x050a12).fillRect(x, 0, 4, 64);
 }
@@ -1036,6 +1282,7 @@ export function createIndustrialTextures(scene) {
   createVehicleTextures(scene, STANDARD_HAULER_ART, standardHaulerFrames());
   createStandaloneTextures(scene);
   createLightTextures(scene);
+  bakeNeonRoadTexture(scene);
   if (!scene.textures.exists('hazard_divider')) drawObstacleArt(scene, 'hazard_divider');
   for (const key of new Set(OBSTACLE_ART.flatMap(art => art.textures))) {
     if (!scene.textures.exists(key)) drawObstacleArt(scene, key);
@@ -1077,6 +1324,28 @@ export function createIndustrialTextures(scene) {
     ])),
     cargo_stack: drawCargoCapacityCrate,
     cargo_spark: graphics => graphics.fillStyle(PALETTE.white).fillCircle(4, 4, 4),
+    hazard_energy_orb: graphics => {
+      // Unstable orange charge: halo, jagged spark corona, molten shell and a white-hot core.
+      graphics.fillStyle(0xff5a00, 0.16).fillCircle(32, 32, 31);
+      graphics.fillStyle(0xff7a00, 0.3).fillCircle(32, 32, 26);
+      for (let spike = 0; spike < 12; spike++) {
+        const angle = spike * Math.PI / 6 + (spike % 2) * 0.18;
+        const reach = spike % 2 ? 27 : 31;
+        const side = 0.16;
+        graphics.fillStyle(spike % 2 ? 0xffb000 : 0xff6a00, 0.85).fillTriangle(
+          32 + Math.cos(angle - side) * 17, 32 + Math.sin(angle - side) * 17,
+          32 + Math.cos(angle) * reach, 32 + Math.sin(angle) * reach,
+          32 + Math.cos(angle + side) * 17, 32 + Math.sin(angle + side) * 17);
+      }
+      graphics.fillStyle(0x3a0d00, 1).fillCircle(32, 32, 18);
+      graphics.fillStyle(0xff6a00, 1).fillCircle(32, 32, 16);
+      graphics.fillStyle(0xffa21a, 1).fillCircle(32, 32, 12);
+      graphics.lineStyle(2, 0xffe08a, 0.95).strokeCircle(32, 32, 16);
+      graphics.lineStyle(1, 0x3a0d00, 0.7).strokeCircle(32, 32, 21);
+      graphics.fillStyle(0xffe9a8, 1).fillCircle(32, 32, 8);
+      graphics.fillStyle(0xffffff, 1).fillCircle(32, 32, 5);
+      graphics.fillStyle(0xffffff, 0.85).fillCircle(27, 27, 2);
+    },
     hauler_gold_sparkle: graphics => {
       polygon(graphics, PALETTE.goldLight, [[6, 0], [7, 4], [12, 6], [7, 7],
         [6, 12], [4, 7], [0, 6], [4, 4]]);
@@ -1133,6 +1402,21 @@ export function buildIndustrialRoad(scene, {width, height, stripeGap, stripesPer
     preset.subRoadTexture).setDepth(0.05).setBlendMode(preset.blendMode).setAlpha(preset.overlayAlpha);
   const surface = routeTile(scene, width / 2, height / 2, width, height, 'industrial_road').setDepth(-1);
   const dust = routeTile(scene, width / 2, height / 2, width, height, 'dustlands_road').setDepth(-0.5).setAlpha(0);
+  const flanks = [];
+  for (const theme of Object.values(ROAD_SURFACE_PRESETS)) ensureRoadFlankFrames(scene, theme.roadTexture);
+  for (const [owner, key] of [[surface, 'industrial_road'], [dust, 'dustlands_road']]) {
+    owner.flanks = ['flankL', 'flankR'].map(frame => {
+      ensureRoadFlankFrames(scene, key);
+      const left = frame === 'flankL';
+      const flank = routeTile(scene, left ? -ROAD_LEFT / 2 : width + ROAD_LEFT / 2, height / 2,
+        ROAD_LEFT, height, key).setDepth(owner.depth).setAlpha(owner.alpha ?? 1);
+      if (scene.textures?.get(key)?.has?.(frame)) flank.setTexture(key, frame);
+      flank.setFlipX?.(true);
+      flank.flankFrame = frame;
+      flanks.push(flank);
+      return flank;
+    });
+  }
   const lines = [];
   for (let lane = 1; lane < LANE_CENTERS.length; lane++) {
     const x = (LANE_CENTERS[lane - 1] + LANE_CENTERS[lane]) / 2;
@@ -1140,7 +1424,43 @@ export function buildIndustrialRoad(scene, {width, height, stripeGap, stripesPer
       lines.push(scene.add.rectangle(x, -25 + i * stripeGap, 2, 35, PALETTE.steelLight, 0.5));
     }
   }
-  return {surface, dust, lines, subRoad};
+  return {surface, dust, lines, subRoad, flanks};
+}
+
+/** Road shoulders become mirrored frames so off-stage flanks continue the scenery to the screen edges. */
+export function ensureRoadFlankFrames(scene, key) {
+  const texture = scene?.textures?.exists?.(key) ? scene.textures.get(key) : null;
+  if (!texture || texture.has('flankL')) return;
+  const source = texture.source[0];
+  const firstFrame = texture.firstFrame;
+  texture.add('flankL', 0, 0, 0, ROAD_LEFT, source.height);
+  texture.add('flankR', 0, source.width - ROAD_LEFT, 0, ROAD_LEFT, source.height);
+  // Phaser promotes the first added frame to the default; full-road surfaces must keep using the whole texture.
+  texture.firstFrame = firstFrame;
+}
+
+/** Fits flanks and road surfaces to the visible world so no backdrop shows around the gameplay stage. */
+export function fitRoadToView(surfaces, flanks, width, height, bleedX, bleedY) {
+  const tall = height + bleedY * 2;
+  for (const surface of surfaces) surface?.setSize(width, tall);
+  for (const flank of flanks) {
+    const left = flank.flankFrame === 'flankL';
+    flank.setSize(bleedX, tall).setPosition(left ? -bleedX / 2 : width + bleedX / 2, height / 2);
+  }
+}
+
+function syncRoadFlanks(owner, key) {
+  if (!owner.flanks) return;
+  for (const flank of owner.flanks) {
+    if (flank.displayTexture?.key !== key || flank.displayFrame?.name !== flank.flankFrame) {
+      const {width, height} = flank;
+      ensureRoadFlankFrames(flank.scene, key);
+      flank.setTexture(key, flank.flankFrame);
+      if (flank.width !== width || flank.height !== height) flank.setSize(width, height);
+    }
+    flank.tilePositionY = owner.tilePositionY;
+    flank.setAlpha(owner.alpha).setTint(owner.tintTopLeft ?? 0xffffff);
+  }
 }
 
 export function syncSectorRoad(base, incoming, distance, levelId = 'level1', mode = 'normal', subRoad = null) {
@@ -1159,11 +1479,16 @@ export function syncSectorRoad(base, incoming, distance, levelId = 'level1', mod
   const baseDistance = baseSector === sector ? distance : sector.startsAt - 0.001;
   base.setTint(roadTint(baseSector, baseDistance, levelId, mode));
   incoming.setTint(roadTint(sector, distance, levelId, mode));
+  syncRoadFlanks(base, baseKey);
+  syncRoadFlanks(incoming, incomingKey);
   if (subRoad) {
     const preset = resolveVisualTheme(sector).surfacePreset;
     const key = preset.subRoadTexture;
     if (subRoad.displayTexture.key !== key) subRoad.setTexture(key);
     subRoad.setBlendMode(preset.blendMode).setAlpha(preset.overlayAlpha);
+    subRoad.scrollRatio = preset.overlayScrollRatio ?? null;
+    // Road-aligned overlays share the road texture's x origin; the sub-road tile overhangs the stage.
+    subRoad.tilePositionX = preset.overlayRoadAligned ? subRoad.x - subRoad.width / 2 : 0;
   }
 }
 
@@ -1224,8 +1549,12 @@ export function syncDepotEntrance(view, depot, distance, phase) {
     .setText(`DEPOT ${remaining} m\n${left ? '<<<' : '>>>'} DOCK`);
 }
 
+export function hazardLightCount(kind) {
+  return HAZARD_LIGHTS.strobes[kind] ?? 1;
+}
+
 export function createBarrierLights(scene, sprite, kind, time, night = false) {
-  const lights = (['forklift', 'sweeper'].includes(kind) ? [0] : [-1, 1]).map(() =>
+  const lights = Array.from({length: hazardLightCount(kind)}, () =>
     scaleSpriteArt(routeImage(scene, sprite.x, sprite.y, 'barrier_caution_light')).setDepth(6));
   syncBarrierLights(lights, sprite, kind, time, night);
   return lights;
@@ -1233,17 +1562,47 @@ export function createBarrierLights(scene, sprite, kind, time, night = false) {
 
 export function syncBarrierLights(lights, sprite, kind, time, night = false) {
   const {width, height} = HAZARDS[kind];
-  lights.forEach((light, index) => {
-    const phase = (time + index * 500) % 1000;
-    const lit = phase < 90 || (phase >= 180 && phase < 270);
+  const strobe = kind in HAZARD_LIGHTS.strobes;
+  const paired = lights.length > 1;
+  const idle = night ? ENVIRONMENT_VISUALS.barrierNightIdleAlpha : 0.18;
+  for (let index = 0; index < lights.length; index++) {
+    const light = lights[index];
+    let alpha;
+    if (strobe) {
+      const phase = (time + index * 500) % 1000;
+      alpha = phase < 90 || (phase >= 180 && phase < 270) ? 1 : idle;
+    } else {
+      // Slow triangle-wave beacon for obstacles without authored strobes.
+      const phase = (time % HAZARD_LIGHTS.beaconPeriodMs) / (HAZARD_LIGHTS.beaconPeriodMs / 2);
+      alpha = HAZARD_LIGHTS.beaconIdleAlpha + (1 - HAZARD_LIGHTS.beaconIdleAlpha) * (phase <= 1 ? phase : 2 - phase);
+    }
     scaleSpriteArt(light, night ? ENVIRONMENT_VISUALS.barrierNightScale : 1);
     // Night strobes sit just above the ambient mask so their warning flashes aren't darkened.
     light.setDepth(night ? 16.1 : 6).setBlendMode(night ? 'ADD' : 'NORMAL')
-      .setPosition(sprite.x + (['forklift', 'sweeper'].includes(kind) ? 0 : index ? 1 : -1) *
-        (width / 2 - 5) * sprite.scaleX,
+      .setPosition(sprite.x + (paired ? index ? 1 : -1 : 0) * (width / 2 - 5) * sprite.scaleX,
         sprite.y - height * 0.18 * sprite.scaleY)
-      .setAlpha(lit ? 1 : night ? ENVIRONMENT_VISUALS.barrierNightIdleAlpha : 0.18);
-  });
+      .setAlpha(alpha);
+  }
+}
+
+/** Soft neon halo around a Neon-sector obstacle; one pooled image, positioned on the art's visual centre. */
+export function createNeonHalo(scene, sprite, tintIndex, time, night = false) {
+  const halo = routeImage(scene, sprite.x, sprite.y, HAZARD_LIGHTS.neonHalo.key)
+    .setBlendMode('ADD').setTint(HAZARD_LIGHTS.neonHalo.tints[tintIndex % HAZARD_LIGHTS.neonHalo.tints.length]);
+  halo.haloPhase = tintIndex * 0.37;
+  syncNeonHalo(halo, sprite, time, night);
+  return halo;
+}
+
+export function syncNeonHalo(halo, sprite, time, night = false) {
+  const {padPx, alphaMin, alphaMax, pulseMs, dayDepth, nightDepth} = HAZARD_LIGHTS.neonHalo;
+  const width = sprite.displayWidth ?? 0, height = sprite.displayHeight ?? 0;
+  const pulse = 0.5 - 0.5 * Math.cos((time / pulseMs + (halo.haloPhase ?? 0)) * Math.PI * 2);
+  halo.setPosition(sprite.x + (0.5 - (sprite.originX ?? 0.5)) * width,
+    sprite.y + (0.5 - (sprite.originY ?? 0.5)) * height)
+    .setDisplaySize(width + padPx, height + padPx)
+    .setDepth(night ? nightDepth : dayDepth)
+    .setAlpha(alphaMin + (alphaMax - alphaMin) * pulse);
 }
 
 export function addHudBacking(scene, width) {
@@ -1362,6 +1721,20 @@ function createGrindEmitter(scene) {
   return {emitter, anchor};
 }
 
+function createEnergyOrbEmitter(scene) {
+  const emitter = scene.add.particles(0, 0, PARTICLE_DOT_KEY, {
+    lifespan: {min: 140, max: 320}, speed: {min: 110, max: 280},
+    angle: {min: 0, max: 360}, scale: {start: 1.6, end: 0},
+    alpha: {start: 1, end: 0}, tint: [0xff6a00, 0xffb000, 0xffffff],
+    blendMode: 'ADD', emitting: false, maxAliveParticles: 28,
+  }).setDepth(16.3);
+  return emitter;
+}
+
+export function playEnergyOrbSparks(effects, x, y) {
+  effects?.orbSparks?.explode(24, x, y);
+}
+
 export function playImpactSparks(effects, ship, x, y) {
   const {emitter, anchor} = effects.grind;
   anchor.impactAngle = Math.atan2(ship.y - y, ship.x - x) * 180 / Math.PI;
@@ -1394,9 +1767,10 @@ export function createHaulerEffects(scene) {
   const exhaust = createExhaustEmitter(scene);
   const damageSmoke = createExhaustEmitter(scene, 0x20242a);
   const grind = createGrindEmitter(scene);
+  const orbSparks = createEnergyOrbEmitter(scene);
   const sparkles = [0, 1, 2].map(() => scene.add.image(0, 0, 'hauler_gold_sparkle')
     .setDepth(8).setVisible(false));
-  return {shadow, cargoShadows, rack, hitches, exhaust, damageSmoke, grind, sparkles};
+  return {shadow, cargoShadows, rack, hitches, exhaust, damageSmoke, grind, orbSparks, sparkles};
 }
 
 export function stopHaulerExhaust(effects) {
@@ -1404,6 +1778,8 @@ export function stopHaulerExhaust(effects) {
     emitter.emitting = false;
     emitter.killAll?.();
   });
+  effects.orbSparks?.stop?.();
+  effects.orbSparks?.killAll?.();
 }
 
 export function syncBlueprintVisuals(sprite, glow, time, glowOffsetY = 0) {

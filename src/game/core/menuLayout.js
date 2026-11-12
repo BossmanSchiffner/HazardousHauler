@@ -42,6 +42,40 @@ export function squareGridMetrics(width, {padding = 18, gap = 10, columns = 3} =
   });
 }
 
+export function upgradeTileContentMetrics(width, height) {
+  if (!finitePositive(width) || !finitePositive(height)) {
+    throw new Error('Invalid upgrade tile dimensions');
+  }
+  const scale = Math.min(1.15, width / 140, height / 180);
+  const paddingX = Math.min(12, width * 0.075);
+  const paddingY = 8 * scale;
+  const titleHeight = 22 * scale;
+  const rankHeight = 12 * scale;
+  const iconSize = Math.min(38 * scale, width * 0.3);
+  const benefitHeight = 22 * scale;
+  const noteHeight = 12 * scale;
+  const buttonHeight = 42 * scale;
+  const itemHeight = titleHeight + rankHeight + iconSize + benefitHeight + noteHeight + buttonHeight;
+  const gap = Math.max(3 * scale, (height - paddingY * 2 - itemHeight) / 5);
+  let cursor = paddingY;
+  const titleY = cursor + titleHeight / 2;
+  cursor += titleHeight + gap;
+  const rankY = cursor + rankHeight / 2;
+  cursor += rankHeight + gap;
+  const iconY = cursor + iconSize / 2;
+  cursor += iconSize + gap;
+  const benefitY = cursor + benefitHeight / 2;
+  cursor += benefitHeight + gap;
+  const noteY = cursor + noteHeight / 2;
+  cursor += noteHeight + gap;
+  const buttonY = cursor + buttonHeight / 2;
+
+  return Object.freeze({
+    scale, paddingX, paddingY, titleY, titleHeight, rankY, iconY, iconSize,
+    benefitY, benefitHeight, noteY, noteHeight, buttonY, buttonHeight, gap,
+  });
+}
+
 export function peekingCardMetrics(top, bottom, visibleRows = 2, peek = 0.35) {
   if (![top, bottom, visibleRows, peek].every(Number.isFinite) ||
       top < 0 || bottom <= top || !Number.isInteger(visibleRows) || visibleRows < 1 || peek < 0.3 || peek > 0.4) {
@@ -51,6 +85,19 @@ export function peekingCardMetrics(top, bottom, visibleRows = 2, peek = 0.35) {
   const height = (bottom - top - gap * visibleRows) / (visibleRows + peek);
   if (height <= 0) throw new Error('Peeking cards do not fit the viewport');
   return Object.freeze({height, gap, stride: height + gap, peek});
+}
+
+export function adaptiveCardMetrics(top, bottom, minHeight, maxRows = 2, peek = 0.35) {
+  if (!finitePositive(minHeight) || !Number.isInteger(maxRows) || maxRows < 1) {
+    throw new Error('Invalid adaptive card dimensions');
+  }
+  for (let rows = maxRows; rows > 1; rows--) {
+    const cards = peekingCardMetrics(top, bottom, rows, peek);
+    if (cards.height >= minHeight) return Object.freeze({...cards, rows});
+  }
+  const cards = peekingCardMetrics(top, bottom, 1, peek);
+  const height = Math.max(minHeight, cards.height);
+  return Object.freeze({...cards, height, stride: height + cards.gap, rows: 1});
 }
 
 export function measureMenuContent(children) {

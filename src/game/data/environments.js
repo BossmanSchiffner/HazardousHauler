@@ -3,27 +3,76 @@ import {depotPaletteStep} from '../core/depots.js';
 export const ROAD_SURFACE_PRESETS = Object.freeze({
   industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
   dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
-  neon: Object.freeze({roadTexture: 'neon_road', subRoadTexture: 'subroad_neon', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  // The hex grate is a road-aligned layer glued to the roadbed, so it scrolls 1:1 instead of with sub-road parallax.
+  neon: Object.freeze({roadTexture: 'road_neon_base', subRoadTexture: 'overlay_neon_hex', blendMode: 'NORMAL',
+    overlayAlpha: 0.85, overlayScrollRatio: 1, overlayRoadAligned: true}),
   foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+});
+
+export const LEVEL_LIGHTING_PRESETS = Object.freeze({
+  level1: Object.freeze(['dawn', 'dawn', 'midday', 'midday']),
+  level2: Object.freeze(['dawn', 'midday', 'midday', 'dusk']),
+  level3: Object.freeze(['dawn', 'midday', 'dusk', 'night']),
+  level4: Object.freeze(['dusk', 'dusk', 'night', 'night']),
 });
 
 export const SECTOR_LIGHTING = Object.freeze([
   Object.freeze({name: 'DAWN TRANSIT', tint: 0xe8d0b0, headlights: false}),
   Object.freeze({name: 'MID-DAY TRANSIT', tint: 0xffffff, headlights: false}),
   Object.freeze({name: 'DUSK TRANSIT', tint: 0x8c6b9e, headlights: true}),
-  Object.freeze({name: 'NIGHT SHIFT', tint: 0x46516a, headlights: true}),
+  Object.freeze({name: 'NIGHT SHIFT', tint: 0x6a7590, headlights: true}),
 ]);
-export const LEVEL_SECTOR_LIGHTING = Object.freeze({
-  level1: Object.freeze([SECTOR_LIGHTING[0], SECTOR_LIGHTING[0], SECTOR_LIGHTING[1], SECTOR_LIGHTING[1]]),
-  level2: Object.freeze([SECTOR_LIGHTING[0], SECTOR_LIGHTING[1], SECTOR_LIGHTING[1], SECTOR_LIGHTING[2]]),
+const LIGHTING_BY_PRESET = Object.freeze({
+  dawn: SECTOR_LIGHTING[0], midday: SECTOR_LIGHTING[1],
+  dusk: SECTOR_LIGHTING[2], night: SECTOR_LIGHTING[3],
 });
+export const THEMES = Object.freeze({
+  neon: Object.freeze({
+    roadKey: ROAD_SURFACE_PRESETS.neon.roadTexture,
+    overlayKey: ROAD_SURFACE_PRESETS.neon.subRoadTexture,
+    overlayBlend: ROAD_SURFACE_PRESETS.neon.blendMode,
+    overlayAlpha: ROAD_SURFACE_PRESETS.neon.overlayAlpha,
+    ambientTint: Object.freeze({dusk: 0x8a70a8, night: 0x56487e}),
+    headlightIntensity: 1.3,
+    hazardGlowIntensity: 1.4,
+  }),
+});
+
+/** Decorative Neon blade signs on the shoulders: pooled images, no collision, deterministic cadence. */
+export const NEON_SHOULDER_SIGNS = Object.freeze({
+  spacingMeters: 140, firstMeters: 60, depth: 2, displayScale: 0.5,
+  pulseMs: 1200, alphaMin: 0.8, alphaMax: 1,
+  left: Object.freeze({key: 'neon_sign_kanji', x: 35}),
+  right: Object.freeze({key: 'neon_sign_apex', x: 355}),
+});
+
+/**
+ * Every obstacle carries a light: listed kinds flash amber double strobes, all others a slow amber beacon.
+ * Neon-sector obstacles also get a soft cyan/purple ring halo so they read against the dark grid.
+ */
+export const HAZARD_LIGHTS = Object.freeze({
+  strobes: Object.freeze({divider: 2, barrier: 2, forklift: 1, sweeper: 2, boomLift: 1, serviceBoom: 1}),
+  beaconPeriodMs: 1400, beaconIdleAlpha: 0.3,
+  neonHalo: Object.freeze({key: 'glow_hazard_ring', tints: Object.freeze([0x3ccfff, 0xb45cff]), padPx: 30,
+    alphaMin: 0.4, alphaMax: 0.7, pulseMs: 1800, dayDepth: 4.9, nightDepth: 16.05}),
+});
+
+const NEON_LIGHTING_BY_PRESET = Object.freeze({
+  dusk: Object.freeze({...SECTOR_LIGHTING[2], tint: THEMES.neon.ambientTint.dusk}),
+  night: Object.freeze({...SECTOR_LIGHTING[3], tint: THEMES.neon.ambientTint.night}),
+});
+export const LEVEL_SECTOR_LIGHTING = Object.freeze(Object.fromEntries(
+  Object.entries(LEVEL_LIGHTING_PRESETS).map(([levelId, presets]) => [levelId,
+    Object.freeze(presets.map(preset => levelId === 'level4'
+      ? NEON_LIGHTING_BY_PRESET[preset] : LIGHTING_BY_PRESET[preset]))]),
+));
 export const OVERDRIVE_LIGHTING = Object.freeze({name: 'HIGH NOON', tint: 0xffffff, headlights: false});
 export const ENVIRONMENT_VISUALS = Object.freeze({
   subRoadSpeed: 0.7, ambientBlendSeconds: 1.8,
   headlightLength: 220, headlightWidth: 84, headlightAlpha: 0.35,
   streetlightSpacingMeters: 80, streetlightRadius: 140, streetlightAlpha: 0.38,
   streetlightTint: 0xffe090,
-  barrierNightScale: 1.3, barrierNightIdleAlpha: 0.3,
+  barrierNightScale: 1.8, barrierNightIdleAlpha: 0.3,
   cargoNightTint: 0xe6e6e6, cargoNightGlowScale: 0.9,
   burstZoom: 0.94, burstOutMs: 300, burstReturnMs: 1500,
   streakSeconds: 1.8, streakMargin: 0.15,
@@ -56,16 +105,16 @@ const environment = (roadTexture, roadsideIdentity, hazardFamilies, roadTints) =
 /** Visual asset inventories; challenge selection lives in challengeProfiles.js. */
 export const ENVIRONMENTS = Object.freeze({
   industrial: environment('industrial_road', ['vent', 'pipes', 'utility', 'loading'],
-    ['divider', 'barrier', 'signalCabinet', 'rockSlab', 'loadingPlatform', 'pipeAssembly', 'roadsideMachine', 'cargoDock', 'serviceBoom'],
+    ['divider', 'barrier', 'signalCabinet', 'rockSlab', 'loadingPlatform', 'pipeAssembly', 'roadsideMachine', 'cargoDock', 'serviceBoom', 'boomLift'],
     [0xffffff, 0xe0edf4, 0xf2e4d1, 0xd5e4dc]),
   dustlands: environment('dustlands_road', ['rocks', 'wreckage', 'exposed-conduits'],
-    ['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'],
+    ['divider', 'rockSlab', 'dustConduit', 'wreckPlatform', 'boomLift'],
     [0xffffff, 0xf3e4cb, 0xe5d4c1, 0xe9dfce]),
-  neon: environment('neon_road', ['service-facades', 'signal-signs', 'energy-conduits'],
-    ['divider', 'signalCabinet', 'neonConduit', 'signGantry'],
+  neon: environment(ROAD_SURFACE_PRESETS.neon.roadTexture, ['service-facades', 'signal-signs', 'energy-conduits'],
+    ['divider', 'signalCabinet', 'neonConduit', 'signGantry', 'vent', 'ventGrille', 'boomLift'],
     [0xffffff, 0xdde8ff, 0xefdbf8, 0xd5edf2]),
   reactor: environment('reactor_road', ['containment-walls', 'cooling-conduits', 'reactor-panels'],
-    ['divider', 'rockSlab', 'reactorPipe', 'containment'],
+    ['divider', 'rockSlab', 'reactorPipe', 'containment', 'vent', 'ventGrille', 'boomLift'],
     [0xffffff, 0xd9eee0, 0xd5e6ec, 0xe6e5ce]),
   overdrive: environment('overdrive_road', ['containment-walls', 'signal-signs', 'energy-conduits'],
     ['divider', 'rockSlab', 'signalCabinet', 'reactorPipe', 'signGantry', 'containment'],
@@ -80,6 +129,7 @@ const visualThemes = new Map(Object.entries(ENVIRONMENTS).map(([themeId, environ
   roadTints: environment.roadTints,
   surfacePreset: ROAD_SURFACE_PRESETS[themeId === 'reactor' ? 'foundry'
     : themeId === 'overdrive' ? 'neon' : themeId],
+  ...THEMES[themeId],
 })]));
 const warnedVisualThemes = new WeakSet();
 

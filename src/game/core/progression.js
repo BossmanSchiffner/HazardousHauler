@@ -59,6 +59,7 @@ export function checkpointDistance(levelId) {
 }
 
 export function isLevelUnlocked(profile, levelId) {
+  if (levelId === 'level4') return profile.completedLevels?.includes('level3') === true;
   return levelIds.includes(levelId) && (
     levelId === GAME_BALANCE.progression.firstPlayableLevel ||
     profile.levelProgress?.[levelId]?.unlocked === true ||
@@ -67,8 +68,9 @@ export function isLevelUnlocked(profile, levelId) {
 }
 
 export function isCheckpointUnlocked(profile, levelId) {
-  return isLevelUnlocked(profile, levelId) &&
-    profile.levelProgress?.[levelId]?.sector3CheckpointUnlocked === true;
+  return isLevelUnlocked(profile, levelId) && (levelId === 'level4'
+    ? profile.milestones?.includes('level4,sector3') === true
+    : profile.levelProgress?.[levelId]?.sector3CheckpointUnlocked === true);
 }
 
 export function isRunStartAvailable(profile, levelId, start = 'beginning', mode = 'normal') {

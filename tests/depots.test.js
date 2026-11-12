@@ -25,16 +25,17 @@ import Rectangle from 'phaser/src/geom/rectangle/index.js';
 import {releaseRouteVisual} from '../src/game/rendering/routeVisualPool.js';
 
 test('depot schedules follow campaign transitions or each global continuous 1000m milestone', () => {
-  for (const levelId of ['level1', 'level2']) {
+  for (const levelId of Object.keys(IMPLEMENTED_LEVELS)) {
     let distance = 0;
     const normal = [];
-    for (let index = 0; index < 3; index++) {
+    const expected = GAME_BALANCE.routes[levelId].sectorEndsMeters.slice(0, -1);
+    for (let index = 0; index < expected.length; index++) {
       const next = nextDepotAfter(distance, DEPOT_RULES, levelId, 'normal');
       normal.push(next.distance);
       assert.equal(next.transition, true);
       distance = next.distance;
     }
-    assert.deepEqual(normal, levelId === 'level1' ? [500, 1000, 1500] : [500, 1000, 2000]);
+    assert.deepEqual(normal, expected);
     assert.equal(nextDepotAfter(normal.at(-1), DEPOT_RULES, levelId, 'normal').distance, Infinity);
   }
   let at = 0;
@@ -44,7 +45,8 @@ test('depot schedules follow campaign transitions or each global continuous 1000
     endless.push(next.distance);
     at = next.distance;
   }
-  assert.deepEqual(endless, [1000, 2000, 3000, 4000, 5000]);
+  assert.deepEqual(endless, Array.from({length: 5}, (_, index) =>
+    (index + 1) * GAME_BALANCE.routes.continuous.depotIntervalMeters));
   assert.throws(() => nextDepotAfter(1000, DEPOT_RULES, 'level2', 'continuous'), /per-level/);
   assert.throws(() => nextDepotAfter(-1), /Invalid Depot schedule/);
   assert.throws(() => nextDepotAfter(0, {...DEPOT_RULES, loopMeters: 0}), /Invalid Depot schedule/);
@@ -59,15 +61,19 @@ test('moving windows align with banking and include the final Normal settlement 
     found.push(next.distance);
     at = next.distance;
   }
-  assert.deepEqual(found, [500, 1000, 1500, 2000]);
-  assert.equal(nextMoverWindowAfter(499.99).distance, 500);
-  assert.equal(nextMoverWindowAfter(500).distance, 1000);
-  assert.equal(nextMoverWindowAfter(1500).distance, 2000);
-  assert.equal(nextMoverWindowAfter(2000).distance, Infinity);
-  assert.equal(nextMoverWindowAfter(500, MOVER_WINDOW_RULES, 'level2').distance, 1000);
-  assert.equal(nextMoverWindowAfter(2000, MOVER_WINDOW_RULES, 'level2').distance, 3000);
-  assert.equal(nextMoverWindowAfter(3000, MOVER_WINDOW_RULES, 'level2').distance, Infinity);
-  assert.equal(nextMoverWindowAfter(5000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 6000);
+  const level1Ends = GAME_BALANCE.routes.level1.sectorEndsMeters;
+  const level2Ends = GAME_BALANCE.routes.level2.sectorEndsMeters;
+  assert.deepEqual(found, level1Ends);
+  assert.equal(nextMoverWindowAfter(level1Ends[0] - 0.01).distance, level1Ends[0]);
+  assert.equal(nextMoverWindowAfter(level1Ends[0]).distance, level1Ends[1]);
+  assert.equal(nextMoverWindowAfter(level1Ends[2]).distance, level1Ends[3]);
+  assert.equal(nextMoverWindowAfter(level1Ends.at(-1)).distance, Infinity);
+  assert.equal(nextMoverWindowAfter(level2Ends[0], MOVER_WINDOW_RULES, 'level2').distance, level2Ends[1]);
+  assert.equal(nextMoverWindowAfter(level2Ends.at(-2), MOVER_WINDOW_RULES, 'level2').distance, level2Ends.at(-1));
+  assert.equal(nextMoverWindowAfter(level2Ends.at(-1), MOVER_WINDOW_RULES, 'level2').distance, Infinity);
+  const continuousInterval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+  assert.equal(nextMoverWindowAfter(5 * continuousInterval, MOVER_WINDOW_RULES, 'level1', 'continuous').distance,
+    6 * continuousInterval);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 10000);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').startDistance, 9000);
   assert.throws(() => nextMoverWindowAfter(-1), /Invalid Depot schedule/);
@@ -230,10 +236,13 @@ test('balance bot must steer into a facility to bank; reaching its sample horizo
 const sceneSource = readFileSync(new URL('../src/game/scenes/RoutePrototypeScene.js', import.meta.url), 'utf8')
   .replace(/^import[\s\S]*?;\r?\n/gm, '').replace('export class RoutePrototypeScene', 'class RoutePrototypeScene');
 const DepotScene = vm.runInNewContext(`${sceneSource}\nRoutePrototypeScene;`, {
-  Phaser: {Scene: class {}, Geom: {Rectangle}, Math: {Clamp: (v, min, max) => Math.max(min, Math.min(max, v))}},
+  Phaser: {Scene: class {}, BlendModes: {ADD: 1}, Geom: {Rectangle},
+    Math: {Clamp: (v, min, max) => Math.max(min, Math.min(max, v))}},
   releaseRouteVisual,
   GAME_BALANCE, balance, ...depotEconomy, cargoTotals, METERS_PER_PIXEL, MAX_TRACK_SPEED,
   ROAD_LEFT, ROAD_RIGHT, SHIP_Y, DEPOT_RULES, depotEntryAllowed, depotDockingStart, depotMotionStep, nextDepotAfter,
+  depotWorldY, depotFacilityHeight: () => 100,
+  createDepotFacility: (_scene, depot, y) => ({depot, container: {y}}),
   routeSpeedAtDistance, routeFinishDistance, sectorAtDistance, IMPLEMENTED_LEVELS, continuousStageAtDistance,
   SPRITE_ART_SCALE, PALETTE, advanceSteering, KEYBOARD_BRAKE_SECONDS, HAZARD_ROW_ENVELOPE_PX,
   SPAWN_Y: GAME_BALANCE.routes.geometry.spawnYpx, depotResumeFirstDistance, hazardScrollScale,
@@ -241,10 +250,29 @@ const DepotScene = vm.runInNewContext(`${sceneSource}\nRoutePrototypeScene;`, {
   syncDepotEntrance() {}, syncGuardrailSparks() {}, syncSectorRoad() {}, isDeveloperRun: () => false,
 });
 
+test('scheduled Depot facility enters at its distance threshold', () => {
+  const facilityHeight = 100;
+  const nextDepot = nextDepotAfter(0, DEPOT_RULES, 'level3', 'normal');
+  const scene = new DepotScene();
+  Object.assign(scene, {
+    distance: nextDepot.distance - (SHIP_Y + facilityHeight) * METERS_PER_PIXEL + 0.01,
+    nextDepot,
+    depotFacilities: [],
+  });
+
+  scene.updateDepotFacilities(0);
+
+  assert.equal(scene.depotFacilities.length, 1);
+  assert.equal(scene.depotFacilities[0].depot.distance, nextDepot.distance);
+  assert.ok(scene.depotFacilities[0].container.y >= -facilityHeight);
+});
+
 function tacticalDepotScene(mode = 'normal', rank = 3) {
   const scene = new DepotScene();
   Object.assign(scene, {
     phase: 'running', levelId: 'level1', runMode: mode, profile: defaultProfile(),
+    _scratchPlayerRect: new Rectangle(), _scratchDepotRect: new Rectangle(),
+    _scratchIntersectionRect: new Rectangle(),
     distance: mode === 'continuous' ? 1000 : 500,
     stats: {shieldCapacity: rank, capacity: 11, handling: 0, loadRelief: 0},
     shieldCharges: 0, hull: 2, maxHull: 3, depotCount: 0, invulnerable: 0, holdFullCooldown: 0,
@@ -440,7 +468,7 @@ test('depot Endless stopped Skip alone restores equipped shields without banking
     assert.equal(scene.runEconomy.continuousPassedDepots, 1);
     assert.equal(scene.runEconomy.depotsSkipped, 1);
     assert.equal(scene.runEconomy.depotsReached, 1);
-    assert.equal(scene.nextDepotDistance, 2000);
+    assert.equal(scene.nextDepotDistance, 2 * GAME_BALANCE.routes.continuous.depotIntervalMeters);
     assert.equal(scene.invulnerable, 1);
   }
 });

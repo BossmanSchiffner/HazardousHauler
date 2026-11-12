@@ -3,8 +3,6 @@
  * Obstacle shadows retain the overhead-light spec. Truck contact shadows, suspension and
  * trailer articulation remains cosmetic and cannot move the cab.
  */
-export {MAX_TRACK_SPEED} from './gameBalance.js';
-
 export const balance = Object.freeze({
   RUN_TRUCK_VISUAL_SCALE: 1.05,
   COLLECTIBLE_VISUAL_SCALE: 0.95 * 0.95,

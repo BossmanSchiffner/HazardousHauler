@@ -28,13 +28,13 @@ import {addModuleIcon, colorText, hazardTexture, MODULE_CAPTIONS, garageUpgradeB
   preloadCollectibleArt, COLLECTIBLE_ART, syncBlueprintVisuals, syncCargoPickupVisuals, syncHaulerEffects,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y,
   SPRITE_ART_SCALE, scaleSpriteArt,
-  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, stopHaulerExhaust,
+  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo, stopHaulerExhaust,
   vehicleTexture, vehicleTrimName, addGoldPreviewSparkles,
   createSilhouetteShadow, syncSilhouetteShadow, createDepotFacility, depotFacilityHeight, SHADOW_TINT,
   createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon, addHudBacking, GUARDRAIL_ART,
   playImpactSparks} from '../src/game/rendering/industrial.js';
 import {balance} from '../src/game/data/balance.js';
-import {SECTOR_LIGHTING, OVERDRIVE_LIGHTING} from '../src/game/data/environments.js';
+import {ENVIRONMENT_VISUALS, NEON_SHOULDER_SIGNS, resolveVisualTheme, SECTOR_LIGHTING, OVERDRIVE_LIGHTING} from '../src/game/data/environments.js';
 import {lightingForSector, setRoadLighting, setRoadEnvironmentVisible, startRoadBurst,
   stopRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
 import {cargoOffer, cargoTotals, collectCargo, damageCargo, createCargoTrail} from '../src/game/core/cargo.js';
@@ -51,7 +51,7 @@ import {
 import {checkpointDistance, isLevelUnlocked, isRunStartAvailable, recordSectorProgress} from '../src/game/core/progression.js';
 import {HINTS, hintForEvent, markHintSeen} from '../src/game/core/onboarding.js';
 import {createRunContext, HELP_SECTIONS, resultTip} from '../src/game/core/playerGuidance.js';
-import {advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics} from '../src/game/core/menuLayout.js';
+import {adaptiveCardMetrics, advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics, upgradeTileContentMetrics} from '../src/game/core/menuLayout.js';
 import {vehicleStatus, selectVehicle, purchaseVehicle, buyVehicleTrim, selectVehicleTrim} from '../src/game/core/vehicles.js';
 import {VEHICLES} from '../src/game/data/catalog.js';
 
@@ -93,7 +93,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
     };
   } }, Geom: {Rectangle}, BlendModes: {ADD: 1}, Math: {Clamp: (value, min, max) => Math.max(min, Math.min(max, value))}},
   routeImage, releaseRouteVisual,
-  balance, depotWorldY, depotFacilityHeight,
+  balance, depotWorldY, depotFacilityHeight, ENVIRONMENT_VISUALS, fitRoadToView() {},
   lightingForSector, setRoadLighting, setRoadEnvironmentVisible, startRoadBurst,
   stopRoadBurst, updateRoadEnvironment,
   createSilhouetteShadow: (...args) => visualHooks.createSilhouetteShadow(...args),
@@ -105,7 +105,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   adjustDeveloperCoins, isDeveloperRun, markDeveloperRun, DebugManager,
   GAME_BALANCE, MAX_TRACK_SPEED, VEHICLES,
   vehicleStatus, selectVehicle, purchaseVehicle, buyVehicleTrim, selectVehicleTrim,
-  advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics,
+  adaptiveCardMetrics, advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics, upgradeTileContentMetrics,
   createRunContext, HELP_SECTIONS, resultTip,
   bankCargo, bankingQuote, createRunEconomy, DEPOT_ECONOMY, continuousQuote, passContinuousDepot,
   awardCloseCall, closeCallBonusPercent, playImpactSparks, advanceNearMiss, cargoPickupHits,
@@ -123,7 +123,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   preloadCollectibleArt, syncBlueprintVisuals, syncCargoPickupVisuals, syncHaulerEffects,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y,
   SPRITE_ART_SCALE, scaleSpriteArt,
-  preloadDepotArt, createBarrierLights, syncBarrierLights, stopHaulerExhaust,
+  preloadDepotArt, preloadNeonVisuals() {}, NEON_SHOULDER_SIGNS, resolveVisualTheme, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo, stopHaulerExhaust,
   vehicleTexture, vehicleTrimName, addGoldPreviewSparkles,
   cargoOffer, cargoTotals, collectCargo, damageCargo, createCargoTrail, advanceSteering, KEYBOARD_BRAKE_SECONDS,
   HAZARD_ROW_ENVELOPE_PX, hazardDefinition, hazardGeometry, hazardHits, hazardX, LANE_CENTERS,
@@ -158,11 +158,17 @@ test('startup save recovery warning uses the error toast only after world and me
   const scene = new Scene();
   const order = [];
   scene.buildWorld = () => order.push('world');
+  scene.createTransientTextPool = () => {};
   scene.handleViewportResize = () => {};
   scene.initializeUrlDebug = () => order.push('menu');
   scene.showToast = (message, style) => order.push({message, style});
   scene.events = {once() {}};
   scene.scale = {on() {}, gameSize: {width: 390, height: 844}};
+  scene.add = {graphics: () => ({
+    setScrollFactor() { return this; }, setDepth() { return this; }, clear() { return this; },
+    fillStyle() { return this; }, fillRect() { return this; }, lineStyle() { return this; },
+    lineBetween() { return this; }, strokeRect() { return this; },
+  })};
   scene.input = {on() {}, keyboard: {addKeys: () => ({})}};
   startupWarning = 'Original saved progress preserved; saving is blocked.';
   try {
@@ -197,6 +203,7 @@ test('ordinary startup opens the main menu directly and classifies the first inp
     const scene = new Scene();
     const listeners = new Map();
     scene.buildWorld = () => {};
+    scene.createTransientTextPool = () => {};
     scene.handleViewportResize = () => {};
     scene.beginMenuScroll = () => {};
     scene.beginSteering = () => {};
@@ -205,6 +212,11 @@ test('ordinary startup opens the main menu directly and classifies the first inp
     scene.handlePointerUp = () => {};
     scene.endMenuScroll = () => {};
     scene.scale = {on() {}, off() {}, gameSize: {width: 390, height: 844}};
+    scene.add = {graphics: () => ({
+      setScrollFactor() { return this; }, setDepth() { return this; }, clear() { return this; },
+      fillStyle() { return this; }, fillRect() { return this; }, lineStyle() { return this; },
+      lineBetween() { return this; }, strokeRect() { return this; },
+    })};
     scene.events = {once() {}};
     scene.input = {
       on(name, handler) { listeners.set(name, handler); },
@@ -435,16 +447,36 @@ function depotScene() {
   scene.lines = [];
   scene.dustSurface = {};
   scene.objects = [];
+  scene._scratchPlayerRect = new Rectangle();
+  scene._scratchDepotRect = new Rectangle();
+  scene._scratchIntersectionRect = new Rectangle();
   scene.time = {now: 0};
   scene.overlayObjects = [];
   scene.uiRows = [];
   scene.uiCurrency = [];
+  scene.add = {
+    image(x, y, key) {
+      return {
+        x, y, key, width: 390, height: 190, displayHeight: 190,
+        setDepth() { return this; },
+        setScale(scale) { this.displayHeight = this.height * scale; return this; },
+      };
+    },
+  };
   scene.addCard = () => {};
   scene.addStatRow = (label, value, y, options) => scene.uiRows.push({label, value, y, ...options});
   scene.addCurrency = (value, x, y, options) => {
     scene.uiCurrency.push({value, x, y, ...options});
     return {width: 50, displayWidth: 50, setAlpha() {}, setPosition() {}, setY() {}, destroy() {}};
   };
+  scene.acquireTransientText = (x, y, text) => ({
+    x, y, text,
+    setPosition(nextX, nextY) { this.x = nextX; this.y = nextY; return this; },
+    setVisible(value) { this.visible = value; return this; },
+    setAlpha(value) { this.alpha = value; return this; },
+    destroy() {},
+  });
+  scene.releaseTransientText = node => node?.destroy?.();
   for (const method of ['clearOverlay', 'setWorldVisible', 'refreshHud', 'triggerHint', 'showToast',
     'syncHaulerVisuals', 'panel', 'hideToast', 'addButton', 'createMenuScroll', 'finishMenuScroll']) {
     scene[method] = () => {};
@@ -470,6 +502,43 @@ function finishDocking(scene) {
   for (let frame = 0; frame < 31 && scene.phase === 'docking'; frame++) scene.updateStep(0, 50);
   assert.equal(scene.phase, 'depot');
 }
+
+test('transient text pool prewarms labels and reuses released entries', () => {
+  const scene = new Scene();
+  let created = 0;
+  const displayObject = (x = 0, y = 0, text = '') => ({
+    x, y, text, width: text.length * 8,
+    setOrigin() { return this; },
+    setDepth() { return this; },
+    setVisible(value) { this.visible = value; return this; },
+    setText(value) { this.text = value; this.width = value.length * 8; return this; },
+    setFontSize() { return this; },
+    setColor() { return this; },
+    setAlpha(value) { this.alpha = value; return this; },
+    setPosition(nextX, nextY) { this.x = nextX; this.y = nextY; return this; },
+    setDisplaySize() { return this; },
+    destroy() { throw new Error('pooled labels must not be destroyed'); },
+  });
+  scene.add = {
+    text(x, y, text) { created++; return displayObject(x, y, text); },
+    image(x, y) { return displayObject(x, y); },
+    container(x, y) {
+      const container = displayObject(x, y);
+      container.setDepth = () => container;
+      return container;
+    },
+  };
+  scene.tweens = {killTweensOf() {}};
+  scene.createTransientTextPool();
+  assert.equal(created, 32);
+  const first = scene.acquireTransientText(20, 30, 'PICKUP', '#ffffff', 18);
+  scene.releaseTransientText(first);
+  const reused = scene.acquireTransientText(40, 50, 'BANKED', '#ffdf7c', 14, true);
+  assert.equal(reused, first);
+  assert.equal(reused.visible, true);
+  assert.equal(reused.alpha, 1);
+  assert.equal(created, 32);
+});
 
 test('URL debug boots the exact implemented level and sector without recording progress', () => {
   for (const levelId of ['level1', 'level2']) for (const sectorNumber of [1, 2, 3, 4]) {
@@ -658,6 +727,48 @@ test('URL debug actual frame loop reaches both exact finish distances within 60 
     assert.equal(savedProfile, null);
     assert.equal(scene.runResult.net, 0);
   }
+});
+
+test('Neon shoulder signs are pooled, collision-free, deterministic and pulse without per-sign tweens', () => {
+  const run = levelId => {
+    const scene = depotScene();
+    const created = [];
+    const image = scene.add.image;
+    scene.add.image = (...args) => {
+      const node = Object.assign(image(...args), {
+        setAlpha(alpha) { this.alpha = alpha; return this; },
+        destroy() { this.destroyed = true; },
+      });
+      created.push(node);
+      return node;
+    };
+    scene.tweens = {add: () => assert.fail('signs must not allocate tweens'), killTweensOf() {}};
+    scene.shoulderSigns = [];
+    scene.startRun('developer', levelId, 'normal', {sectorNumber: 1, vehicleId: 'standard'});
+    const start = scene.distance;
+    const log = [];
+    for (let frame = 0; frame < 1200; frame++) {
+      scene.time.now = frame * 1000 / 60;
+      scene.distance = start + frame * 0.6;
+      scene.updateShoulderSigns(10);
+      for (const sign of scene.shoulderSigns) {
+        assert.ok(sign.alpha >= NEON_SHOULDER_SIGNS.alphaMin - 1e-9 && sign.alpha <= NEON_SHOULDER_SIGNS.alphaMax + 1e-9);
+      }
+      assert.ok(scene.shoulderSigns.length <= 4, 'sign pool budget');
+    }
+    for (const node of created) log.push(`${node.key}@${node.x}`);
+    assert.ok(!scene.objects.length, 'signs never enter the collision object list');
+    const live = [...scene.shoulderSigns];
+    scene.removeObjects();
+    assert.equal(scene.shoulderSigns.length, 0);
+    assert.ok(live.every(node => node.destroyed), 'signs are released back to the pool on reset');
+    return log;
+  };
+  const neon = run('level4');
+  assert.ok(neon.length >= 4, `${neon.length} signs over 720 m`);
+  assert.ok(neon.some(entry => entry === `neon_sign_kanji@${NEON_SHOULDER_SIGNS.left.x}`));
+  assert.ok(neon.some(entry => entry === `neon_sign_apex@${NEON_SHOULDER_SIGNS.right.x}`));
+  assert.deepEqual(run('level1'), [], 'signs are Neon-only');
 });
 
 test('URL debug bot traverses all four Level 2 sectors on the returning-mover regression seed without God Mode', () => {
@@ -1083,7 +1194,8 @@ test('run menu level cards contain paired start tabs and scroll independently of
     assert.ok(cards[0].bottom < viewport.bottom);
     assert.ok(cards.at(-1).bottom > viewport.bottom, 'future entries remain scrollable, not under the footer');
     const tabs = rows.filter(row => row.text === 'SECTOR 1' || row.text === 'CHECKPOINT\nSECTOR 3');
-    assert.equal(tabs.length, 4, 'only implemented levels have start tabs');
+    assert.equal(tabs.length, IMPLEMENTED_LEVELS.level1.length * 2,
+      'only implemented levels have start tabs');
     for (let index = 0; index < tabs.length; index += 2) {
       const left = tabs[index], right = tabs[index + 1], card = cards[index / 2];
       assert.equal(left.top, right.top);
@@ -1551,7 +1663,7 @@ test('Garage equipment details explain complete gates, future gates and slot-bas
   assert.ok(!buttons.some(button => button.label === 'BUY UPGRADE'));
   labels.length = 0;
   scene.showUpgradeDetail('module', 'util_impact_pulse');
-  assert.ok(labels.some(text => text.includes('Reach Level 4, Sector 3. Level 4 is not available yet.')));
+  assert.ok(labels.some(text => text.includes('Reach Level 4, Sector 3 (1,500 m).')));
   assert.equal(JSON.stringify(scene.profile), source);
   scene.profile = upgradeCargoCapacity(scene.profile).profile;
   labels.length = 0;
@@ -1780,10 +1892,18 @@ test('Garage mobile card lists reveal 30 to 40 percent of card three with tight 
       assert.ok(scene.overlayObjects.some(object => object.x === 300 && object.y === 56 &&
         object.width === 100 && object.height === 34), `${width}x${height}/${tab}: wallet stays inside its inset`);
       const tiles = cards.filter(card => card.height > 100);
-      const third = tiles[2];
+      const peekIndex = tiles.findIndex(tile => tile.y + tile.height / 2 > scene.menuScrollBottom + 1e-9);
+      assert.ok(peekIndex >= 1, `${width}x${height}/${tab}/${fullSlots}: at least one full card row`);
+      const third = tiles[peekIndex];
       const visible = scene.menuScrollBottom - (third.y - third.height / 2);
-      assert.ok(visible / third.height >= 0.3 - 1e-9 && visible / third.height <= 0.4,
-        `${width}x${height}/${tab}/${fullSlots}: ${visible / third.height}`);
+      const minimumHeight = tab === 'garage' ? 196 : 180;
+      if (third.height <= minimumHeight + 1e-9) {
+        assert.ok(visible / third.height <= 0.4,
+          `${width}x${height}/${tab}/${fullSlots}: readable minimum-height cards keep rows whole`);
+      } else {
+        assert.ok(visible / third.height >= 0.3 - 1e-9 && visible / third.height <= 0.4,
+          `${width}x${height}/${tab}/${fullSlots}: ${visible / third.height}`);
+      }
       const nextRow = tiles[tab === 'garage' ? 1 : 2];
       assert.ok(Math.abs(nextRow.y - tiles[0].y - tiles[0].height - 12) < 1e-9);
       assert.equal(scene.footerButton.label, 'BACK TO MENU');
@@ -1975,15 +2095,16 @@ test('Garage upgrade cards bind supplied art and display exact ranks, bonuses an
     upgrades.forEach((card, index) => {
       const box = card.objects[0];
       const icon = card.objects.find(object => object.key?.startsWith('garage_upgrade_'));
+      const content = upgradeTileContentMetrics(box.width, box.height);
       const id = ['cargo_expanded', 'hand_precision', 'coll_magnet', 'cargo_light',
         'def_plating', 'util_insurance', 'def_shield', 'util_impact_pulse'][index];
       assert.equal(icon.key, GARAGE_UPGRADE_ART.find(art => art.id === id).key);
-      assert.equal(Math.max(icon.displayWidth, icon.displayHeight), Math.min(72, card.height * 0.20));
+      assert.equal(Math.max(icon.displayWidth, icon.displayHeight), content.iconSize);
       assert.ok(card.objects.indexOf(icon) > 0, 'art is painted after its backing');
       const action = buttons.find(button => button.x === box.x &&
         button.y > card.y - card.height / 2 && button.y < card.y + card.height / 2);
-      assert.equal(action.width, box.width - 24);
-      assert.equal(action.height, 54);
+      assert.equal(action.width, box.width - content.paddingX * 2);
+      assert.equal(action.height, content.buttonHeight);
       if (id === 'hand_precision') {
         const owned = variant === 'equipped' || variant === 'max';
         const price = GAME_BALANCE.upgrades.modules.hand_precision.price;
@@ -2488,10 +2609,10 @@ test('menu descriptions and image-card columns stay centered within their padded
     labels.length = 0;
     scene.addUpgradeGridTile(item, 109, 400, 166, 'standard');
     assert.equal(labels.length, 4);
-    assert.ok(labels.every((label, index) =>
+    const {paddingX} = upgradeTileContentMetrics(166, 366);
+    assert.ok(labels.every(label =>
       label.x === 109 && label.originX === 0.5 &&
-      label.originY === (index === 0 ? 0 : 0.5) &&
-      label.style.align === 'center' && label.style.wordWrap.width === 166 - 24));
+      label.style.align === 'center' && label.style.wordWrap.width === 166 - paddingX * 2));
   }
   assert.equal(JSON.stringify(scene.profile), before);
 });
@@ -2542,20 +2663,22 @@ test('upgrade tiles leave internal padding around wrapped names, benefits and lo
       const height = 231;
       scene.addUpgradeGridTile(item, 110.5, 400, 157, 'standard', height);
       const tile = {x: 110.5, y: 400, width: 157, height};
+      const content = upgradeTileContentMetrics(tile.width, tile.height);
       assert.equal(labels[0].originX, 0.5);
-      assert.equal(labels[0].originY, 0);
-      assert.equal(labels[0].y, tile.y - tile.height / 2 + 16,
-        'title is physically positioned relative to the centered card background');
+      assert.equal(labels[0].originY, 0.5);
+      assert.equal(labels[0].y, tile.y - tile.height / 2 + content.titleY,
+        'title is vertically centered within its padded card row');
       let previousBottom;
       for (const label of labels) {
         const displayHeight = label.height * label.scale;
         const top = label.y - displayHeight * label.originY;
         const bottom = top + displayHeight;
-        assert.ok(top >= tile.y - tile.height / 2 + 12, label.text);
-        assert.ok(bottom <= tile.y + tile.height / 2 - 12, label.text);
-        assert.ok(label.width * label.scale <= tile.width - 24 + 1e-8, label.text);
+        assert.ok(top >= tile.y - tile.height / 2 + content.paddingY - 1e-8,
+          `${label.text}: top=${top}, padding=${tile.y - tile.height / 2 + content.paddingY}`);
+        assert.ok(bottom <= tile.y + tile.height / 2 - content.paddingY + 1e-8, label.text);
+        assert.ok(label.width * label.scale <= tile.width - content.paddingX * 2 + 1e-8, label.text);
         assert.equal(label.x, tile.x, 'text shares the upgrade image and container center line');
-        if (previousBottom) assert.ok(top >= previousBottom + 6, label.text);
+        if (previousBottom) assert.ok(top >= previousBottom + content.gap - 1e-8, label.text);
         previousBottom = bottom;
       }
     }
@@ -2691,13 +2814,19 @@ test('run menu Endless entry keeps one readable rules screen and returns to the 
   assert.equal(scene.phase, 'menu');
 });
 
-test('run menu level start tabs use per-level checkpoint gates and launch directly without intermediate menus', () => {
+test('run menu level start tabs show implemented levels in order with per-level gates', () => {
   for (const level2Unlocked of [false, true]) for (const level1Checkpoint of [false, true])
-    for (const level2Checkpoint of [false, true]) {
+    for (const level2Checkpoint of [false, true]) for (const level3Unlocked of [false, true])
+      for (const level3Checkpoint of [false, true]) for (const level4Unlocked of [false, true])
+        for (const level4Checkpoint of [false, true]) {
       const scene = depotScene();
       scene.profile.levelProgress.level2.unlocked = level2Unlocked;
       scene.profile.levelProgress.level1.sector3CheckpointUnlocked = level1Checkpoint;
       scene.profile.levelProgress.level2.sector3CheckpointUnlocked = level2Checkpoint;
+      scene.profile.levelProgress.level3.unlocked = level3Unlocked;
+      scene.profile.levelProgress.level3.sector3CheckpointUnlocked = level3Checkpoint;
+      scene.profile.completedLevels = level4Unlocked ? ['level3'] : [];
+      if (level4Checkpoint) scene.profile.milestones.push('level4,sector3');
       const buttons = [], labels = [], starts = [];
       scene.addButton = (label, y, action, options = {}) => buttons.push({label, y, action, ...options});
       scene.addLabel = text => { labels.push(text); return {height: 20}; };
@@ -2707,11 +2836,15 @@ test('run menu level start tabs use per-level checkpoint gates and launch direct
       assert.equal(scene.phase, 'levelSelect');
       assert.ok(!buttons.some(button => /OVERDRIVE|CONTINUOUS|ENDLESS|NORMAL RUN/.test(button.label)));
       const tabs = buttons.filter(button => button.label !== 'RETURN TO MENU');
-      assert.equal(tabs.length, 4);
+      assert.equal(tabs.length, 8);
       assert.equal(tabs[0].disabled, false);
       assert.equal(tabs[1].disabled, !level1Checkpoint);
       assert.equal(tabs[2].disabled, !level2Unlocked);
       assert.equal(tabs[3].disabled, !(level2Unlocked && level2Checkpoint));
+      assert.equal(tabs[4].disabled, !level3Unlocked);
+      assert.equal(tabs[5].disabled, !(level3Unlocked && level3Checkpoint));
+      assert.equal(tabs[6].disabled, !level4Unlocked);
+      assert.equal(tabs[7].disabled, !(level4Unlocked && level4Checkpoint));
       for (let index = 0; index < tabs.length; index++) {
         const tab = tabs[index];
         if (tab.disabled) {
@@ -2720,10 +2853,13 @@ test('run menu level start tabs use per-level checkpoint gates and launch direct
         }
         tab.action();
         assert.deepEqual(starts.at(-1), [index % 2 ? 'checkpoint' : 'beginning',
-          index < 2 ? 'level1' : 'level2', 'normal']);
+          index < 2 ? 'level1' : index < 4 ? 'level2' : index < 6 ? 'level3' : 'level4', 'normal']);
       }
-      assert.deepEqual(labels.filter(label => /^LEVEL [3-5]$/.test(label)), ['LEVEL 3', 'LEVEL 4', 'LEVEL 5']);
-      assert.equal(labels.filter(label => label === 'COMING SOON').length, 3);
+      assert.ok(labels.includes('Level 3: Reactor Zone'));
+      assert.ok(labels.includes('Level 4: Neon Gridway'));
+      assert.deepEqual(labels.filter(label => /^LEVEL [3-5]$/.test(label)), ['LEVEL 5']);
+      assert.equal(labels.filter(label => label === 'COMING SOON').length, 1);
+      assert.equal(labels.includes('Complete Level 3 to unlock Level 4.'), !level4Unlocked);
       assert.equal(JSON.stringify(scene.profile), before);
       assert.equal(typeof scene.showModeSelect, 'undefined');
       assert.equal(typeof scene.showNormalStartSelect, 'undefined');
@@ -2958,6 +3094,35 @@ test('developer sector launches bypass access without changing checkpoint or rew
   scene.distance = GAME_BALANCE.routes.level2.sectorStartsMeters[3] + 20;
   scene.recordMilestones();
   assert.equal(scene.profile.levelProgress.level2.sector3CheckpointUnlocked, false);
+});
+
+test('developer level choices scroll above a separate fixed Back button at phone sizes', () => {
+  for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844]]) {
+    const scene = depotScene();
+    scene.menuHeight = responsiveViewport(width, height, 390).worldHeight;
+    scene.setScreenRenderer = () => {};
+    const buttons = [];
+    let scrollViewport;
+    scene.createMenuScroll = (_key, top, bottom) => { scrollViewport = {top, bottom}; };
+    scene.addButton = (label, y, action, options = {}) =>
+      buttons.push({label, y, action, height: options.height ?? 54});
+
+    scene.showDeveloperLevelSelect();
+
+    const levelButtons = buttons.filter(button => button.label !== 'BACK');
+    const back = buttons.find(button => button.label === 'BACK');
+    assert.equal(levelButtons.length, GAME_BALANCE.progression.levelIds.length);
+    assert.ok(back);
+    for (const button of levelButtons) {
+      assert.ok(button.y + button.height / 2 <= scrollViewport.bottom + 66,
+        `${width}x${height}: each level remains reachable within the scroller`);
+      assert.ok(button.y + button.height / 2 < back.y - back.height / 2,
+        `${width}x${height}: ${button.label} does not overlap Back`);
+    }
+    assert.ok(back.y + back.height / 2 <= scene.menuHeight - 32);
+    assert.ok(back.y - back.height / 2 - scrollViewport.bottom >= MENU_SPACING.padding - 1e-9);
+    assert.equal(typeof buttons.find(button => button.label.includes('Level 4'))?.action, 'function');
+  }
 });
 
 test('seven taps on the build label within five seconds reveal the hidden developer menu', () => {
@@ -3444,6 +3609,7 @@ test('approved container variants and short edge pipes retain one unchanged game
   scene.trackStream = {nextRow: () => row};
   scene.add = {image(x, y, texture) {
     return {x, y, texture, setDepth() { return this; },
+      setBlendMode() { return this; }, setPosition() { return this; }, setAlpha() { return this; },
       setFlipX(value) { this.flipped = value; return this; },
       setOrigin(x, y) { this.originX = x; this.originY = y; return this; },
       setDisplaySize() { throw new Error('Short pipe artwork must not stretch like a wall'); },
@@ -3458,13 +3624,14 @@ test('approved container variants and short edge pipes retain one unchanged game
     assert.equal(item.sprite.texture, hazardTexture(item.kind, sectorAtDistance(0), item.lane));
     assert.equal(item.roadsideBase, isGuardrail(item) ? undefined : null);
     assert.equal(item.lengthPx, undefined);
-    assert.equal(item.cautionLights, null);
+    if (!isGuardrail(item)) assert.equal(item.cautionLights.length, 1, 'every obstacle carries one amber beacon');
   }
+  const lightCount = scene.objects.reduce((sum, item) => sum + (item.cautionLights?.length ?? 0), 0);
   assert.equal(scene.objects[4].sprite.flipped, false);
   assert.equal(scene.objects[5].sprite.flipped, true);
   assert.equal(JSON.stringify({row, profile: scene.profile}), before);
   scene.removeObjects();
-  assert.equal(destroyed.length, hazards.length);
+  assert.equal(destroyed.length, hazards.length + lightCount, 'each obstacle and its beacon are released');
 });
 
 test('approved Barrier, Rockslab and Signal Cabinet keep their spawn geometry, depth and shared cleanup', () => {
@@ -3494,15 +3661,15 @@ test('approved Barrier, Rockslab and Signal Cabinet keep their spawn geometry, d
     assert.equal(item.sprite.scaleX, 1.1);
     assert.equal(item.sprite.scaleY, 1.1);
     assert.equal(item.roadsideBase, null);
-    assert.equal(item.cautionLights?.length ?? 0, item.kind === 'barrier' ? 2 : 0);
+    assert.equal(item.cautionLights?.length ?? 0, item.kind === 'barrier' ? 2 : 1);
     if (item.cautionLights) assert.ok(item.cautionLights.every(light => light.texture === 'barrier_caution_light'));
     assert.equal(item.lengthPx, undefined);
   }
   assert.equal(JSON.stringify({row, profile: scene.profile, geometry: HAZARDS}), before);
   scene.removeObjects();
   assert.equal(scene.objects.length, 0);
-  assert.deepEqual(destroyed, ['hazard_signalCabinet', 'hazard_rockSlab', 'cargo_hazard',
-    'barrier_caution_light', 'barrier_caution_light']);
+  assert.deepEqual(destroyed, ['hazard_signalCabinet', 'barrier_caution_light', 'hazard_rockSlab',
+    'barrier_caution_light', 'cargo_hazard', 'barrier_caution_light', 'barrier_caution_light']);
 });
 
 test('approved Barrier replaces generated concrete divider visuals across sectors without changing spawn data', () => {

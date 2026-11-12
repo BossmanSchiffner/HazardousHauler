@@ -161,7 +161,7 @@ function syncStreaks(view, scene, dt) {
 }
 
 export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt, nextDepot) {
-  view.road.subRoad.tilePositionY -= scrollPx * V.subRoadSpeed;
+  view.road.subRoad.tilePositionY -= scrollPx * (view.road.subRoad.scrollRatio ?? V.subRoadSpeed);
   view.glints.tilePositionY -= scrollPx;
   if (!view.visible) return;
   const remaining = nextDepot?.distance - distance;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {HAZARDS, INDUSTRIAL_HAZARD_KINDS, HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailContact, guardrailLayout, hazardDefinition, hazardGeometry, hazardHits, isGuardrail, hazardsForRow, hasStraightRoute, hazardArtOverlaps, hazardBlockedIntervals, hazardSweptArtOverlaps, hazardX, movingHazardOffset, sideHazardQuota} from '../src/game/core/hazards.js';
+import {HAZARDS, INDUSTRIAL_HAZARD_KINDS, HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailContact, guardrailLayout, hazardDefinition, hazardGeometry, hazardHits, isGuardrail, hazardsForRow, hasStraightRoute, hazardArtOverlaps, hazardBlockedIntervals, hazardSweptArtOverlaps, hazardX, movingHazardOffset, energyOrbX, sideHazardQuota} from '../src/game/core/hazards.js';
 import {CHUNK_REGISTRIES, INDUSTRIAL_CHUNKS, ROW_REACTION_SECONDS, createTrackGenerator, createTrackStream, rowSpacingAtSpeed} from '../src/game/core/trackGenerator.js';
 import {ROAD_LEFT, ROAD_RIGHT, HAZARD_TRAVEL_PX} from '../src/game/data/route.js';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
@@ -12,22 +12,51 @@ import {ENVIRONMENTS} from '../src/game/data/environments.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, sectorAtDistance} from '../src/game/core/sectors.js';
 import {minimumLaneChanges, sampleRoute} from '../scripts/route-audit.mjs';
 import {driveTrackTransition, validateTrackSequence} from '../src/game/core/trackValidation.js';
+import {CHALLENGE_PROFILES} from '../src/game/data/challengeProfiles.js';
 
 const lanes = [86, 159, 232, 305];
 const {playerHalfWidthPx: CAB_HALF_WIDTH, playerHalfHeightPx: CAB_HALF_HEIGHT} = GAME_BALANCE.hazards;
 
+test('Energy Orb is a non-blocking roaming circular hazard with Level 4 profile pacing', () => {
+  const orb = hazardDefinition('energy_orb');
+  assert.deepEqual([orb.width, orb.height, orb.radius], [48, 48, 24]);
+  assert.equal(orb.isMover, true);
+  assert.equal(orb.moverType, 'roaming_lateral');
+  assert.equal(orb.lateralSpeed, 45);
+  assert.deepEqual([orb.minX, orb.maxX], [75, 315]);
+  assert.equal(orb.ignoresObstacles, true);
+  assert.equal(hazardHits('energy_orb', 100, 100, 100 + CAB_HALF_WIDTH + 23, 100), true);
+  assert.equal(hazardHits('energy_orb', 100, 100, 100 + CAB_HALF_WIDTH + 25, 100), false);
+  for (const [sector, gap] of [[1, [170, 210]], [2, [150, 190]], [3, [140, 180]], [4, [130, 160]]]) {
+    const profile = CHALLENGE_PROFILES[`level4_neon_s${sector}`];
+    assert.deepEqual(profile.obstaclePalette, ['signalCabinet', 'barrier', 'vent', 'signalCabinet', 'rockSlab',
+      'boomLift', 'signalCabinet', 'ventGrille']);
+    assert.equal(profile.allowSweeper, false);
+    assert.equal(profile.allowForklift, false);
+    assert.equal(profile.allowEnergyOrb, true);
+    assert.deepEqual(profile.orbSpawnIntervalM, [180, 260]);
+    assert.deepEqual(profile.baseGapRange, gap);
+  }
+  assert.equal(energyOrbX({initialX: 75, direction: 1}, 0), 75);
+  assert.equal(energyOrbX({initialX: 75, direction: 1}, 4), 255);
+  assert.equal(energyOrbX({initialX: 315, direction: -1}, 4), 135);
+  assert.equal(energyOrbX({initialX: 315, direction: 1}, 0), 315);
+});
+
 test('side hazard quota accepts only the approved inclusive physical-instance range', () => {
-  for (const side of [3, 4, 5, 6]) {
-    const result = sideHazardQuota(100, side);
-    assert.equal(result.acceptable, true, `${side}%`);
-    assert.equal(result.share, side / 100);
-    assert.equal(result.minimumShare, 0.03);
+  for (const [obstacles, side] of [[10_000, 225], [10_000, 226], [100, 3], [100, 4], [100, 5], [100, 6]]) {
+    const result = sideHazardQuota(obstacles, side);
+    assert.equal(result.acceptable, true, `${100 * side / obstacles}%`);
+    assert.equal(result.share, side / obstacles);
+    assert.equal(result.minimumShare, GAME_BALANCE.routes.sideObstacles.minimumShare);
     assert.equal(result.maximumShare, 0.06);
     assert.equal(result.targetShare, 0.045);
   }
-  for (const side of [0, 2, 7, 100]) assert.equal(sideHazardQuota(100, side).acceptable, false);
-  assert.equal(sideHazardQuota(1_000_001, 30_000).acceptable, false,
-    'rounding to 3.00% must not waive a below-minimum result');
+  for (const [obstacles, side] of [[100, 0], [10_000, 224], [100, 7], [100, 100]]) {
+    assert.equal(sideHazardQuota(obstacles, side).acceptable, false);
+  }
+  assert.equal(sideHazardQuota(1_000_000, 22_499).acceptable, false,
+    'rounding to 2.25% must not waive a below-minimum result');
   assert.equal(sideHazardQuota(999_999, 60_000).acceptable, false,
     'rounding to 6.00% must not waive an above-maximum result');
   assert.equal(sideHazardQuota(0, 0).acceptable, false, 'an empty route is not quota evidence');
@@ -58,7 +87,9 @@ test('hazard art footprints and collision envelopes vary, stay within their lane
   assert.equal(new Set(INDUSTRIAL_HAZARD_KINDS.map(kind => HAZARDS[kind].height)).size, INDUSTRIAL_HAZARD_KINDS.length);
   for (const [kind, spec] of Object.entries(HAZARDS)) {
     const visual = spec.scenery ?? spec;
-    if (!isGuardrail(kind)) assert.deepEqual(TEXTURE_SIZES[spec.texture], [visual.width, visual.height]);
+    if (!isGuardrail(kind) && kind !== 'energy_orb') {
+      assert.deepEqual(TEXTURE_SIZES[spec.texture], [visual.width, visual.height]);
+    }
     assert.ok(spec.hitX <= spec.width / 2 + CAB_HALF_WIDTH, `${kind}: collider never extends past art plus cab half-width`);
     assert.ok(spec.hitY <= spec.height / 2 + CAB_HALF_HEIGHT, `${kind}: collider never extends past art plus cab half-height`);
     if (!spec.roadside) assert.ok(!hazardHits(kind, 159, 0, 232, 0), 'adjacent safe lane stays safe');
@@ -74,11 +105,16 @@ test('hazard art footprints and collision envelopes vary, stay within their lane
         assert.ok(hazardHits(kind, 159, 0, 159 + part.x + part.halfWidth + CAB_HALF_WIDTH - 0.01,
           part.y + part.halfHeight + CAB_HALF_HEIGHT - 0.01), `${kind}: cab surface touching the footprint collides`);
       }
+    } else if (spec.radius) {
+      assert.equal(hazardHits(kind, 159, 0,
+        159 + CAB_HALF_WIDTH + spec.radius - 0.01, 0), true);
     } else {
       assert.ok(hazardHits(kind, 159, 0, 159 + spec.hitX - 0.01, spec.hitY - 0.01));
     }
     // 1e-9 absorbs float drift from adding the non-integer cab half-width to a lane coordinate.
-    assert.ok(!hazardHits(kind, 159, 0, 159 + spec.hitX + 1e-9, 0), `${kind}: cab surface clear of the collider stays safe`);
+    const clearX = spec.radius ? CAB_HALF_WIDTH + spec.radius + 1e-9 : spec.hitX + 1e-9;
+    assert.ok(!hazardHits(kind, 159, 0, 159 + clearX, 0),
+      `${kind}: cab surface clear of the collider stays safe`);
   }
   assert.throws(() => hazardDefinition('unknown'), /Unknown/);
 });

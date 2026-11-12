@@ -8,7 +8,7 @@ import {hazardBlockedIntervals, routeHazardBlockedIntervals, usesPotentialMoverL
   moverReservation, staticIntersectsMoverReservation, movingHazardMinimumForInterval}
   from '../src/game/core/hazards.js';
 import {physicalPressureMetrics} from '../src/game/core/hazards.js';
-import {createTrackGenerator, movingEncounterRows, staticIntersectsMoverAtRow} from '../src/game/core/trackGenerator.js';
+import {createTrackGenerator, createTrackStream, movingEncounterRows, staticIntersectsMoverAtRow} from '../src/game/core/trackGenerator.js';
 import {HAZARD_TRAVEL_PX, SHIP_Y, SPAWN_Y} from '../src/game/data/route.js';
 import {HAZARD_ROW_ENVELOPE_PX} from '../src/game/core/hazards.js';
 import {hazardClearance, validateTrackSequence} from '../src/game/core/trackValidation.js';
@@ -60,7 +60,8 @@ test('instantaneous mover checks use a 15px margin and leave safe neighboring ro
 
 test('row-local mover repair excludes instantaneous overlaps without clearing surrounding rows', () => {
   for (const seed of [1, 98765]) {
-    const rows = sampleRoute(seed, 4000, false, 'level2', 'normal', 9);
+    const rows = sampleRoute(seed, GAME_BALANCE.routes.level2.finishDistanceMeters,
+      false, 'level2', 'normal', 9);
     const emitted = rows.filter(row => row.emitted);
     const windows = emitted.flatMap(row => row.hazards.filter(hazard => hazard.movement)
       .map(hazard => hazard.moverReservation));
@@ -117,6 +118,35 @@ test('moving sweeper stays in one lane at half track speed and shares exact phys
     1500 + (HAZARD_TRAVEL_PX - physical.hitY * 2) * METERS_PER_PIXEL);
   for (const ratio of [0, 1, NaN, -1]) assert.throws(() =>
     hazardScrollScale({...mover, movement: {axis: 'forward', forwardSpeedRatio: ratio}}), /Invalid/);
+});
+
+test('Level 3 Street Sweepers meet the per-sector minimum and alternate road halves', () => {
+  const sectors = IMPLEMENTED_LEVELS.level3;
+  const {minimumPerSector} = GAME_BALANCE.routes.streetSweeper;
+  for (const seed of [5, 4242]) {
+    const stream = createTrackStream(seed, 'level3', 'normal');
+    const perSector = new Map(sectors.map(sector => [sector.number, 0]));
+    const sides = [];
+    let distance = 20;
+    while (distance < sectors.at(-1).endsAt) {
+      const depot = nextDepotAfter(distance, DEPOT_RULES, 'level3', 'normal').distance;
+      const row = stream.nextRow(distance, {nextDepotDistance: depot, protectedUntilDistance: 0});
+      if (!row) { distance += 1; continue; }
+      for (const sweeper of row.sweepers ?? []) {
+        const sector = sectors.find(entry => row.plannedDistance < entry.endsAt);
+        perSector.set(sector.number, perSector.get(sector.number) + 1);
+        sides.push(sweeper.lane < 2 ? 'L' : 'R');
+        assert.ok(!row.hazards.some(hazard => hazard.lane === sweeper.lane && !hazard.continuation),
+          'the sweeper source row leaves its lane free of statics');
+      }
+      distance = row.plannedDistance + row.spacingPx * METERS_PER_PIXEL;
+      if (distance >= depot - 1) distance = depot + 60;
+    }
+    for (const [sector, count] of perSector) {
+      assert.ok(count >= minimumPerSector, `seed ${seed} sector ${sector} has ${count} sweepers`);
+    }
+    assert.doesNotMatch(sides.join(''), /LL|RR/, `seed ${seed} sweepers alternate sides`);
+  }
 });
 
 test('moving sweeper and forklift encounters retain connected 6px physical clearance at Normal speeds and reject walls', () => {

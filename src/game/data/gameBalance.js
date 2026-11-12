@@ -15,7 +15,33 @@
  * New calculations use the new balance; saved ownership is retained and past purchases are
  * never refunded automatically. Moving-hazard bounds and speed live beside their route.
  */
-export const MAX_TRACK_SPEED = 680;
+export const MAX_TRACK_SPEED = 720;
+
+export const CAMPAIGN_SPEEDS = deepFreeze({
+  level1: [320, 350, 380, 410],
+  level2: [350, 380, 410, 440],
+  level3: [380, 410, 440, 470],
+  level4: [410, 440, 470, 500],
+});
+
+export const ROUTE_TOPOLOGY = deepFreeze({
+  level1: {
+    finishDistance: 2000, depotDistances: [500, 1000, 1500],
+    checkpointDistance: 1000, sectorEnds: [500, 1000, 1500, 2000],
+  },
+  level2: {
+    finishDistance: 3000, depotDistances: [500, 1000, 2000],
+    checkpointDistance: 1000, sectorEnds: [500, 1000, 2000, 3000],
+  },
+  level3: {
+    finishDistance: 4000, depotDistances: [500, 1500, 2500],
+    checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+  },
+  level4: {
+    finishDistance: 4000, depotDistances: [500, 1500, 2500],
+    checkpointDistance: 1500, sectorEnds: [500, 1500, 2500, 4000],
+  },
+});
 
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -46,10 +72,27 @@ const balance = {
       depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40},
     level1: {
       challengeProfileId: 'industrial',
-      sectorEndsMeters: [500, 1000, 1500, 2000],
+      sectorEndsMeters: ROUTE_TOPOLOGY.level1.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level1.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level1.checkpointDistance,
       sectorThemeIds: ['industrial', 'industrial', 'industrial', 'industrial'],
-      speed: {startPxPerSecond: 320, endPxPerSecond: 410, sectorStartsPxPerSecond: [320, 350, 380, 410]},
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level1[0], endPxPerSecond: CAMPAIGN_SPEEDS.level1.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level1},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
+      densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
+      densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
+      sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
+    },
+    level4: {
+      challengeProfileId: 'neon',
+      sectorEndsMeters: ROUTE_TOPOLOGY.level4.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level4.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level4.checkpointDistance,
+      sectorThemeIds: ['neon', 'neon', 'neon', 'neon'],
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level4[0], endPxPerSecond: CAMPAIGN_SPEEDS.level4.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level4},
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
       challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
@@ -58,11 +101,28 @@ const balance = {
     },
     level2: {
       challengeProfileId: 'dustlands',
-      sectorEndsMeters: [500, 1000, 2000, 3000],
+      sectorEndsMeters: ROUTE_TOPOLOGY.level2.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level2.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level2.checkpointDistance,
       sectorThemeIds: ['dustlands', 'dustlands', 'dustlands', 'dustlands'],
       openingSpeedSource: {levelId: 'level1', distanceMeters: 500},
-      speed: {startPxPerSecond: 350, endPxPerSecond: 440, sectorStartsPxPerSecond: [350, 380, 410, 440]},
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level2[0], endPxPerSecond: CAMPAIGN_SPEEDS.level2.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level2},
       // Difficulty steps up at each sector milestone; the final entry applies past the finish (Overdrive).
+      densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
+      densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
+      sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
+    },
+    level3: {
+      challengeProfileId: 'reactor',
+      sectorEndsMeters: ROUTE_TOPOLOGY.level3.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level3.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level3.checkpointDistance,
+      sectorThemeIds: ['reactor', 'reactor', 'reactor', 'reactor'],
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level3[0], endPxPerSecond: CAMPAIGN_SPEEDS.level3.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level3},
       densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
       densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
       challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
@@ -87,8 +147,21 @@ const balance = {
       centralTravelLaneCount: 1,
       recoverySecondsBySector: [1.8, 1.2, 1.2, 1.2],
     },
+    // Street Sweepers overlay certified rows: their lane stays free of static obstacles while on screen.
+    streetSweeper: {
+      firstMeters: 120,
+      // Each sweeper sector guarantees this many, alternating left (lanes 0-1) and right (lanes 2-3) halves.
+      minimumPerSector: 2,
+      // One sweeper clears the hauler's bumper line before the next one spawns.
+      minimumGapMeters: 90,
+      sectorLeadMeters: 40,
+      spawnOffsetPx: -40,
+      visualClearancePx: 24,
+      contactWindowMeters: 25,
+      wallLookbackMeters: 60,
+    },
     sideObstacles: {
-      minimumShare: 0.03,
+      minimumShare: 0.0225,
       maximumShare: 0.06,
       targetShare: 0.045,
       minimumSpanRows: 3,
@@ -111,6 +184,9 @@ const balance = {
       // Owner rule: a lane that opens stays open 2..3 consecutive rows before it is threatened again.
       minimumClearEvents: {normal: 2, continuous: 2},
       maximumClearEvents: {normal: 3, continuous: 3},
+      // Owner rule: no stretch longer than this planned distance may leave a middle lane (1 or 2) open on
+      // every row; some row must leave only an outer lane (0 or 3) open, so the truck cannot shuttle 1<->2.
+      edgeLaneDemandMeters: {normal: 160, continuous: 160},
       encounters: {
         candidateBudget: 8, recentLayouts: 4,
         densityRecovery: {
@@ -264,7 +340,7 @@ const balance = {
     apexUnlock: {milestone: 'level1,sector4', prerequisites: ['swift', 'armoured', 'prospector']},
   },
   progression: {
-    levelIds: ['level1', 'level2'],
+    levelIds: ['level1', 'level2', 'level3', 'level4'],
     firstPlayableLevel: 'level1',
     sectorsPerLevel: 4,
     checkpointSector: 3,
@@ -285,12 +361,17 @@ const balance = {
       exitLengthPerWidth: 321 / 335,
     },
     collision: {
+      energy_orb: {texture: 'hazard_energy_orb', width: 48, height: 48, hitX: 37, hitY: 40},
       rockSlab: {width: 60, height: 46, hitX: 40, hitY: 36, footprint: [[0, 0, 28, 20]]},
       wreckage: {width: 60, height: 58, hitX: 40, hitY: 41, footprint: [[-9, 0, 19, 25], [19, 10, 9, 15]]},
       signalCabinet: {width: 40, height: 58, hitX: 30, hitY: 43, footprint: [[0, 0, 18, 27]]},
       energySpine: {width: 24, height: 60, hitX: 22, hitY: 44, footprint: [[0, 0, 10, 28]]},
       coolingDrum: {width: 56, height: 60, hitX: 38, hitY: 44, footprint: [[0, 0, 26, 28]]},
       reactorShield: {width: 64, height: 38, hitX: 42, hitY: 33, footprint: [[0, 0, 30, 17]]},
+      // Free-standing lane obstacles drawn from the approved Vent and Service Boom art.
+      vent: {width: 40, height: 60, hitX: 30, hitY: 44, footprint: [[0, 0, 18, 28]]},
+      ventGrille: {width: 42, height: 58, hitX: 32, hitY: 43, footprint: [[0, 0, 19, 27]]},
+      boomLift: {width: 38, height: 64, hitX: 29, hitY: 46, footprint: [[0, 0, 17, 30]]},
       dustConduit: {width: 54, height: 46, roadside: true, anchorX: 64, elongated: true, scenery: 'pipes'},
       wreckPlatform: {width: 54, height: 60, roadside: true, anchorX: 64, elongated: true, scenery: 'loading'},
       neonConduit: {width: 54, height: 46, roadside: true, anchorX: 64, elongated: true, scenery: 'pipes'},
@@ -310,9 +391,10 @@ const balance = {
       barrier: {texture: 'cargo_hazard', width: 62, height: 50, hitX: 40, hitY: 40, footprint: [[0, 0, 28, 24]]},
       bollard: {width: 34, height: 62, hitX: 26, hitY: 46, footprint: [[0, 0, 14, 30]]},
       gate: {width: 68, height: 34, hitX: 42, hitY: 32, footprint: [[0, 0, 30, 16]]},
+      // Street Sweeper: a lane-wide truck driving up its lane; excluded from the static row envelope.
       sweeper: {
-        texture: 'hazard_forklift', height: 68,
-        collisionInsetPx: 5,
+        texture: 'hazard_sweeper', height: 112,
+        collisionInsetPx: 6,
       },
       forklift: {
         texture: 'hazard_forklift', widthLanes: 1, height: 68,
@@ -354,9 +436,13 @@ const balance = {
 };
 
 balance.routes.level1.sectorStartsMeters = [0, ...balance.routes.level1.sectorEndsMeters.slice(0, -1)];
-balance.routes.level1.finishDistanceMeters = balance.routes.level1.sectorEndsMeters.at(-1);
+balance.routes.level1.finishDistanceMeters = ROUTE_TOPOLOGY.level1.finishDistance;
 balance.routes.level2.sectorStartsMeters = [0, ...balance.routes.level2.sectorEndsMeters.slice(0, -1)];
-balance.routes.level2.finishDistanceMeters = balance.routes.level2.sectorEndsMeters.at(-1);
+balance.routes.level2.finishDistanceMeters = ROUTE_TOPOLOGY.level2.finishDistance;
+balance.routes.level3.sectorStartsMeters = [0, ...balance.routes.level3.sectorEndsMeters.slice(0, -1)];
+balance.routes.level3.finishDistanceMeters = ROUTE_TOPOLOGY.level3.finishDistance;
+balance.routes.level4.sectorStartsMeters = [0, ...balance.routes.level4.sectorEndsMeters.slice(0, -1)];
+balance.routes.level4.finishDistanceMeters = ROUTE_TOPOLOGY.level4.finishDistance;
 balance.routes.track.laneSpacingPx =
   balance.routes.track.laneCentersPx[1] - balance.routes.track.laneCentersPx[0];
 balance.routes.track.routeValidation.loadedCapacity = balance.cargoProgression.capacityByRank.at(-1);

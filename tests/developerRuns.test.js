@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {defaultProfile} from '../src/game/core/save.js';
 import {adjustDeveloperCoins, isDeveloperRun, markDeveloperRun} from '../src/game/core/developerRuns.js';
-import {createRunEconomy, settleRun} from '../src/game/core/depotEconomy.js';
+import {bankCargo, createRunEconomy, purchaseRepair, settleRun} from '../src/game/core/depotEconomy.js';
 
 test('developer Coin adjustments require a signed safe integer and never go below zero', () => {
   const profile = {...defaultProfile(), coins: 125};
@@ -31,4 +31,19 @@ test('developer runs are marked and settlement cannot award or unlock progressio
   assert.equal(result.profile.settledRunIds.length, 0);
   assert.equal(result.goldUnlocked, false);
   assert.equal(result.summary.net, 0);
+});
+
+test('developer runs use real Depots without paying the wallet, charging repairs or recording milestones', () => {
+  const profile = {...defaultProfile(), coins: 300};
+  const run = createRunEconomy(markDeveloperRun({runId: 'developer-depot', levelId: 'level1', mode: 'normal'}));
+  const bank = bankCargo(profile, run, [{kind: 'coin', mass: 1, slots: 1, value: 40}]);
+  assert.equal(bank.profile, profile);
+  assert.deepEqual(bank.added, []);
+  assert.deepEqual(bank.items, []);
+  assert.equal(bank.quote.cargo, 40);
+  const repair = purchaseRepair(profile, run, {repaired: false}, 1, 3, 500);
+  assert.equal(repair.ok, true);
+  assert.equal(repair.cost, 0);
+  assert.equal(repair.profile.coins, 300);
+  assert.equal(repair.hull, 2);
 });

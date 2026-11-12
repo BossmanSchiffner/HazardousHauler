@@ -587,7 +587,7 @@ test('secondary fillers: themed lane and edge obstacles improve occupied time wi
     .occupiedSeconds, 0, 'removed bodies cannot receive coverage weight');
   const options = {levelId: 'level1', mode: 'normal', startDistance: 0,
     endDistance: GAME_BALANCE.routes.level1.finishDistanceMeters};
-  assert.equal(options.endDistance, 4000);
+  assert.equal(options.endDistance, GAME_BALANCE.routes.level1.finishDistanceMeters);
   const firstSpawn = GAME_BALANCE.routes.spawning.initialRowDelaySeconds *
     routeSpeedAtDistance(0, options.levelId, options.mode) * METERS_PER_PIXEL;
   const lateStart = GAME_BALANCE.routes.level1.sectorStartsMeters[2];

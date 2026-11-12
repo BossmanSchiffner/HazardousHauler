@@ -12,12 +12,12 @@ import {
   COLLECTIBLE_ART, preloadCollectibleArt, syncBlueprintVisuals, syncCargoPickupVisuals,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y, recolorLargeCargoPickup,
   SPRITE_ART_SCALE, scaleSpriteArt, addModuleIcon,
-  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights,
-  syncSectorRoad, syncDepotEntrance, createDepotEntrance, hazardTexture, vehicleTint,
+  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo,
+  syncSectorRoad, syncDepotEntrance, createDepotEntrance, hazardTexture, vehicleTint, bakeNeonRoadTexture,
   createDepotFacility, depotFacilityHeight, createSilhouetteShadow, syncSilhouetteShadow, SHADOW_TINT,
   GUARDRAIL_ART, createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon,
   GARAGE_DISPLAY_ART, preloadGarageDisplayArt,
-  GARAGE_UPGRADE_ART, preloadGarageUpgradeArt,
+  GARAGE_UPGRADE_ART, preloadGarageUpgradeArt, NEON_ART, NEON_THEME_ASSETS, preloadNeonVisuals,
 } from '../src/game/rendering/industrial.js';
 import {balance} from '../src/game/data/balance.js';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
@@ -485,7 +485,8 @@ test('each accepted cargo plays the five-note pickup chime through finite manage
   const notes = [...f.feedback.voices].map(voice => voice.source);
   assert.deepEqual(notes.map(note => note.frequency.events[0][1]), [261.63, 293.66, 329.63, 392, 523.25]);
   assert.deepEqual(notes.map(note => note.startTime), [10, 10.08, 10.16, 10.24, 10.32]);
-  assert.deepEqual(notes.map(note => note.stops[0]), [10.3, 10.38, 10.46, 10.54, 10.62]);
+  const expectedStops = [10.3, 10.38, 10.46, 10.54, 10.62];
+  assert.ok(notes.every((note, index) => Math.abs(note.stops[0] - expectedStops[index]) < 1e-9));
   assert.deepEqual(f.vibrations, [30]);
   f.feedback.resetRun(195);
   assert.equal(f.feedback.voices.size, 0);
@@ -513,6 +514,13 @@ test('sound feedback synthesizes hard crashes, throttled scrapes and Depot whoos
   const nodesAfterScrape = f.nodes.length;
   f.feedback.playMetalScrape();
   assert.equal(f.nodes.length, nodesAfterScrape, 'held wall contact is rate-limited');
+  f.feedback.clearVoices();
+  f.feedback.energyOrbNearMiss();
+  const hum = f.feedback.voices.values().next().value;
+  assert.equal(hum.source.type, 'sine');
+  assert.equal(hum.filter.type, 'bandpass');
+  assert.equal(hum.filter.Q.events[0][1], 7);
+  assert.equal(hum.source.stops[0], 10.34);
   f.feedback.clearVoices();
   f.feedback.depot();
   const [whoosh, first, second] = [...f.feedback.voices];
@@ -685,19 +693,21 @@ test('chassis steering returns from +/-3.5 degrees over exactly 120ms; actual sc
   assert.equal(live.runEconomy.closeCallBonusPercent, 5);
   const alert = alerts.at(-1);
   assert.equal(alert[2], '+5% CLOSE CALL!');
-  assert.equal(alert[5].rise, 30);
-  assert.equal(alert[5].duration, 400);
+  assert.equal(alert[5], 30);
+  assert.equal(alert[6], 400);
   const textNode = {setOrigin() { return this; }, setDepth() { return this; }};
+  live.acquireTransientText = () => textNode;
   live.add = {text: () => textNode};
   live.textStyle = Scene.prototype.textStyle;
-  Scene.prototype.floatText.call(live, 195, 600, alert[2], '#ffe6a1', 18, alert[5]);
+  Scene.prototype.floatText.call(live, 195, 600, alert[2], '#ffe6a1', 18, alert[5], alert[6]);
   assert.equal(animations.at(-1).y, 570);
   assert.equal(animations.at(-1).duration, 400);
 });
 import {CHALLENGE_PROFILES} from '../src/game/data/challengeProfiles.js';
 import {MODULE_DEFS, formatStat} from '../src/game/core/modules.js';
-import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR_LIGHTING, LEVEL_SECTOR_LIGHTING,
-  OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS} from '../src/game/data/environments.js';
+import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR_LIGHTING,
+  LEVEL_LIGHTING_PRESETS, LEVEL_SECTOR_LIGHTING, THEMES, OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS, HAZARD_LIGHTS}
+  from '../src/game/data/environments.js';
 import {ambientAtPoint, createRoadEnvironment, destroyRoadEnvironment, lightingForSector,
   setRoadEnvironmentVisible, setRoadLighting, startRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS} from '../src/game/core/sectors.js';
@@ -753,7 +763,7 @@ function drawingScene({sourceLoaded = true, swiftLoaded = true, depotLoaded = tr
   const sources = new Map(OBSTACLE_ART.map((art, index) => {
     const [width, height] = [[278, 428], [290, 405],
       [289, 414], [335, 414], [1650, 652], [1792, 2400], [1792, 2400], [1676, 839],
-      [1792, 2400]][index];
+      [508, 866], [1792, 2400]][index];
     return [art.sourceKey, {width, height, key: art.sourceKey}];
   }));
   for (const art of COLLECTIBLE_ART) {
@@ -767,6 +777,10 @@ function drawingScene({sourceLoaded = true, swiftLoaded = true, depotLoaded = tr
   }
   if (sourceLoaded) sources.set(STANDARD_HAULER_ART.sourceKey, {width: 2048, height: 2048});
   if (swiftLoaded) sources.set(SWIFT_RUNNER_ART.sourceKey, {width: 2048, height: 2048});
+  for (const [index, art] of NEON_ART.entries()) {
+    const [width, height] = [[478, 856], [430, 430], [96, 188], [96, 188]][index];
+    sources.set(art.sourceKey, {width, height, key: art.sourceKey});
+  }
   const canvasTexture = (key, width, height, commands = []) => {
     const context = {};
     for (const method of ['drawImage', 'save', 'restore', 'translate', 'rotate',
@@ -1537,22 +1551,23 @@ test('Barrier and Sweeper caution lights share amber double flashes and follow a
     images.push(node);
     return node;
   }}};
-  for (const kind of ['divider', 'barrier', 'sweeper']) {
+  for (const kind of ['divider', 'barrier', 'sweeper', 'forklift', 'boomLift']) {
+    const single = kind === 'forklift' || kind === 'boomLift';
     const initialCount = images.length;
     const sprite = {x: 86, y: 300, scaleX: 1.1, scaleY: 1.1};
     const lights = createBarrierLights(scene, sprite, kind, 0);
-    assert.equal(lights.length, kind === 'sweeper' ? 1 : 2);
+    assert.equal(lights.length, single ? 1 : 2);
     assert.ok(lights.every(light => light.key === 'barrier_caution_light' && light.depth === 6 && light.scaleX === 1.1));
-    assert.deepEqual(lights.map(light => light.alpha), kind === 'sweeper' ? [1] : [1, 0.18]);
+    assert.deepEqual(lights.map(light => light.alpha), single ? [1] : [1, 0.18]);
     syncBarrierLights(lights, sprite, kind, 100);
     assert.deepEqual(lights.map(light => light.alpha), lights.map(() => 0.18));
     syncBarrierLights(lights, sprite, kind, 180);
-    assert.deepEqual(lights.map(light => light.alpha), kind === 'sweeper' ? [1] : [1, 0.18]);
+    assert.deepEqual(lights.map(light => light.alpha), single ? [1] : [1, 0.18]);
     sprite.x += 20;
     sprite.y += 80;
     syncBarrierLights(lights, sprite, kind, 500);
-    assert.deepEqual(lights.map(light => light.alpha), kind === 'sweeper' ? [0.18] : [0.18, 1]);
-    if (kind === 'sweeper') assert.equal(lights[0].x, sprite.x);
+    assert.deepEqual(lights.map(light => light.alpha), single ? [0.18] : [0.18, 1]);
+    if (single) assert.equal(lights[0].x, sprite.x);
     else {
       assert.ok(lights[0].x < sprite.x && lights[1].x > sprite.x);
       assert.ok(Math.abs((lights[0].x + lights[1].x) / 2 - sprite.x) < 1e-9);
@@ -1563,10 +1578,10 @@ test('Barrier and Sweeper caution lights share amber double flashes and follow a
     assert.ok(lights.every(light => light.scaleX === 1.1), 'no compounded scaling');
     syncBarrierLights(lights, sprite, kind, 0, true);
     assert.deepEqual(lights.map(light => light.alpha),
-      kind === 'sweeper' ? [1] : [1, ENVIRONMENT_VISUALS.barrierNightIdleAlpha]);
+      single ? [1] : [1, ENVIRONMENT_VISUALS.barrierNightIdleAlpha]);
     assert.ok(lights.every(light => light.scaleX === 1.1 * ENVIRONMENT_VISUALS.barrierNightScale &&
       light.scaleY === light.scaleX && light.blendMode === 'ADD' && light.depth > 16 && light.depth < 18),
-    'night strobes are slightly larger, additive and not darkened by the world mask or above the HUD');
+    'night strobes are larger, additive and not darkened by the world mask or above the HUD');
     syncBarrierLights(lights, sprite, kind, 100, true);
     assert.deepEqual(lights.map(light => light.alpha), lights.map(() => 0.3),
       'same double-flash timing with a brighter idle glow');
@@ -1574,11 +1589,54 @@ test('Barrier and Sweeper caution lights share amber double flashes and follow a
     assert.ok(lights.every(light => light.scaleX === 1.1 * ENVIRONMENT_VISUALS.barrierNightScale),
       'night scaling does not accumulate');
     syncBarrierLights(lights, sprite, kind, 500);
-    assert.deepEqual(lights.map(light => light.alpha), kind === 'sweeper' ? [0.18] : [0.18, 1]);
+    assert.deepEqual(lights.map(light => light.alpha), single ? [0.18] : [0.18, 1]);
     assert.ok(lights.every(light => light.scaleX === 1.1 && light.blendMode === 'NORMAL' && light.depth === 6),
       'daylight/Overdrive restores the original appearance');
     assert.equal(images.length, initialCount + lights.length, 'night enhancement reuses the same lights');
   }
+});
+
+test('every other obstacle carries one slow amber beacon and Neon halos pulse without allocating', () => {
+  const images = [];
+  const node = (x, y, key) => {
+    const image = {...visualNode(), x, y, key, setDepth(depth) { this.depth = depth; return this; },
+      setBlendMode(mode) { this.blendMode = mode; return this; },
+      setTint(tint) { this.tint = tint; return this; },
+      setDisplaySize(width, height) { this.displayWidth = width; this.displayHeight = height; return this; }};
+    images.push(image);
+    return image;
+  };
+  const scene = {add: {image: node}};
+  for (const kind of ['rockSlab', 'signalCabinet', 'vent', 'ventGrille', 'neonConduit']) {
+    const sprite = {x: 120, y: 260, scaleX: 1.1, scaleY: 1.1};
+    const lights = createBarrierLights(scene, sprite, kind, 0);
+    assert.equal(lights.length, 1, kind);
+    assert.equal(lights[0].alpha, HAZARD_LIGHTS.beaconIdleAlpha);
+    syncBarrierLights(lights, sprite, kind, HAZARD_LIGHTS.beaconPeriodMs / 2);
+    assert.equal(lights[0].alpha, 1, 'beacon peaks mid-period');
+    syncBarrierLights(lights, sprite, kind, HAZARD_LIGHTS.beaconPeriodMs / 4, true);
+    assert.ok(lights[0].alpha > HAZARD_LIGHTS.beaconIdleAlpha && lights[0].alpha < 1);
+    assert.ok(lights[0].depth > 16 && lights[0].blendMode === 'ADD');
+  }
+  const count = images.length;
+  const sprite = {x: 100, y: 300, originX: 0.25, originY: 0.5, displayWidth: 80, displayHeight: 60};
+  const halo = createNeonHalo(scene, sprite, 1, 0, true);
+  assert.equal(halo.key, HAZARD_LIGHTS.neonHalo.key);
+  assert.equal(halo.tint, HAZARD_LIGHTS.neonHalo.tints[1]);
+  assert.equal(halo.blendMode, 'ADD');
+  assert.equal(halo.x, 120, 'centred on the visual art, not the anchor');
+  assert.equal(halo.displayWidth, 80 + HAZARD_LIGHTS.neonHalo.padPx);
+  assert.equal(halo.depth, HAZARD_LIGHTS.neonHalo.nightDepth);
+  const alphas = new Set();
+  for (let time = 0; time <= 4000; time += 100) {
+    syncNeonHalo(halo, sprite, time, true);
+    alphas.add(halo.alpha);
+    assert.ok(halo.alpha >= HAZARD_LIGHTS.neonHalo.alphaMin - 1e-9 && halo.alpha <= HAZARD_LIGHTS.neonHalo.alphaMax + 1e-9);
+  }
+  assert.ok(alphas.size > 5, 'halo pulses');
+  syncNeonHalo(halo, sprite, 0, false);
+  assert.equal(halo.depth, HAZARD_LIGHTS.neonHalo.dayDepth);
+  assert.equal(images.length, count + 1, 'halo sync never allocates');
 });
 
 test('Dusk and Night cargo pickups and embedded shadows dim only slightly and preserve rejection cues', () => {
@@ -1683,7 +1741,8 @@ test('visual theme lookup preserves shipped textures and falls back without chan
     const current = resolveVisualTheme(sector);
     assert.equal(current.id, sector.themeId, 'every sector in a level shares its theme art');
     assert.equal(current.roadTexture, ENVIRONMENTS[sector.themeId].roadTexture);
-    assert.equal(sector.themeId, levelId === 'level2' ? 'dustlands' : 'industrial');
+    assert.equal(sector.themeId, levelId === 'level2' ? 'dustlands'
+      : levelId === 'level4' ? 'neon' : 'industrial');
     assert.ok(mock.textures.has(current.roadTexture));
     for (const visualThemeId of [undefined, 'unavailable-art', 'toString']) {
       const missing = {...sector, visualThemeId};
@@ -1697,7 +1756,7 @@ test('visual theme lookup preserves shipped textures and falls back without chan
       }
     }
     const changed = {...sector, visualThemeId: 'neon'};
-    assert.equal(resolveVisualTheme(changed).roadTexture, 'neon_road');
+    assert.equal(resolveVisualTheme(changed).roadTexture, 'road_neon_hex');
     assert.equal(hazardTexture('sideWall', changed), 'chicane_mid', 'guardrails use one approved chicane set');
     assert.equal(hazardTexture('divider', changed), 'divider_neon');
     assert.equal(changed.difficultyStep, sector.difficultyStep);
@@ -2378,48 +2437,104 @@ function roadEnvironmentFixture() {
   return {...fixture, view, ship, texture, tweens, count: created.length};
 }
 
+test('Neon road and sign art preloads from the approved Art Direction rasters, once per key', () => {
+  const loaded = [];
+  const scene = {textures: {exists: () => false}, load: {image: (key, url) => loaded.push([key, url])}};
+  preloadNeonVisuals(scene);
+  assert.deepEqual(NEON_ART.map(art => art.key), Object.values(NEON_THEME_ASSETS));
+  assert.deepEqual(loaded.map(([key]) => key), NEON_ART.map(art => art.sourceKey));
+  for (const [, url] of loaded) {
+    assert.ok(/neon-(road-base|overlay-hex|sign-apex|sign-kanji)\.webp$/.test(url), url);
+    assert.ok(readFileSync(new URL(url)).length > 0, url);
+  }
+  const baked = {textures: {exists: () => true}, load: {image: () => assert.fail('baked art reloaded')}};
+  preloadNeonVisuals(baked);
+});
+
 test('layered road textures are solid, with additive Dustlands dust and multiply Industrial grunge, never cutouts', () => {
   const mock = drawingScene();
   createIndustrialTextures(mock.scene);
-  const signatures = [];
+  const neonRoad = mock.textures.get('road_neon_base');
+  assert.deepEqual([neonRoad.width, neonRoad.height], TEXTURE_SIZES.road_neon_base);
+  assert.equal(neonRoad.width, 390);
+  const [roadDraw, ...seamDraws] = neonRoad.commands.filter(([method]) => method === 'drawImage');
+  assert.equal(roadDraw[1].key, 'neon_source_road_neon_base');
+  // Curb-to-curb art span lands on the gameplay road edges.
+  const [, , roadX, , drawnWidth] = roadDraw;
+  assert.ok(Math.abs(roadX + drawnWidth * 100 / 572 - ROAD_LEFT) < 0.01);
+  assert.ok(Math.abs(roadX + drawnWidth * 464 / 572 - ROAD_RIGHT) < 0.01);
+  assert.ok(drawnWidth * 1024 / 572 >= neonRoad.height + seamDraws.length, 'seam band comes from real art rows');
+  assert.equal(seamDraws.length, 72, 'vertical wrap is crossfaded into a seamless tile');
+  const hex = mock.textures.get('overlay_neon_hex');
+  assert.deepEqual([hex.width, hex.height], TEXTURE_SIZES.overlay_neon_hex);
+  assert.ok(hex.commands.some(([method, image]) => method === 'drawImage' && image.key === 'neon_source_overlay_neon_hex'));
+  assert.ok(hex.commands.some(([method]) => method === 'putImageData'), 'grate alpha is keyed from frame luminance');
+  for (const key of ['neon_sign_apex', 'neon_sign_kanji']) {
+    assert.deepEqual([mock.textures.get(key).width, mock.textures.get(key).height], TEXTURE_SIZES[key]);
+  }
+  for (const art of NEON_ART) assert.ok(!mock.scene.textures.exists(art.sourceKey), 'Neon sources are released');
+  assert.deepEqual(TEXTURE_SIZES.hazard_energy_orb, [64, 64]);
+  assert.deepEqual(TEXTURE_SIZES.glow_orb_radial, [128, 128]);
+  assert.deepEqual([mock.textures.get('hazard_energy_orb').width,
+    mock.textures.get('hazard_energy_orb').height], [64, 64]);
+  assert.deepEqual([mock.textures.get('glow_orb_radial').width,
+    mock.textures.get('glow_orb_radial').height], [128, 128]);
+  assert.throws(() => {
+    mock.scene.phase = 'running';
+    bakeNeonRoadTexture(mock.scene);
+  }, /baked before gameplay/);
+  const signatures = new Map();
   for (const [id, preset] of Object.entries(ROAD_SURFACE_PRESETS)) {
     const texture = mock.textures.get(preset.subRoadTexture);
-    assert.deepEqual([texture.width, texture.height], [390, 1248]);
-    signatures.push(JSON.stringify(texture.commands));
+    assert.deepEqual([texture.width, texture.height], id === 'neon' ? TEXTURE_SIZES.overlay_neon_hex : [390, 1248]);
+    if (id !== 'neon') signatures.set(id, JSON.stringify(texture.commands));
     const road = mock.textures.get(preset.roadTexture);
-    assert.ok(road.commands.some(([method, x, y, width, height]) =>
-      method === 'fillRect' && x === 0 && y === 0 && width === 390 && height === road.height), id);
+    assert.ok(road.commands.some(([method, ...args]) => {
+      if (id !== 'neon') return method === 'fillRect' && args.join() === `0,0,390,${road.height}`;
+      const [, x, y, width, height] = args;
+      return method === 'drawImage' && x <= 0 && y === 0 && x + width >= 390 && height >= road.height;
+    }), id);
     assert.ok(!road.commands.some(([method]) => ['clearRect', 'fill'].includes(method)), 'no alpha carving');
-    assert.equal(preset.blendMode, id === 'dustlands' ? 'ADD' : 'MULTIPLY');
-    assert.ok(preset.overlayAlpha > 0 && preset.overlayAlpha < 0.2);
+    assert.equal(preset.blendMode, {dustlands: 'ADD', neon: 'NORMAL'}[id] ?? 'MULTIPLY');
+    assert.ok(preset.overlayAlpha > 0 && preset.overlayAlpha < (id === 'neon' ? 0.9 : 0.2));
   }
-  assert.equal(new Set(signatures).size, 2, 'one subtle dust and one grunge material');
+  assert.notEqual(signatures.get('industrial'), signatures.get('dustlands'));
   assert.ok(!mock.textures.has('road_decal_oil'));
   assert.ok(!mock.textures.has('road_decal_crack'));
   assert.ok(!mock.textures.has('road_decal_rut'));
   const skid = mock.textures.get('road_decal_skid');
   assert.equal(skid.commands.filter(([method]) => method === 'fillRect').length, 2);
   assert.ok(!skid.commands.some(([method]) => method.includes('Ellipse') || method.includes('Circle')));
-  assert.deepEqual(Object.keys(IMPLEMENTED_LEVELS), ['level1', 'level2'], 'presets never create playable levels');
+  assert.deepEqual(Object.keys(IMPLEMENTED_LEVELS), ['level1', 'level2', 'level3', 'level4']);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.roadTexture, THEMES.neon.roadKey);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.subRoadTexture, THEMES.neon.overlayKey);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.blendMode, THEMES.neon.overlayBlend);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.overlayAlpha, THEMES.neon.overlayAlpha);
+  assert.equal(ROAD_SURFACE_PRESETS.neon.overlayScrollRatio, 1, 'hex grate is glued to the roadbed');
+  assert.deepEqual(THEMES.neon.ambientTint, {dusk: 0x8a70a8, night: 0x56487e});
+  assert.equal(THEMES.neon.headlightIntensity, 1.3);
+  assert.equal(THEMES.neon.hazardGlowIntensity, 1.4);
 });
 
 test('sector lighting follows each live level boundary and continuous uses Mid-Day independently', () => {
-  const steps = {level1: [0, 0, 1, 1], level2: [0, 1, 1, 2]};
+  assert.deepEqual(LEVEL_LIGHTING_PRESETS.level4, ['dusk', 'dusk', 'night', 'night']);
   for (const [levelId, sectors] of Object.entries(IMPLEMENTED_LEVELS)) {
     const finish = sectors.at(-1).endsAt;
     for (const [index, sector] of sectors.entries()) {
-      const expected = SECTOR_LIGHTING[steps[levelId][index]];
+      const expected = LEVEL_SECTOR_LIGHTING[levelId][index];
       assert.equal(LEVEL_SECTOR_LIGHTING[levelId][index], expected);
       assert.equal(lightingForSector(sector, sector.startsAt, finish, 'normal', levelId), expected);
       assert.equal(lightingForSector(sector, sector.endsAt - 0.01, finish, 'normal', levelId), expected);
       assert.equal(lightingForSector(sector, sector.startsAt, finish, 'continuous', levelId), SECTOR_LIGHTING[1]);
-      assert.notEqual(expected, SECTOR_LIGHTING[3], 'Night is reserved for future levels');
+      if (!['level3', 'level4'].includes(levelId)) assert.notEqual(expected, SECTOR_LIGHTING[3]);
     }
     assert.equal(lightingForSector(sectors.at(-1), finish, finish, 'normal', levelId), OVERDRIVE_LIGHTING, levelId);
   }
-  assert.deepEqual(SECTOR_LIGHTING.map(light => light.tint), [0xe8d0b0, 0xffffff, 0x8c6b9e, 0x46516a]);
+  assert.deepEqual(SECTOR_LIGHTING.map(light => light.tint), [0xe8d0b0, 0xffffff, 0x8c6b9e, 0x6a7590]);
   assert.deepEqual(SECTOR_LIGHTING.map(light => light.headlights), [false, false, true, true]);
-  assert.throws(() => lightingForSector({number: 1}, 0, 5000, 'normal', 'level3'), /Unavailable lighting/);
+  assert.deepEqual(LEVEL_SECTOR_LIGHTING.level4.map(light => light.tint),
+    [0x8a70a8, 0x8a70a8, 0x56487e, 0x56487e]);
+  assert.throws(() => lightingForSector({number: 1}, 0, 5000, 'normal', 'level5'), /Unavailable lighting/);
 });
 
 test('headlight and sodium pools restore full world colour inside lights, not only an additive glow', () => {
@@ -2581,11 +2696,11 @@ test('sector transition lasts 1.8 seconds with smooth ambient and camera easing 
   setRoadLighting(view, SECTOR_LIGHTING[1], true);
   setRoadLighting(view, SECTOR_LIGHTING[3]);
   updateRoadEnvironment(view, scene, ship, 3000, 0, 0.45);
-  assert.deepEqual(view.color, [226.09375, 227.8125, 231.71875], 'smoothstep eases into the new ambient colour');
+  assert.deepEqual(view.color, [231.71875, 233.4375, 237.65625], 'smoothstep eases into the new ambient colour');
   updateRoadEnvironment(view, scene, ship, 3000, 0, 0.45);
-  assert.deepEqual(view.color, [162.5, 168, 180.5]);
+  assert.deepEqual(view.color, [180.5, 186, 199.5]);
   updateRoadEnvironment(view, scene, ship, 3000, 0, 0.9);
-  assert.deepEqual(view.color, [70, 81, 106]);
+  assert.deepEqual(view.color, [106, 117, 144]);
   const exhaust = {anchor: {x: 190, y: 670}, emitter: {explode(...args) { this.burst = args; }}};
   startRoadBurst(view, scene, exhaust);
   assert.deepEqual([tweens[0].factor, tweens[0].duration, tweens[0].ease], [0.94, 300, 'Sine.easeInOut']);
@@ -2783,8 +2898,8 @@ test('one pooled diesel emitter makes expanding charcoal puffs that drift with r
   const {scene, created} = effectsScene();
   const effects = createHaulerEffects(scene);
   const {emitter, anchor} = effects.exhaust;
-  assert.equal(created.filter(node => node.type === 'particles').length, 3,
-    'normal diesel, low-Hull smoke and reused grind/impact sparks');
+  assert.equal(created.filter(node => node.type === 'particles').length, 4,
+    'normal diesel, low-Hull smoke, grind/impact sparks and orb sparks');
   assert.equal(effects.thrust, undefined, 'no flame images remain');
   assert.equal(TEXTURE_SIZES.cargo_thrust, undefined);
   assert.equal(emitter.key, 'particle-dot');
@@ -2908,7 +3023,7 @@ test('sector road uses aligned tiled surfaces and lane-center-derived stripe pos
   const rectangles = [];
   const scene = {add: {
     tileSprite: (...args) => {
-      const surface = {args, setDepth(depth) { this.depth = depth; return this; },
+      const surface = {args, setDepth(depth) { this.depth = depth; return this; }, setFlipX() { return this; },
         setBlendMode(mode) { this.blendMode = mode; return this; }, setAlpha() { return this; }};
       surfaces.push(surface);
       return surface;
@@ -2916,7 +3031,9 @@ test('sector road uses aligned tiled surfaces and lane-center-derived stripe pos
     rectangle: (...args) => { rectangles.push(args); return args; },
   }};
   const road = buildIndustrialRoad(scene, {width: 390, height: 844, stripeGap: 78, stripesPerColumn: 12});
-  assert.equal(surfaces.length, 3);
+  assert.equal(surfaces.length, 7);
+  assert.equal(road.flanks.length, 4);
+  assert.deepEqual(road.flanks.map(flank => flank.args[0]), [-21.5, 411.5, -21.5, 411.5]);
   assert.equal(road.subRoad.depth, 0.05);
   assert.equal(road.subRoad.blendMode, 'MULTIPLY');
   assert.deepEqual(road.subRoad.args, [195, 422, 454, 908, 'subroad_industrial']);

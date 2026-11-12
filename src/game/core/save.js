@@ -42,6 +42,7 @@ export const defaultProfile = () => ({
   blueprintRewardIds: [],
   deferredBlueprintRewards: [],
   bestDistance: 0,
+  completedLevels: [],
   totalRuns: 0,
   tutorialCompleted: false,
   rookieTrialRewardsCredited: false,
@@ -202,7 +203,8 @@ export function normalizeProfile(input) {
     return [id, {
       unlocked: id === GAME_BALANCE.progression.firstPlayableLevel ||
         stored?.unlocked === true || stored?.completed === true ||
-        (id === 'level2' && data.levelProgress?.level1?.completed === true),
+        (id === 'level2' && data.levelProgress?.level1?.completed === true) ||
+        (id === 'level3' && data.levelProgress?.level2?.completed === true),
       completed: stored?.completed === true,
       sector3CheckpointUnlocked: checkpointUnlocked,
       bestDistance: nonNegativeInt(stored?.bestDistance),
@@ -245,6 +247,14 @@ export function normalizeProfile(input) {
       milestonesForDistance(GAME_BALANCE.routes[id].sectorStartsMeters[number - 1], id).slice(-1)))]);
   const blueprintRewardIds = [...new Set(Array.isArray(data.blueprintRewardIds)
     ? data.blueprintRewardIds.filter(id => typeof id === 'string' && id) : [])];
+  const completedLevels = [...new Set([
+    ...(Array.isArray(data.completedLevels)
+      ? data.completedLevels.filter(id => typeof id === 'string' && /^level[1-9]\d*$/.test(id)) : []),
+    ...Object.entries(data.levelProgress ?? {})
+      .filter(([, progress]) => progress?.completed === true)
+      .map(([id]) => id)
+      .filter(id => /^level[1-9]\d*$/.test(id)),
+  ])];
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -254,6 +264,7 @@ export function normalizeProfile(input) {
     selectedVehicleId: ownedVehicleIds.includes(data.selectedVehicleId) &&
       ['standard', 'swift'].includes(data.selectedVehicleId) ? data.selectedVehicleId : 'standard',
     blueprintRewardIds,
+    completedLevels,
     deferredBlueprintRewards: Array.isArray(data.deferredBlueprintRewards)
       ? data.deferredBlueprintRewards.filter((reward, index, all) => reward && typeof reward.id === 'string' &&
         reward.id && Number.isInteger(reward.amount) && reward.amount > 0 &&

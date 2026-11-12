@@ -1,5 +1,5 @@
-import {LEVEL2_SECTORS, SECTORS} from '../data/catalog.js';
-import {GAME_BALANCE} from '../data/gameBalance.js';
+import {LEVEL2_SECTORS, LEVEL3_SECTORS, SECTORS} from '../data/catalog.js';
+import {GAME_BALANCE, ROUTE_TOPOLOGY} from '../data/gameBalance.js';
 import {challengeProfile} from '../data/challengeProfiles.js';
 
 const DIFFICULTY_TABLES = ['densityTargets', 'challengeChance', 'sustainedChance'];
@@ -28,6 +28,18 @@ const buildLevel = (levelId, sectors) => {
 export const IMPLEMENTED_LEVELS = Object.freeze({
   level1: buildLevel('level1', SECTORS),
   level2: buildLevel('level2', LEVEL2_SECTORS),
+  level3: buildLevel('level3', LEVEL3_SECTORS),
+  level4: Object.freeze(ROUTE_TOPOLOGY.level4.sectorEnds.map((endsAt, index) => {
+    const challengeProfileId = `level4_neon_s${index + 1}`;
+    challengeProfile(challengeProfileId);
+    return Object.freeze({
+      id: `level4-sector${index + 1}`, name: 'Neon District', color: 0x594a91,
+      themeId: 'neon', visualThemeId: 'neon', challengeProfileId,
+      difficultyStep: index, number: index + 1,
+      startsAt: index === 0 ? 0 : ROUTE_TOPOLOGY.level4.sectorEnds[index - 1],
+      endsAt,
+    });
+  })),
 });
 /** Kept as the Level 1 alias for existing route consumers and tests. */
 export const IMPLEMENTED_SECTORS = IMPLEMENTED_LEVELS.level1;

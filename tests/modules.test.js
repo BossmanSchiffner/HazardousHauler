@@ -87,7 +87,9 @@ test('milestones come from distance, persist, and raise the level cap', () => {
   assert.deepEqual(milestonesForDistance(L2.sectorStartsMeters[3], 'level2'), ['level2', 'level2,sector2', 'level2,sector3', 'level2,sector4'],
     'each level records its own sector milestones');
   assert.deepEqual(MILESTONES, ['level1', 'level1,depot1', 'level1,sector2', 'level1,sector3', 'level1,sector4',
-    'level2', 'level2,depot1', 'level2,sector2', 'level2,sector3', 'level2,sector4']);
+    'level2', 'level2,depot1', 'level2,sector2', 'level2,sector3', 'level2,sector4',
+    'level3', 'level3,depot1', 'level3,sector2', 'level3,sector3', 'level3,sector4',
+    'level4', 'level4,depot1', 'level4,sector2', 'level4,sector3', 'level4,sector4']);
   const {profile, added} = addMilestones(defaultProfile(), ['level1,sector2', 'level1,depot1']);
   assert.deepEqual(added, ['level1,sector2', 'level1,depot1']);
   assert.deepEqual(profile.milestones, ['level1,depot1', 'level1,sector2']);

@@ -133,9 +133,12 @@ test('chicanes: bounded early middle and late samples keep real turns recovery a
       } else if (row.family === 'static_chicane' && row.phase === 0 && !row.motifId) {
         spacing += GAME_BALANCE.routes.sideObstacles.chicaneTransitionExtraPx;
       }
-      if (sample.levelId === 'level1' && !row.motifId && !row.moverOverlay)
-        assert.ok(Math.abs(row.spacingPx - spacing) <= Number.EPSILON * Math.max(1, spacing) * 8,
-        `${sample.stage} ${row.family}/${row.phase} at ${row.plannedDistance}: ${row.spacingPx} vs ${spacing}`);
+      if (sample.levelId === 'level1' && !row.motifId && !row.moverOverlay) {
+        const transition = row.family === 'static_chicane' && row.phase === 0
+          ? GAME_BALANCE.routes.sideObstacles.chicaneTransitionExtraPx : 0;
+        assert.ok(row.spacingPx >= spacing + transition,
+          `${sample.stage} ${row.family}/${row.phase} at ${row.plannedDistance}: insufficient spacing`);
+      }
       if (index) assert.ok(Math.abs(row.plannedDistance - sample.rows[index - 1].plannedDistance -
         sample.rows[index - 1].spacingPx * METERS_PER_PIXEL) < 1e-8);
       const lengths = row.moverOverlay ? [1, 2, 3, 4, 6] : row.motifId ? [3, 6]

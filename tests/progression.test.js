@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultProfile} from '../src/game/core/save.js';
+import {defaultProfile, normalizeProfile} from '../src/game/core/save.js';
 import {
   isCheckpointUnlocked, isLevelUnlocked, isRunStartAvailable,
   equipmentRequirementStatus, recordSectorProgress,
@@ -9,6 +9,7 @@ import {createRunEconomy, normalRunRewardPreview, settleRun} from '../src/game/c
 import {markDeveloperRun} from '../src/game/core/developerRuns.js';
 import {moduleStatus, buyModule, equipModule, loadoutStats} from '../src/game/core/modules.js';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
+import {MILESTONES} from '../src/game/core/modules.js';
 
 const ROUTES = GAME_BALANCE.routes;
 const L1 = ROUTES.level1;
@@ -73,15 +74,15 @@ test('sector entry and completion persist separately, including checkpoint segme
     'unchanged evidence avoids repeated persistence writes');
 });
 
-test('future equipment gate stays closed without creating future Level progress; owned gear remains usable', () => {
+test('Level 4 equipment gate stays closed without creating Level progress; owned gear remains usable', () => {
   let profile = recordSectorProgress(defaultProfile(), 'level1', L1.finishDistanceMeters);
   profile = recordSectorProgress(profile, 'level2', L2.finishDistanceMeters);
   const future = moduleStatus(profile, 'util_impact_pulse');
   assert.deepEqual(future.def.unlock, {levelId: 'level4', sector: 3, event: 'reach'});
   assert.equal(future.unlocked, false);
-  assert.match(future.lockReason, /Reach Level 4, Sector 3.*Level 4 is not available yet/);
+  assert.match(future.lockReason, /Reach Level 4, Sector 3/);
   assert.equal(buyModule({...profile, coins: 10000}, 'util_impact_pulse').ok, false);
-  assert.equal(profile.levelProgress.level4, undefined);
+  assert.equal(profile.levelProgress.level4.unlocked, false);
   profile = {...defaultProfile(), ownedModules: {...defaultProfile().ownedModules, util_impact_pulse: 2}};
   const retained = moduleStatus(profile, 'util_impact_pulse');
   assert.equal(retained.unlocked, true);
@@ -99,6 +100,7 @@ test('normal settlement persists completion at the finish without letting contin
   const finished = settleRun(initial, createRunEconomy({fullStart: true}), [], L1.finishDistanceMeters, true, true).profile;
   assert.equal(moduleStatus(finished, 'def_plating').unlocked, true);
   assert.deepEqual(finished.levelProgress.level1.completedSectors, [1, 2, 3, 4]);
+  assert.deepEqual(finished.completedLevels, ['level1']);
   assert.equal(finished.levelProgress.level2.unlocked, true);
   assert.equal(moduleStatus(finished, 'util_insurance').unlocked, false);
   const checkpoint = settleRun(initial,
@@ -131,6 +133,46 @@ test('Level access and Sector 3 checkpoint eligibility are independent per level
   assert.equal(isRunStartAvailable(profile, 'level2', 'checkpoint'), false);
   profile.levelProgress.level2.sector3CheckpointUnlocked = true;
   assert.equal(isRunStartAvailable(profile, 'level2', 'checkpoint'), true);
+});
+
+test('Level 4 access requires Level 3 completion and its checkpoint requires the Sector 3 milestone', () => {
+  const profile = defaultProfile();
+  assert.deepEqual(profile.completedLevels, []);
+  assert.ok(MILESTONES.includes('level4'));
+  assert.ok(MILESTONES.includes('level4,sector3'));
+  assert.ok(MILESTONES.includes('level4,sector4'));
+  assert.equal(isLevelUnlocked(profile, 'level4'), false);
+  assert.equal(isRunStartAvailable(profile, 'level4', 'beginning'), false);
+
+  profile.completedLevels = ['level3'];
+  assert.equal(isLevelUnlocked(profile, 'level4'), true);
+  assert.equal(isRunStartAvailable(profile, 'level4', 'beginning'), true);
+  assert.equal(isCheckpointUnlocked(profile, 'level4'), false);
+  assert.equal(isRunStartAvailable(profile, 'level4', 'checkpoint'), false);
+  assert.deepEqual(normalizeProfile({...profile, completedLevels: ['level3', 'invalid']}).completedLevels,
+    ['level3']);
+
+  profile.milestones.push('level4,sector3');
+  assert.equal(isCheckpointUnlocked(profile, 'level4'), true);
+  assert.equal(isRunStartAvailable(profile, 'level4', 'checkpoint'), true);
+});
+
+test('campaign completion unlocks the next implemented level in sequence', () => {
+  const initial = defaultProfile();
+  const level2Start = {...initial, completedLevels: ['level1'], levelProgress: {
+    ...initial.levelProgress,
+    level2: {...initial.levelProgress.level2, unlocked: true},
+  }};
+  const level2Finish = settleRun(level2Start, createRunEconomy({
+    levelId: 'level2', fullStart: true,
+  }), [], ROUTES.level2.finishDistanceMeters, true, true).profile;
+  assert.equal(isRunStartAvailable(level2Finish, 'level3', 'beginning'), true);
+
+  const level3Finish = settleRun(level2Finish, createRunEconomy({
+    levelId: 'level3', fullStart: true,
+  }), [], ROUTES.level3.finishDistanceMeters, true, true).profile;
+  assert.equal(isLevelUnlocked(level3Finish, 'level4'), true);
+  assert.equal(isRunStartAvailable(level3Finish, 'level4', 'beginning'), true);
 });
 
 test('continuous unlock is global after Level 1 and never a per-level Overdrive start', () => {

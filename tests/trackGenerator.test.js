@@ -136,7 +136,8 @@ test('certification carries actual x/velocity and excludes individually sub-thre
 test('all integrated seeded Normal/Continuous routes keep a geometrically open >=6 px corridor at 30/60/120 Hz', () => {
   for (const [levelId, mode] of [['level1', 'normal'], ['level2', 'normal'], ['level1', 'continuous']]) {
     for (const seed of [153, 1, 1234, 98765]) {
-      const start = mode === 'normal' ? 9 : 5000, end = mode === 'normal' ? 5000 : 11000;
+      const start = mode === 'normal' ? 9 : 5000;
+      const end = mode === 'normal' ? GAME_BALANCE.routes[levelId].finishDistanceMeters : 11000;
       const rows = sampleRoute(seed, end, false, levelId, mode, start);
       for (const [index, row] of rows.entries()) {
         assert.ok([...row.hazards, ...row.intermediates].every(hazard => hazard.kind !== 'pylon'),
@@ -333,6 +334,33 @@ test('actual emitted collision instances meet the side quota without counting sc
   }
 });
 
+test('Level 4 Energy Orbs spawn separately from connected static hazard proofs', () => {
+  const generator = createTrackGenerator(481516, 'level4');
+  const orbs = [];
+  let chunk = generator.nextChunk(0);
+  while (chunk.rows.at(-1).plannedDistance < 650) {
+    for (const certificate of chunk.certificates) {
+      assert.equal(certificate.completed, true);
+      assert.ok(certificate.clearance >= GAME_BALANCE.routes.track.routeValidation.minimumClearancePx);
+    }
+    for (const row of chunk.rows) {
+      assert.ok(row.hazards.every(hazard => hazard.kind !== 'energy_orb'),
+        'Energy Orbs must not enter static route proofs');
+      orbs.push(...(row.energyOrbs ?? []));
+    }
+    chunk = generator.nextChunk();
+  }
+  assert.ok(orbs.length > 0, 'the Level 4 route emits scheduled Energy Orbs');
+  for (const orb of orbs) {
+    assert.equal(orb.kind, 'energy_orb');
+    assert.ok(orb.distanceMeters >= 180 && orb.distanceMeters <= 650);
+    assert.ok([75, 315].includes(orb.initialX));
+    assert.ok([-1, 1].includes(orb.direction));
+    assert.equal(orb.sweepSpeed, 45);
+    assert.equal(orb.color, 0xff7a00);
+  }
+});
+
 test('live instance accounting counts physical Alpha and Beta once after Depot filtering', () => {
   let continuations = 0, beta = 0, excluded = 0;
   for (const seed of [1, 153]) for (const levelId of ['level1', 'level2']) {
@@ -400,16 +428,23 @@ test('outer pinch pairs preserve both center lanes and stagger opposite curbs by
 test('static chicanes force an adjacent weave with the approved extra 54 px transition window', () => {
   let checked = 0;
   for (const levelId of ['level1', 'level2']) {
-    const rows = sampleRoute(153, 5000, false, levelId);
-    for (const [index, row] of rows.entries()) {
-      if (row.family !== 'static_chicane' || row.phase !== 0) continue;
-      const next = rows[index + 1];
-      assert.equal(next?.chunkId, row.chunkId);
-      // A chicane inside a Depot-protected window is not emitted; the truck sees open road there.
-      if (!row.emitted || !next.emitted) continue;
-      const first = row.hazards.find(hazard => hazard.pinch);
-      const second = next.hazards.find(hazard => hazard.pinch);
-      assert.equal(second.lane, 3 - first.lane);
+    let levelChecked = 0;
+    const rows = sampleRoute(153, campaignEnd(levelId), false, levelId);
+    for (const entry of rows.filter(row => row.family === 'static_chicane' && row.phase === 0)) {
+      const encounter = rows.filter(row => row.encounterId === entry.encounterId)
+        .sort((left, right) => left.phase - right.phase);
+      assert.equal(encounter.length, 2, `${levelId}/${entry.plannedDistance}: complete chicane`);
+      // Protected Depot rows are hidden from play and do not need a visible slalom.
+      if (!encounter.every(row => row.emitted)) continue;
+      const pinches = encounter.map(row => row.hazards.filter(hazard =>
+        hazard.pinch && hazard.kind === 'sideRail'));
+      assert.ok(pinches.every(rowPinches => rowPinches.length === 1),
+        `${levelId}/${entry.plannedDistance}: both reversal pinches must be present`);
+      const [first] = pinches[0];
+      const [second] = pinches[1];
+      assert.ok([0, 3].includes(first.lane));
+      assert.equal(second.lane, 3 - first.lane, 'entry and exit pinches force an outer-lane reversal');
+      const [row, next] = encounter;
       const stagger = (next.plannedDistance - row.plannedDistance) / METERS_PER_PIXEL -
         second.offsetY + first.offsetY;
       assert.ok(Math.abs(row.spacingPx - next.spacingPx -
@@ -419,10 +454,14 @@ test('static chicanes force an adjacent weave with the approved extra 54 px tran
         GAME_BALANCE.routes.sideObstacles.chicaneTransitionExtraPx) < 1e-8);
       assert.ok(row.hazards.some(hazard => hazard.kind === 'divider' && [1, 2].includes(hazard.lane)));
       assert.ok(!row.safeLanes.some(lane => next.safeLanes.includes(lane)), 'no straight lane survives both gates');
-      assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6 &&
-        Math.abs(proof.lanes[2] - proof.lanes[1]) === 1));
+      const proofs = encounter.flatMap(chicaneRow => chicaneRow.certificates);
+      assert.deepEqual([...new Set(proofs.map(proof => proof.hz))].sort((a, b) => a - b), [30, 60, 120]);
+      assert.ok(proofs.every(proof => proof.completed &&
+        proof.clearance >= GAME_BALANCE.routes.track.routeValidation.minimumClearancePx));
       checked++;
+      levelChecked++;
     }
+    assert.ok(levelChecked > 0, `${levelId}: a full static chicane reaches the route`);
   }
   assert.ok(checked > 0, 'the approved weave must reach real generated routes');
 });
@@ -845,7 +884,9 @@ test('coins keep a steady rhythm: one pickup every 1–2 eligible rows', () => {
 test('leaving a Depot resumes obstacles exactly DEPOT_RESUME_METERS after the facility', () => {
   assert.equal(DEPOT_RESUME_METERS, DEPOT_RULES.resumeMeters);
   const hitOffset = (HAZARD_TRAVEL_PX - HAZARD_ROW_ENVELOPE_PX / 2) * METERS_PER_PIXEL;
-  for (const depot of [500, 1000, 1500, 2000, 3000]) {
+  const campaignDepots = [...new Set(['level1', 'level2'].flatMap(levelId =>
+    GAME_BALANCE.routes[levelId].sectorEndsMeters.slice(0, -1)))];
+  for (const depot of campaignDepots) {
     const first = depotResumeFirstDistance(depot);
     assert.ok(first < depot, 'the first row is already on the road, hidden by the Depot overlay');
     assert.ok(Math.abs(first + hitOffset - depot - DEPOT_RESUME_METERS) < 1e-9);
