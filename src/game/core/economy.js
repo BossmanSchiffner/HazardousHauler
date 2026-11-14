@@ -28,10 +28,12 @@ export function routeSpeedAtDistance(distance, levelId = 'level1', mode = 'norma
   if (!Number.isFinite(distance)) throw new Error('Route distance must be numeric');
   if (!['normal', 'continuous'].includes(mode)) throw new Error(`Unknown route mode ${mode}`);
   if (mode === 'continuous') {
-    if (levelId !== 'level1') throw new Error('Continuous Run uses the global Level 1 Sector 2 baseline');
+    if (levelId !== GAME_BALANCE.routes.continuous.baselineLevelId) {
+      throw new Error('Endless Run uses the global Level 1 route');
+    }
     const rules = GAME_BALANCE.routes.continuous;
     return Math.min(MAX_TRACK_SPEED, rules.startSpeedPxPerSecond +
-      continuousStageAtDistance(Math.max(0, distance)) * rules.milestoneSpeedStep);
+      Math.floor(Math.max(0, distance) / rules.speedStepIntervalMeters) * rules.milestoneSpeedStep);
   }
   const route = GAME_BALANCE.routes[levelId];
   if (!route?.speed) throw new Error(`Unknown route level ${levelId}`);
@@ -51,8 +53,10 @@ export function routeTimeAtDistance(distance, levelId = 'level1', mode = 'normal
   const route = GAME_BALANCE.routes[levelId];
   if (!route || !['normal', 'continuous'].includes(mode)) throw new Error('Invalid route clock configuration');
   if (mode === 'continuous') {
-    if (levelId !== 'level1') throw new Error('Continuous Run uses the global Level 1 Sector 2 baseline');
-    const interval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+    if (levelId !== GAME_BALANCE.routes.continuous.baselineLevelId) {
+      throw new Error('Endless Run uses the global Level 1 route');
+    }
+    const interval = GAME_BALANCE.routes.continuous.speedStepIntervalMeters;
     let seconds = 0;
     for (let from = 0; from < distance;) {
       const to = Math.min(distance, from + interval);

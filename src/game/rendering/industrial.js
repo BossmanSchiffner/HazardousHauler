@@ -3,7 +3,7 @@ import {guardrailLayout, HAZARDS, LANE_CENTERS} from '../core/hazards.js';
 import {advanceCargoTrail, createCargoTrail} from '../core/cargo.js';
 import {formatStat} from '../core/modules.js';
 import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS,
-  ENVIRONMENT_VISUALS, HAZARD_LIGHTS, headlightFalloff, streetlightFalloff} from '../data/environments.js';
+  ENVIRONMENT_VISUALS, HAZARD_LIGHTS, NEON_READABILITY, headlightFalloff, streetlightFalloff} from '../data/environments.js';
 import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../core/depots.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
 import {balance} from '../data/balance.js';
@@ -156,7 +156,6 @@ export const TEXTURE_SIZES = Object.freeze({
   hazard_energy_orb: Object.freeze([64, 64]),
   glow_orb_radial: Object.freeze([128, 128]),
   vent_air_puff: Object.freeze([40, 40]),
-  glow_hazard_ring: Object.freeze([96, 96]),
   cargo_spark: Object.freeze([8, 8]),
   module_util_impact_pulse: Object.freeze([40, 40]),
   industrial_road: Object.freeze([390, 1248]),
@@ -1013,6 +1012,14 @@ function bakeNeonBaseRoad(scene) {
     context.drawImage(source, 0, (height + row) / scale, source.width, 1 / scale, x, row, drawnWidth, 1);
   }
   context.globalAlpha = 1;
+  context.fillStyle = '#62d8ef';
+  context.fillRect(ROAD_LEFT, 0, 3, height);
+  context.fillRect(ROAD_RIGHT - 3, 0, 3, height);
+  context.fillStyle = '#64738e';
+  for (let lane = 1; lane < LANE_CENTERS.length; lane++) {
+    const laneX = (LANE_CENTERS[lane - 1] + LANE_CENTERS[lane]) / 2;
+    for (let y = 0; y < height; y += 64) context.fillRect(laneX - 0.5, y, 1, 28);
+  }
   texture.refresh();
 }
 
@@ -1040,6 +1047,9 @@ function bakeNeonHexOverlay(scene) {
       const index = (y * width + x) * 4;
       const luminance = (data[index] * 0.3 + data[index + 1] * 0.59 + data[index + 2] * 0.11);
       const frame = Math.max(0, Math.min(1, (luminance - 48) / 72));
+      data[index] = Math.max(data[index], 105);
+      data[index + 1] = Math.max(data[index + 1], 125);
+      data[index + 2] = Math.max(data[index + 2], 155);
       data[index + 3] = Math.round(frame * frame * (3 - 2 * frame) * edge * 255);
     }
   }
@@ -1091,25 +1101,25 @@ export function bakeNeonRoadTexture(scene) {
   }
   bakeOrbGlowTexture(scene);
   bakeVentAirTexture(scene);
-  bakeHazardRingTexture(scene);
+  bakeCargoRimTexture(scene);
 }
 
-// White soft-edged ring; tinted per obstacle so Neon hazards carry a halo without washing out their art.
-function bakeHazardRingTexture(scene) {
-  const key = HAZARD_LIGHTS.neonHalo.key;
+function bakeCargoRimTexture(scene) {
+  const key = NEON_READABILITY.cargoRimKey;
   if (scene.textures.exists(key)) return;
-  const [width, height] = TEXTURE_SIZES[key];
-  const texture = scene.textures.createCanvas(key, width, height);
+  const size = 42;
+  const texture = scene.textures.createCanvas(key, size, size);
   const context = texture.getContext();
-  const pixels = context.createImageData(width, height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const distance = Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) / (width / 2);
-      const band = Math.max(0, 1 - Math.abs(distance - 0.72) / 0.28);
-      const index = (y * width + x) * 4;
-      pixels.data[index] = pixels.data[index + 1] = pixels.data[index + 2] = 0xff;
-      pixels.data[index + 3] = Math.round(band * band * (3 - 2 * band) * 200);
-    }
+  const pixels = context.createImageData(size, size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const dx = Math.abs(x + 0.5 - size / 2), dy = Math.abs(y + 0.5 - size / 2);
+    const edge = Math.max(dx, dy);
+    if (edge < 16 || edge > 18 || Math.min(dx, dy) < 10) continue;
+    const index = (y * size + x) * 4;
+    pixels.data[index] = 150;
+    pixels.data[index + 1] = 235;
+    pixels.data[index + 2] = 255;
+    pixels.data[index + 3] = 200;
   }
   context.putImageData(pixels, 0, 0);
   texture.setFilter(0);
@@ -1585,26 +1595,6 @@ export function syncBarrierLights(lights, sprite, kind, time, night = false) {
   }
 }
 
-/** Soft neon halo around a Neon-sector obstacle; one pooled image, positioned on the art's visual centre. */
-export function createNeonHalo(scene, sprite, tintIndex, time, night = false) {
-  const halo = routeImage(scene, sprite.x, sprite.y, HAZARD_LIGHTS.neonHalo.key)
-    .setBlendMode('ADD').setTint(HAZARD_LIGHTS.neonHalo.tints[tintIndex % HAZARD_LIGHTS.neonHalo.tints.length]);
-  halo.haloPhase = tintIndex * 0.37;
-  syncNeonHalo(halo, sprite, time, night);
-  return halo;
-}
-
-export function syncNeonHalo(halo, sprite, time, night = false) {
-  const {padPx, alphaMin, alphaMax, pulseMs, dayDepth, nightDepth} = HAZARD_LIGHTS.neonHalo;
-  const width = sprite.displayWidth ?? 0, height = sprite.displayHeight ?? 0;
-  const pulse = 0.5 - 0.5 * Math.cos((time / pulseMs + (halo.haloPhase ?? 0)) * Math.PI * 2);
-  halo.setPosition(sprite.x + (0.5 - (sprite.originX ?? 0.5)) * width,
-    sprite.y + (0.5 - (sprite.originY ?? 0.5)) * height)
-    .setDisplaySize(width + padPx, height + padPx)
-    .setDepth(night ? nightDepth : dayDepth)
-    .setAlpha(alphaMin + (alphaMax - alphaMin) * pulse);
-}
-
 export function addHudBacking(scene, width) {
   return scene.add.rectangle(width / 2, 35, width, 70, 0x0c111a, 0.88);
 }
@@ -1789,6 +1779,13 @@ export function syncBlueprintVisuals(sprite, glow, time, glowOffsetY = 0) {
 
 export function syncCargoPickupVisuals(sprite, glow, time, night = false, accepted = true) {
   syncBlueprintVisuals(sprite, glow, time, CARGO_PICKUP_GLOW_OFFSET_Y * SPRITE_ART_SCALE);
+  if (glow.neonCargo) {
+    sprite.setDepth(16.2).setTint(0xffffff).setAlpha(accepted ? 1 : 0.35);
+    glow.setPosition(sprite.x, sprite.y).setRotation(sprite.rotation)
+      .setDisplaySize(sprite.displayWidth, sprite.displayHeight)
+      .setDepth(16.25).setAlpha((0.55 + Math.sin(time / 650) * 0.05) * (accepted ? 1 : 0.35));
+    return;
+  }
   // The supplied pickup raster includes its drop shadow; avoid the heavy road mask for both.
   sprite.setDepth(night ? 16.2 : 5).setTint(night ? ENVIRONMENT_VISUALS.cargoNightTint : 0xffffff)
     .setAlpha(accepted ? 1 : 0.35);

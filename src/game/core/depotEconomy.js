@@ -207,13 +207,13 @@ export function settleRun(profile, run, items, distance, banked, completed = fal
     const hold = cargoTotals(items).value;
     const retained = Math.floor(hold * GAME_BALANCE.rewards.continuous.wreckRetention);
     const quote = banked ? continuousQuote(items, run)
-      : {cargo: retained, bonus: 0, payout: retained, percent: 0};
+      : {cargo: 0, bonus: 0, payout: 0, percent: 0};
     const settledRun = {...run,
       cargoCoins: quote.cargo,
       bonusCoins: banked ? quote.bonus : 0,
       distanceCoins: 0, otherCoins: 0, recordCoins: 0, completionCoins: 0, noDamageCoins: 0,
       repairCosts: 0};
-    const summary = runEconomySummary(settledRun, distance, banked ? 'Continuous cash-out' : 'Continuous wreck retention');
+    const summary = runEconomySummary(settledRun, distance, banked ? 'Continuous cash-out' : 'Continuous cargo forfeited');
     const nextRunIds = [...settledRunIds.filter(id => id !== run.runId), run.runId];
     return {
       profile: {...profile, coins: profile.coins + quote.payout,

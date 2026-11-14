@@ -87,8 +87,6 @@ import {
   scaleSpriteArt,
   syncDepotEntrance,
   syncBarrierLights,
-  createNeonHalo,
-  syncNeonHalo,
   syncCargoPickupVisuals,
   syncGuardrailBeacon,
   syncGuardrailSparks,
@@ -426,9 +424,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.syncRoadBleed(screenWidth, screenHeight);
   }
 
-  /** Extends road shoulders and surface past the stage, including burst zoom-out, so runs reach every screen edge. */
+  /** Preserve the complete portrait course; unused screen width stays plain rather than tiling scenery. */
   syncRoadBleed(screenWidth, screenHeight) {
     if (!this.roadSurface || !this.roadFlanks?.length) return;
+    this.roadFlanks.forEach(flank => flank.setVisible(false));
+    this.subRoad?.setSize(W, H + 64);
     const zoom = Math.min(screenWidth / W, screenHeight / H, 1.12) * ENVIRONMENT_VISUALS.burstZoom;
     const bleedX = Math.max(8, Math.ceil((screenWidth / zoom - W) / 2) + 8);
     const bleedY = Math.max(0, Math.ceil((screenHeight / zoom - H) / 2) + 8);
@@ -441,9 +441,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const graphics = this.viewportBackdrop;
     const width = this.scale?.width;
     const height = this.scale?.height;
+    const gameplay = ['running', 'docking', 'depot', 'crashing'].includes(this.phase);
     if (!graphics || !Number.isFinite(width) || !Number.isFinite(height) ||
-        (this.viewportBackdropSize?.width === width && this.viewportBackdropSize?.height === height)) return;
-    this.viewportBackdropSize = {width, height};
+        (this.viewportBackdropSize?.width === width && this.viewportBackdropSize?.height === height &&
+          this.viewportBackdropSize?.gameplay === gameplay)) return;
+    this.viewportBackdropSize = {width, height, gameplay};
+    if (gameplay) {
+      graphics.clear().fillStyle(0x080c14, 1).fillRect(0, 0, width, height);
+      return;
+    }
     const stageWidth = Math.min(width, W * Math.min(width / W, height / H, 1.12));
     const stageLeft = (width - stageWidth) / 2;
     const stageRight = stageLeft + stageWidth;
@@ -625,7 +631,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   setWorldVisible(visible) {
     if (this.roadEnvironment) setRoadEnvironmentVisible(this.roadEnvironment, visible, this);
-    this.roadFlanks?.forEach(flank => flank.setVisible(visible));
+    this.roadFlanks?.forEach(flank => flank.setVisible(false));
     this.syncResponsiveCamera();
     if (!visible && this.depotEntrance) {
       syncDepotEntrance(this.depotEntrance, this.nextDepot, this.distance, 'menu', this.levelId ?? 'level1');
@@ -1496,10 +1502,13 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const layout = this.menuMetrics();
     this.createMenuScroll('continuous-confirm', layout.contentTop, layout.contentBottom);
     const explanation = [
-      'An endless run with increasing speed.',
+      'Start at 580 px/s. Gain 20 px/s every 1,000 m, up to 700 px/s.',
+      'Depots appear every 2,000 m.',
+      'Industrial → Dustlands → Dustlands at Dusk → Neon Gridway, repeating every 2,000 m.',
       'You cannot bank cargo during the run.',
       'Pass a Depot for +10% on your cargo Coins, up to +100%.',
-      'Stop at a Depot: End Run cashes out; Skip restores equipped shields without banking.',
+      'Cash out at a Depot to end the run and earn Coins, or Skip to continue.',
+      'A crash forfeits all cargo. Only a Depot cash-out earns Coins.',
     ].join('\n\n');
     this.addLabel(explanation, W / 2, layout.contentTop + 10, 14, '#dfeaf3', 334)
       .setLineSpacing(3);
@@ -2472,9 +2481,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const hold = cargoTotals(this.cargoItems).value;
     const secured = this.runEconomy.cargoCoins + this.runEconomy.bonusCoins;
     const continuous = this.runMode === 'continuous';
-    const wreckRetained = continuous ? Math.floor(hold * GAME_BALANCE.rewards.continuous.wreckRetention) : 0;
     const risk = continuous
-      ? hold - wreckRetained + continuousQuote(this.cargoItems, this.runEconomy).bonus
+      ? hold + continuousQuote(this.cargoItems, this.runEconomy).bonus
       : bankingQuote(this.cargoItems, this.runEconomy).payout + this.runEconomy.noDamageBonusPending;
 
     const confirmationPlate = this.add.rectangle(W / 2, top + 172, 302, 204, PALETTE.edge, 0.75)
@@ -2486,7 +2494,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.addLabel('UNBANKED CARGO', W / 2, top + 184, 13, '#f2c474', 280).setDepth(112);
     this.addCurrency(hold, W / 2, top + 216, {size: 23, color: '#f2c474', maxWidth: 250, depth: 113});
     this.addLabel(continuous
-      ? `END NOW: LOSE ${risk} COINS  •  WRECK KEEPS ${wreckRetained}`
+      ? `END NOW: LOSE ${risk} COINS  •  CASH OUT AT A DEPOT TO EARN`
       : `END NOW: LOSE ${risk} COINS INCLUDING BONUSES`,
     W / 2, top + 250, 12, '#ff9aa6', 280).setDepth(112);
     this.addFooterActions([
@@ -2710,11 +2718,13 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.objects.push({sprite, pickupGlow, type: 'cargo', ...pickup});
   }
 
-  addCargoPickupVisual(x, y, value) {
+  addCargoPickupVisual(x, y, value, distance = this.distance) {
+    const neon = sectorAtDistance(distance, this.levelId, this.runMode).themeId === 'neon';
     const sprite = scaleSpriteArt(routeImage(this, x, y, cargoPickupTexture(value)),
       balance.COLLECTIBLE_VISUAL_SCALE).setDepth(5);
-    const pickupGlow = scaleSpriteArt(routeImage(this, x, y, cargoPickupGlowTexture(value)))
-      .setDepth(4.5).setBlendMode('ADD');
+    const pickupGlow = scaleSpriteArt(routeImage(this, x, y, neon ? 'cargo_neon_rim' : cargoPickupGlowTexture(value)))
+      .setDepth(4.5).setBlendMode(neon ? 'NORMAL' : 'ADD');
+    pickupGlow.neonCargo = neon;
     syncCargoPickupVisuals(sprite, pickupGlow, this.time.now,
       this.roadEnvironment?.lighting.headlights ?? false);
     return {sprite, pickupGlow};
@@ -2815,7 +2825,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
     releaseRouteVisual(this, item.blueprintGlow);
     releaseRouteVisual(this, item.pickupGlow);
     releaseRouteVisual(this, item.orbGlow);
-    releaseRouteVisual(this, item.neonHalo);
     if (item.ventAir) for (const puff of item.ventAir) releaseRouteVisual(this, puff);
     this.releaseTransientText(item.valueText);
     this.objects.splice(index, 1);
@@ -2884,28 +2893,27 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const night = this.roadEnvironment?.lighting.headlights ?? false;
       const cautionLights = createBarrierLights(this, sprite, hazard.kind,
         hazard.kind === 'forklift' ? motionAge * 1000 : this.time.now, night);
-      const neonHalo = resolveVisualTheme(sector).hazardThemeId === 'neon'
-        ? createNeonHalo(this, sprite, hazard.lane ?? 0, this.time.now, night) : null;
       const shadow = syncSilhouetteShadow(createSilhouetteShadow(this, sprite), sprite, true);
       // Vents exhale two pooled wisps that drift off the grille and fade, out of phase.
       const ventAir = hazard.kind === 'vent' || hazard.kind === 'ventGrille'
         ? [0, 1].map(() => routeImage(this, sprite.x, sprite.y, 'vent_air_puff').setDepth(5.6).setAlpha(0))
         : null;
-      this.objects.push({...record, sprite, shadow, roadsideBase, cautionLights, neonHalo, ventAir,
+      this.objects.push({...record, sprite, shadow, roadsideBase, cautionLights, ventAir,
         ventPhase: ventAir ? (plannedDistance * 0.37 + hazard.lane * 0.29) % 1 : 0});
     }
     for (const orb of emitted ? row.energyOrbs ?? [] : []) {
       const sprite = routeImage(this, orb.initialX,
         SPAWN_Y + (this.distance - orb.distanceMeters) / METERS_PER_PIXEL - frameScroll,
         'hazard_energy_orb').setDepth(8);
-      const orbGlow = routeImage(this, sprite.x, sprite.y, 'glow_orb_radial')
-        .setDepth(7.5).setBlendMode('ADD').setAlpha(0.55);
+      const orbGlow = sectorAtDistance(orb.distanceMeters, this.levelId, this.runMode).themeId === 'neon' ? null
+        : routeImage(this, sprite.x, sprite.y, 'glow_orb_radial')
+          .setDepth(7.5).setBlendMode('ADD').setAlpha(0.55);
       this.objects.push({type: 'hazard', kind: 'energy_orb', ...orb, sprite, orbGlow,
         plannedDistance: orb.distanceMeters, nearMissPlayed: false});
     }
     for (const pickup of row.pickups) {
       const x = LANE_CENTERS[pickup.lane] + (pickup.offsetX ?? 0);
-      const {sprite, pickupGlow} = this.addCargoPickupVisual(x, spawnY, pickup.value);
+      const {sprite, pickupGlow} = this.addCargoPickupVisual(x, spawnY, pickup.value, plannedDistance);
       this.objects.push({
         sprite, pickupGlow, type: 'cargo', kind: pickup.kind,
         mass: pickup.mass, slots: pickup.slots, value: pickup.value,
@@ -2966,8 +2974,14 @@ export class RoutePrototypeScene extends Phaser.Scene {
       : `${levelDisplayName(this.levelId)} • SECTOR ${this.currentSector.number}/${IMPLEMENTED_LEVELS[this.levelId].length}`);
     this.hud.distance.setText(`${Math.floor(this.distance)} m`);
     const sector = this.currentSector;
+    const endless = this.runMode === 'continuous';
+    const stageStart = endless
+      ? continuousStageAtDistance(this.distance) * GAME_BALANCE.routes.continuous.depotIntervalMeters
+      : sector.startsAt;
+    const stageEnd = this.runMode === 'continuous'
+      ? stageStart + GAME_BALANCE.routes.continuous.depotIntervalMeters : sector.endsAt;
     this.hud.progressBar.setScale(Math.max(0, Math.min(1,
-      (this.distance - sector.startsAt) / (sector.endsAt - sector.startsAt))), 1);
+      (this.distance - stageStart) / (stageEnd - stageStart))), 1);
     const full = this.cargoWeight >= this.stats.capacity || this.cargoSlots >= this.stats.capacity;
     this.hud.cargo.setText(`${this.cargoValue}`);
     this.hud.load.setText(`LOAD ${this.cargoWeight}/${this.stats.capacity}`).setColor(full ? '#ffdf7c' : '#8ab4f8');
@@ -3067,7 +3081,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
     }
     const dt = Math.min(delta / 1000, 0.05); // suspend/resume spike guard
     if (this.tutorialRun) this.tutorialPopupElapsed = (this.tutorialPopupElapsed ?? 0) + dt;
-    const priorContinuousStage = this.runMode === 'continuous' ? continuousStageAtDistance(this.distance) : 0;
+    const continuousSpeedInterval = GAME_BALANCE.routes.continuous.speedStepIntervalMeters;
+    const priorContinuousSpeedStep = this.runMode === 'continuous'
+      ? Math.floor(this.distance / continuousSpeedInterval) : 0;
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.holdFullCooldown = Math.max(0, this.holdFullCooldown - dt);
     const priorDistance = this.distance;
@@ -3101,7 +3117,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     }
     this.syncFinishLine();
     if (this.runMode === 'continuous' &&
-        continuousStageAtDistance(this.distance) > priorContinuousStage) {
+        Math.floor(this.distance / continuousSpeedInterval) > priorContinuousSpeedStep) {
       this.showToast(`ENDLESS RUN\nSpeed ${routeSpeedAtDistance(this.distance, this.levelId, this.runMode)} px/s (max ${MAX_TRACK_SPEED}).`, 'hint');
     }
     const sector = sectorAtDistance(this.distance, this.levelId, this.runMode);
@@ -3116,7 +3132,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
         startRoadBurst(this.roadEnvironment, this, this.haulerEffects.exhaust);
       }
       this.showToast(this.runMode === 'continuous'
-        ? 'ENDLESS RUN\nLevel 1 Sector 2 challenges.'
+        ? `ENDLESS RUN // ${sector.name}\n${sector.number === 2 ? 'Horizontal Forklifts'
+          : sector.number === 3 ? 'Street Sweepers + Forklifts'
+            : sector.number === 4 ? 'Neon Energy Orbs' : 'Static hazards'}`
         : `>> SECTOR ${sector.number}: ${lighting.name} // SPEED ESCALATED\n${message}`, 'hint');
     }
     const priorShip = {x: this.ship.x, y: this.ship.y};
@@ -3178,11 +3196,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
         } else {
           item.sprite.setX(nextX);
         }
-        item.orbGlow.setPosition(item.sprite.x, item.sprite.y);
+        item.orbGlow?.setPosition(item.sprite.x, item.sprite.y);
         // Unstable charge: the corona spins while the bloom flickers.
         const flicker = Math.sin(this.time.now * 0.019) + 0.5 * Math.sin(this.time.now * 0.047);
         item.sprite.rotation += dt * 2.4;
-        item.orbGlow.setScale(1 + 0.1 * flicker).setAlpha(0.5 + 0.12 * flicker);
+        item.orbGlow?.setScale(1 + 0.1 * flicker).setAlpha(0.5 + 0.12 * flicker);
       }
       item.roadsideBase?.setY(item.sprite.y);
       if (item.ventAir) {
@@ -3195,12 +3213,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
         }
       }
       if (item.shadow) syncSilhouetteShadow(item.shadow, item.sprite, true);
-      if (item.cautionLights || item.neonHalo) {
+      if (item.cautionLights) {
         const night = this.roadEnvironment?.lighting.headlights ?? false;
         if (isGuardrail(item)) syncGuardrailBeacon(item.sprite, this.time.now, night);
         else if (item.cautionLights) syncBarrierLights(item.cautionLights, item.sprite, item.kind,
           item.kind === 'forklift' ? item.motionAge * 1000 : this.time.now, night);
-        if (item.neonHalo) syncNeonHalo(item.neonHalo, item.sprite, this.time.now, night);
       }
       if (item.blueprintGlow) syncBlueprintVisuals(item.sprite, item.blueprintGlow, this.time.now);
       const offer = item.type === 'cargo' ? cargoOffer(this.cargoItems, item, capacity) : null;
@@ -3515,7 +3532,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     for (let i = this.objects.length - 1; i >= 0; i--) {
       const item = this.objects[i];
       for (const node of [item.sprite, item.shadow, item.roadsideBase, item.pickupGlow,
-        item.blueprintGlow, item.valueText, item.neonHalo, ...(item.cautionLights ?? []), ...(item.ventAir ?? [])]) {
+        item.blueprintGlow, item.valueText, ...(item.cautionLights ?? []), ...(item.ventAir ?? [])]) {
         if (node) node.y += scrollPx * hazardScrollScale(item);
       }
       const height = item.type === 'hazard' ? hazardGeometry(item).height : item.lengthPx ?? 0;
@@ -3763,10 +3780,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
       y += 42;
     }
     const increment = Math.round(GAME_BALANCE.rewards.continuous.skipBonusPerDepot * 100);
-    const explanation = this.addLabel(message || `End Run pays ${quote.payout} Coins. No banking while continuing.\nSkip restores equipped shields and adds ${increment} bonus points (max 100%).\n\nA wreck keeps 25% of your current cargo Coins, with no bonuses.`,
+    const explanation = this.addLabel(message || `Cash out ends the run and pays ${quote.payout} Coins. No banking while continuing.\nSkip restores equipped shields and adds ${increment} bonus points (max 100%).\n\nA crash loses all cargo. Only a Depot cash-out earns Coins.`,
       W / 2, y + 12, 14, '#dfeaf3', 310).setLineSpacing(4);
     y += explanation.height + 30;
-    this.addButton('END RUN', y, () => this.finishRun(true),
+    this.addButton('CASH OUT & END RUN', y, () => this.finishRun(true),
       {height: 56, size: 17, fill: PALETTE.depotDark});
     this.finishMenuScroll();
     this.addFooterButton('SKIP', () => this.resumeAfterDepot(),
@@ -4007,7 +4024,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       : completed ? `${levelName} COMPLETE` : banked ? 'RUN COMPLETE'
         : this.voluntaryRunEnd ? 'RUN ENDED' : 'VEHICLE DISABLED',
     `${this.runMode === 'continuous'
-      ? banked ? 'Cashed out at' : 'Hull destroyed after'
+      ? banked ? 'Cashed out at' : this.voluntaryRunEnd ? 'Ended at' : 'Hull destroyed after'
       : completed ? `Finished ${levelName} at` : banked || this.voluntaryRunEnd ? 'Run ended at' : 'Hull destroyed after'} ${Math.floor(this.distance)} m`);
     this.syncHaulerVisuals();
     const result = this.runResult;
@@ -4022,9 +4039,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
     });
     y += 42;
     const rows = this.runMode === 'continuous'
-      ? [[banked ? 'Cargo cashed out' : 'Cargo retained (25%)', result.cargoCoins],
-        ['Cargo bonus', result.bonusCoins],
-        ...(result.cargoLost ? [['Forfeited cargo', result.cargoLost]] : []),
+      ? [...(banked
+        ? [['Cargo cashed out', result.cargoCoins], ['Cargo bonus', result.bonusCoins]]
+        : [['Forfeited cargo', result.cargoLost]]),
         ['Net gain', result.net], ['Wallet (safe)', this.profile.coins]]
       : [
         ['Cargo banked', result.cargoCoins], ['Hold bonuses', result.bonusCoins],

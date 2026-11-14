@@ -11,7 +11,7 @@ import {
 import {laneClearTimeSeconds} from './steering.js';
 import {MAX_MODULE_LEVEL, WORST_CASE_HANDLING, loadoutStats} from './modules.js';
 import {PICKUP_RADIUS_PX, HAZARD_TRAVEL_PX, SHIP_Y, SPAWN_Y} from '../data/route.js';
-import {difficultyStepAtDistance, sectorAtDistance} from './sectors.js';
+import {CONTINUOUS_SECTORS, difficultyStepAtDistance, sectorAtDistance} from './sectors.js';
 import {cargoPickupForRoll} from './cargo.js';
 import {HAZARD_ROW_ENVELOPE_PX, MAX_HAZARD_HIT_X, hazardsForRow, hazardBlockedIntervals, LANE_CENTERS,
 hasStraightRoute, straightRouteWidth, hazardSweptArtOverlaps, hazardGeometry, hazardDefinition, hazardX,
@@ -1146,8 +1146,16 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   let pendingCargo = null;
   const account = {obstacles: 0, sideObstacles: 0};
   const moving = GAME_BALANCE.routes.movingHazards;
-  const movingEligible = moving.eligibleLevelIds.includes(levelId) && moving.eligibleModes.includes(mode);
+  const continuousMoving = mode === 'continuous' && levelId === moving.continuousLevelId;
+  const movingEligible = (moving.eligibleLevelIds.includes(levelId) && moving.eligibleModes.includes(mode)) ||
+    continuousMoving;
   const movingStart = route.sectorStartsMeters[moving.firstSector - 1];
+  const continuousWindowEligible = interval => {
+    if (mode !== 'continuous') return true;
+    const stage = Math.floor(interval.start / GAME_BALANCE.routes.continuous.depotIntervalMeters) %
+      CONTINUOUS_SECTORS.length;
+    return moving.continuousSectorNumbers.includes(stage + 1);
+  };
   let pending = [];
   let obligations = [];
   let reservations = new Map();
@@ -1322,6 +1330,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     if (!movingEligible) return {due: false, deadline: false};
     const contact = hazardFirstContactDistance({kind: 'forklift', offsetY: 0}, distance);
     const interval = intervalFor(contact, planningStart ?? distance, false);
+    if (!continuousWindowEligible(interval) || distance < interval.start) {
+      return {due: false, deadline: false, remaining: 0};
+    }
     const encounters = [...movingContacts(interval), ...extraContacts.filter(contact =>
       contact >= interval.start && contact < interval.depot.distance)].sort((a, b) => a - b);
     const minimum = movingMinimumForInterval(interval);
@@ -1350,8 +1361,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       bankDeadline = beforeBank > 0 && contact +
         ((beforeBank - 1) * 3 + (lastFamily === 'moving_intercept' ? 1 : 0)) * rowMeters > bankSafeEnd;
     }
+    const dueLookaheadRows = mode === 'continuous' ? 0 : 5;
     const due = distance >= movingStart && remaining > 0 && contact <= safeEnd &&
-    (contact + 5 * rowMeters >= target || bankDeadline) &&
+    (contact + dueLookaheadRows * rowMeters >= target || bankDeadline) &&
       (!encounters.length || contact - encounters.at(-1) + 2 * rowMeters >=
         moving.minimumEncounterSpacingMeters);
     return {due, remaining, count: encounters.length, minimum, overCapacity: encounters.length > moving.maximumPerWindow,
@@ -1859,7 +1871,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     fitsDepot(row, composed.positions[index]) ? [...row.hazards, ...row.intermediates]
       .filter(hazard => hazard.movement && !hazard.continuation)
       .map(hazard => contactFor(hazard, composed.positions[index])) : []);
-  const overlayForklift = (composed, variant, scheduled = []) => {
+  const overlayForklift = (composed, variant, scheduled = [], requiredThreatMask = 0) => {
     const candidate = {...composed, rows: composed.rows.map(row => ({...row,
       hazards: row.hazards.slice(), intermediates: (row.intermediates ?? []).slice()}))};
     const lane = variant % TRACK_LANES.length;
@@ -1896,6 +1908,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           const safe = TRACK_LANES.filter(openLane => !blocked.some(([left, right]) =>
             LANE_CENTERS[openLane] > left && LANE_CENTERS[openLane] < right));
             if (!safe.includes(option.moverReservation.bypassLane)) { bypassFailures++; return false; }
+          const staticMask = obstacleLaneMask(obstacles);
+          if (((staticMask | option.moverReservation.affectedMask) & requiredThreatMask) !==
+              requiredThreatMask) return false;
           const contact = contactFor(option, distance);
           const interval = intervalFor(contact, distance, false);
           const otherContacts = [...movingContacts(interval), ...scheduled,
@@ -1934,7 +1949,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       const schedule = movingSchedule(distance, spacing, scheduled, lastFamily);
       if (schedule.overCapacity) return null;
       if (schedule.blockedByDepot) return null;
-      const quotaRequired = window => movingEligible && window.depot > movingStart &&
+      const quotaRequired = window => movingEligible && continuousWindowEligible(window) && window.depot > movingStart &&
         (mode === 'continuous' || window.depot <= route.finishDistanceMeters);
       // Past a scheduling window is not the same as having fulfilled its quota.
       if (quotaRequired(schedule) && schedule.remaining > 0 && schedule.contact > schedule.safeEnd) return null;
@@ -2210,12 +2225,23 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       const rowProfile = challengeProfile(sector.challengeProfileId);
       if (!rowProfile.sweeperSpawnIntervalM || source.sweepers) continue;
       const [minimum, maximum] = rowProfile.sweeperSpawnIntervalM;
-      if (sector.number !== sweeperSector) {
+      const sectorEnd = mode === 'continuous'
+        ? (Math.floor(x / GAME_BALANCE.routes.continuous.depotIntervalMeters) + 1) *
+          GAME_BALANCE.routes.continuous.depotIntervalMeters
+        : sector.endsAt;
+      const sectorStart = mode === 'continuous'
+        ? Math.floor(x / GAME_BALANCE.routes.continuous.depotIntervalMeters) *
+          GAME_BALANCE.routes.continuous.depotIntervalMeters
+        : sector.startsAt;
+      const sectorIdentity = mode === 'continuous'
+        ? Math.floor(x / GAME_BALANCE.routes.continuous.depotIntervalMeters)
+        : sector.number;
+      if (sectorIdentity !== sweeperSector) {
         // Each sector restarts its quota; the first sweeper of a run waits for the opening.
         const lead = nextSweeperDistance === null
-          ? Math.max(sector.startsAt, planningStart ?? x) + sweeperBalance.firstMeters
-          : sector.startsAt + sweeperBalance.sectorLeadMeters;
-        sweeperSector = sector.number;
+          ? Math.max(sectorStart, planningStart ?? x) + sweeperBalance.firstMeters
+          : sectorStart + sweeperBalance.sectorLeadMeters;
+        sweeperSector = sectorIdentity;
         sweeperSectorCount = 0;
         nextSweeperDistance = Math.max(lead, lastSweeperDistance + sweeperBalance.minimumGapMeters);
       }
@@ -2250,7 +2276,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       });
       if (!alongside.length) continue;
       const depotLimit = depot - depotApproachMeters(depot, levelId, mode);
-      const sectorLimit = Math.min(sector.endsAt, depotLimit,
+      const sectorLimit = Math.min(sectorEnd, depotLimit,
         mode === 'normal' ? route.finishDistanceMeters : Infinity) - exitTravel;
       const quotaShort = sweeperSectorCount < sweeperBalance.minimumPerSector;
       const lanes = TRACK_LANES.slice();
@@ -2493,9 +2519,13 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             }
           }
           let overlayApplied = false;
-            if (schedule.due && levelId === 'level2' && movingEligible &&
+            if (schedule.due && movingEligible &&
               !next.rows.some(row => row.hazards.some(hazard => hazard.movement))) {
-            const overlaid = overlayForklift(next, variant);
+              const streaks = plannedPressure.history?.streaks ?? plannedPressure.streaks;
+              const requiredThreatMask = mode === 'continuous'
+                ? TRACK_LANES.reduce((mask, lane) => streaks[lane] >= clearLimit ? mask | (1 << lane) : mask, 0)
+                : 0;
+              const overlaid = overlayForklift(next, variant, [], requiredThreatMask);
             if (overlaid) {
               next = overlaid;
               overlayApplied = true;
@@ -2507,10 +2537,12 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             traceProposal?.(family, 'rejectedPhysical', next);
             continue;
           }
-          composed.witness = levelId === 'level2' && mode === 'normal' && !composed.body
+          const canDeferMovingWitness = (levelId === 'level2' && mode === 'normal') ||
+            mode === 'continuous';
+          composed.witness = canDeferMovingWitness && movingEligible && !composed.body
             ? [] : preservesMovingReservation(composed, family, composed.results, pacing);
           if (composed.witness === null) {
-            if (levelId === 'level2' && mode === 'normal' && movingEligible && !composed.body) {
+            if (canDeferMovingWitness && movingEligible && !composed.body) {
               composed.witness = [];
               composed.movingQuotaWitnessMissing = true;
             } else {
@@ -2804,7 +2836,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           ? [...TRACK_LANES.map(lane => ['single_pressure', lane]),
             ...TRACK_LANES.map(lane => ['risk_reward', lane])]
           : [...openings.map(lane => ['split_gate', lane]),
-            ...(urgent.length === 1 ? [['single_pressure', urgent[0]]]
+            ...(urgent.length === 1 ? openings.map(lane => ['single_pressure', lane])
               : urgent.length ? [] : [0, 3, 1, 2].map(lane => ['single_pressure', lane]))];
         let straightFallback = null;
         for (const relax of [false, true]) {
@@ -2833,7 +2865,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           candidate = {family, signature: signatureFor(family, composed.rows), ...composed, fallback: true};
           certificates = composed.results;
         }
-        if (!candidate && levelId === 'level2' && movingEligible) {
+        if (!candidate && movingEligible && (levelId === 'level2' && mode === 'normal' ||
+            mode === 'continuous' && schedule.due)) {
           for (const variant of movingVariants(distance, spacing, plannedPressure)) {
             attempts++;
             const lane = variant % TRACK_LANES.length;
@@ -2847,9 +2880,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             break;
           }
         }
-        if (!candidate && mode === 'normal') {
-          const recoveryLanes = urgent.length ? urgent : [...TRACK_LANES];
-          for (const extraSpacing of [0, 54, 108, 162, 216]) {
+        if (!candidate && ['normal', 'continuous'].includes(mode)) {
+          const recoveryLanes = urgent.length ? openings : [...TRACK_LANES];
+          for (const extraSpacing of [0, 54, 108, 162, 216, 324, 432, 540, 648]) {
             for (const lane of recoveryLanes) {
               attempts++;
               const source = recipe('single_pressure', lane, false, spacing + extraSpacing);
@@ -2971,7 +3004,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         const rowDistance = row.plannedDistance;
         const rowProfile = challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId);
         if (!rowProfile.allowEnergyOrb || !fitsDepot(row, rowDistance) ||
-            rowDistance >= route.finishDistanceMeters) continue;
+            (mode === 'normal' && rowDistance >= route.finishDistanceMeters)) continue;
         const [minimum, maximum] = rowProfile.orbSpawnIntervalM;
         if (nextOrbDistance === null) nextOrbDistance = rowDistance + minimum +
           orbRandom() * (maximum - minimum);
@@ -3092,7 +3125,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         if (!reportedInterval) reportedInterval = intervalFor(contact, planningStart ?? distance);
         while (contact >= reportedInterval.depot.distance) {
           const required = movingMinimumForInterval(reportedInterval);
-          movingQuotaConflict = reportedInterval.depot.distance > movingStart &&
+          movingQuotaConflict = continuousWindowEligible(reportedInterval) &&
+            reportedInterval.depot.distance > movingStart &&
             !movingHazardQuota(reportedInterval.encounters.length, required).acceptable
             ? {start: reportedInterval.start, depot: reportedInterval.depot.distance,
               encounters: reportedInterval.encounters.length,
@@ -3107,8 +3141,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       }
       for (const hazard of hazards.filter(h => h.movement)) {
         const contact = contactFor(hazard, distance);
-        if (!movingEligible || (mode === 'normal' && contact >= route.finishDistanceMeters)) continue;
         const interval = intervalFor(contact, distance);
+        if (!movingEligible || !continuousWindowEligible(interval) ||
+            (mode === 'normal' && contact >= route.finishDistanceMeters)) continue;
         if (interval.encounters.length >= moving.maximumPerWindow) {
           throw new Error(`Moving quota cap exceeded: ${interval.start}-${interval.depot.distance} m`);
         }

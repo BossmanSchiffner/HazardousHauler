@@ -41,6 +41,21 @@ export const IMPLEMENTED_LEVELS = Object.freeze({
     });
   })),
 });
+const continuousInterval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+export const CONTINUOUS_SECTORS = Object.freeze([
+  Object.freeze({id: 'continuous-industrial', name: 'Industrial Outskirts', color: 0x34485d,
+    themeId: 'industrial', visualThemeId: 'industrial', challengeProfileId: 'industrial',
+    difficultyStep: 0, number: 1, startsAt: 0, endsAt: continuousInterval}),
+  Object.freeze({id: 'continuous-dustlands', name: 'Dustlands', color: 0x927147,
+    themeId: 'dustlands', visualThemeId: 'dustlands', challengeProfileId: 'dustlands',
+    difficultyStep: 1, number: 2, startsAt: 0, endsAt: continuousInterval}),
+  Object.freeze({id: 'continuous-dusklands', name: 'Dustlands at Dusk', color: 0x927147,
+    themeId: 'dustlands', visualThemeId: 'dustlands', challengeProfileId: 'dustlands_dusk',
+    difficultyStep: 2, number: 3, startsAt: 0, endsAt: continuousInterval}),
+  Object.freeze({id: 'continuous-neon', name: 'Neon Gridway', color: 0x594a91,
+    themeId: 'neon', visualThemeId: 'neon', challengeProfileId: 'level4_neon_s1',
+    difficultyStep: 3, number: 4, startsAt: 0, endsAt: continuousInterval}),
+]);
 /** Kept as the Level 1 alias for existing route consumers and tests. */
 export const IMPLEMENTED_SECTORS = IMPLEMENTED_LEVELS.level1;
 
@@ -50,7 +65,8 @@ export function sectorAtDistance(distance, levelId = 'level1', mode = 'normal') 
   if (!sectors) throw new Error(`Unknown level ${levelId}`);
   if (mode === 'continuous') {
     if (levelId !== GAME_BALANCE.routes.continuous.baselineLevelId) throw new Error('Continuous Run has no per-level selection');
-    return sectors[GAME_BALANCE.routes.continuous.baselineSector - 1];
+    const stage = Math.floor(distance / continuousInterval) % CONTINUOUS_SECTORS.length;
+    return CONTINUOUS_SECTORS[stage];
   }
   if (mode !== 'normal') throw new Error(`Unknown sector mode ${mode}`);
   return sectors.findLast(sector => distance >= sector.startsAt);

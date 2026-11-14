@@ -15,7 +15,7 @@
  * New calculations use the new balance; saved ownership is retained and past purchases are
  * never refunded automatically. Moving-hazard bounds and speed live beside their route.
  */
-export const MAX_TRACK_SPEED = 720;
+export const MAX_TRACK_SPEED = 700;
 
 export const CAMPAIGN_SPEEDS = deepFreeze({
   level1: [320, 350, 380, 410],
@@ -53,7 +53,7 @@ function deepFreeze(value) {
 
 const balance = {
   rewards: {
-    continuous: {skipBonusPerDepot: 0.10, maximumBonus: 1, wreckRetention: 0.25},
+    continuous: {skipBonusPerDepot: 0.10, maximumBonus: 1, wreckRetention: 0},
     blueprintToCoins: 35,
     crash: {baseCoins: 5, stepCoins: 3, stepDistanceMeters: 150, maxCoins: 50},
     levelRecord: {sector1: 50, sectors2to3: 100, sectors4to5: 250, fullStartOnly: true},
@@ -68,8 +68,9 @@ const balance = {
   routes: {
     metersPerPixel: 0.06,
     finishClearanceMeters: 10,
-    continuous: {baselineLevelId: 'level1', baselineSector: 2,
-      depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40},
+    continuous: {baselineLevelId: 'level1',
+      depotIntervalMeters: 2000, startSpeedPxPerSecond: 580, milestoneSpeedStep: 20,
+      speedStepIntervalMeters: 1000},
     level1: {
       challengeProfileId: 'industrial',
       sectorEndsMeters: ROUTE_TOPOLOGY.level1.sectorEnds,
@@ -133,6 +134,8 @@ const balance = {
       eligibleLevelIds: ['level2'],
       eligibleModes: ['normal'],
       firstSector: 2,
+      continuousLevelId: 'level1',
+      continuousSectorNumbers: [2, 3],
       minimumPerWindow: 4,
       maximumPerWindow: 14,
       minimumEncounterSpacingMeters: 40,
@@ -165,7 +168,7 @@ const balance = {
       maximumShare: 0.06,
       targetShare: 0.045,
       minimumSpanRows: 3,
-      maximumSpanRows: 4,
+      maximumSpanRows: 6,
       accountingWindowMeters: 600,
       chicaneStaggerRows: 1.5,
       chicaneTransitionExtraPx: 54,

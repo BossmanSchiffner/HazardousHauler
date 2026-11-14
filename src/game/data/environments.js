@@ -3,9 +3,9 @@ import {depotPaletteStep} from '../core/depots.js';
 export const ROAD_SURFACE_PRESETS = Object.freeze({
   industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
   dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
-  // The hex grate is a road-aligned layer glued to the roadbed, so it scrolls 1:1 instead of with sub-road parallax.
+  // Keep the cached overlay available for art inspection, but do not render it during runs.
   neon: Object.freeze({roadTexture: 'road_neon_base', subRoadTexture: 'overlay_neon_hex', blendMode: 'NORMAL',
-    overlayAlpha: 0.85, overlayScrollRatio: 1, overlayRoadAligned: true}),
+    overlayAlpha: 0, overlayScrollRatio: 1, overlayRoadAligned: true}),
   foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
 });
 
@@ -48,13 +48,18 @@ export const NEON_SHOULDER_SIGNS = Object.freeze({
 
 /**
  * Every obstacle carries a light: listed kinds flash amber double strobes, all others a slow amber beacon.
- * Neon-sector obstacles also get a soft cyan/purple ring halo so they read against the dark grid.
+ * No surrounding obstacle rings or halos; the small warning beacons mark the solid artwork.
  */
 export const HAZARD_LIGHTS = Object.freeze({
   strobes: Object.freeze({divider: 2, barrier: 2, forklift: 1, sweeper: 2, boomLift: 1, serviceBoom: 1}),
   beaconPeriodMs: 1400, beaconIdleAlpha: 0.3,
-  neonHalo: Object.freeze({key: 'glow_hazard_ring', tints: Object.freeze([0x3ccfff, 0xb45cff]), padPx: 30,
-    alphaMin: 0.4, alphaMax: 0.7, pulseMs: 1800, dayDepth: 4.9, nightDepth: 16.05}),
+});
+
+export const NEON_READABILITY = Object.freeze({
+  roadAmbient: Object.freeze([150, 146, 180]),
+  edgeAmbient: Object.freeze([210, 230, 245]),
+  edgeWidthPx: 3,
+  cargoRimKey: 'cargo_neon_rim',
 });
 
 const NEON_LIGHTING_BY_PRESET = Object.freeze({

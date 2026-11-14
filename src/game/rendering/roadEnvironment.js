@@ -1,4 +1,4 @@
-import {ENVIRONMENT_VISUALS as V, SECTOR_LIGHTING, LEVEL_SECTOR_LIGHTING, OVERDRIVE_LIGHTING,
+import {ENVIRONMENT_VISUALS as V, NEON_READABILITY, SECTOR_LIGHTING, LEVEL_SECTOR_LIGHTING, OVERDRIVE_LIGHTING,
   headlightFalloff, streetlightFalloff} from '../data/environments.js';
 import {METERS_PER_PIXEL} from '../core/economy.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
@@ -10,7 +10,10 @@ const channels = color => [color >> 16, (color >> 8) & 255, color & 255];
 
 export function lightingForSector(sector, distance, finishDistance, mode = 'normal', levelId = 'level1') {
   if (!['normal', 'continuous'].includes(mode)) throw new Error(`Unknown lighting mode ${mode}`);
-  if (mode === 'continuous') return SECTOR_LIGHTING[1];
+  if (mode === 'continuous') {
+    if (sector.themeId === 'neon') return LEVEL_SECTOR_LIGHTING.level4[1];
+    return sector.number === 3 ? SECTOR_LIGHTING[2] : SECTOR_LIGHTING[1];
+  }
   if (distance >= finishDistance) return OVERDRIVE_LIGHTING;
   const lighting = LEVEL_SECTOR_LIGHTING[levelId]?.[sector.number - 1];
   if (!lighting) throw new Error(`Unavailable lighting for ${levelId}, Sector ${sector.number}`);
@@ -215,21 +218,28 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
   view.glints.setVisible(view.lighting === SECTOR_LIGHTING[0]);
   // White mask regions restore original world saturation inside lights, including obstacles and pickups.
   const maskColor = view.color.join(',');
-  if (night || maskColor !== view.lastMaskColor) {
+  const neon = scene.currentSector?.themeId === 'neon' ||
+    (scene.levelId === 'level4' && scene.runMode !== 'continuous');
+  if (night || maskColor !== view.lastMaskColor || neon !== view.lastNeonReadability) {
     const pixels = view.pixels.data;
     for (let y = 0; y < view.texture.height; y++) for (let x = 0; x < view.texture.width; x++) {
       const worldX = -32 + (x + 0.5) * (view.width + 64) / view.texture.width;
       const worldY = -32 + (y + 0.5) * (view.height + 64) / view.texture.height;
       const light = lightAtPoint(worldX, worldY, lights, pools);
       const index = (y * view.texture.width + x) * 4;
+      const onRoad = neon && worldX >= ROAD_LEFT && worldX <= ROAD_RIGHT;
+      const ambientFloor = onRoad && Math.min(worldX - ROAD_LEFT, ROAD_RIGHT - worldX) <=
+        NEON_READABILITY.edgeWidthPx ? NEON_READABILITY.edgeAmbient : NEON_READABILITY.roadAmbient;
       for (let channel = 0; channel < 3; channel++) {
-        pixels[index + channel] = Math.round(view.color[channel] + (255 - view.color[channel]) * light);
+        const ambient = onRoad ? Math.max(view.color[channel], ambientFloor[channel]) : view.color[channel];
+        pixels[index + channel] = Math.round(ambient + (255 - ambient) * light);
       }
       pixels[index + 3] = 255;
     }
     view.context.putImageData(view.pixels, 0, 0);
     view.texture.refresh();
     view.lastMaskColor = maskColor;
+    view.lastNeonReadability = neon;
   }
   syncStreaks(view, scene, dt);
 }

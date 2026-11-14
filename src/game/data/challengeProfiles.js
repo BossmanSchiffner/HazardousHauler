@@ -38,6 +38,11 @@ export const CHALLENGE_PROFILES = Object.freeze({
     'pipeAssembly', 'roadsideMachine', 'cargoDock', 'serviceBoom'], ['barrier', 'rockSlab', 'signalCabinet', 'boomLift']),
   dustlands: profile(['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'], ['rockSlab', 'boomLift'],
     {obstaclePalette: ['rockSlab', 'boomLift', 'rockSlab']}),
+  dustlands_dusk: profile(['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'],
+    ['rockSlab', 'boomLift', 'vent', 'ventGrille'], {
+      obstaclePalette: ['rockSlab', 'boomLift', 'vent', 'wreckPlatform'],
+      sweeperSpawnIntervalM: [160, 240],
+    }),
   neon: profile(['divider', 'signalCabinet', 'neonConduit', 'signGantry'], ['signalCabinet', 'vent', 'boomLift', 'ventGrille']),
   level4_neon_s1: profile(LEVEL4_FAMILIES, LEVEL4_FAMILIES, {
     obstaclePalette: LEVEL4_PALETTE, allowSweeper: false, allowForklift: false,
