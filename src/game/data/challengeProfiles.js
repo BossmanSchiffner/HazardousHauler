@@ -40,7 +40,7 @@ export const CHALLENGE_PROFILES = Object.freeze({
     {obstaclePalette: ['rockSlab', 'boomLift', 'rockSlab']}),
   dustlands_dusk: profile(['divider', 'rockSlab', 'dustConduit', 'wreckPlatform'],
     ['rockSlab', 'boomLift', 'vent', 'ventGrille'], {
-      obstaclePalette: ['rockSlab', 'boomLift', 'vent', 'wreckPlatform'],
+      obstaclePalette: ['rockSlab', 'boomLift', 'vent', 'ventGrille'],
       sweeperSpawnIntervalM: [160, 240],
     }),
   neon: profile(['divider', 'signalCabinet', 'neonConduit', 'signGantry'], ['signalCabinet', 'vent', 'boomLift', 'ventGrille']),

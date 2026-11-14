@@ -33,7 +33,7 @@ test('debug unlock grants only implemented vehicles, live sockets and modules in
   const before = JSON.stringify(profile);
   const unlocked = new DebugManager('?unlockAll=true').profileForSession(profile);
   assert.equal(unlocked.coins, 99999);
-  assert.deepEqual(unlocked.ownedVehicleIds, ['standard', 'swift']);
+  assert.deepEqual(unlocked.ownedVehicleIds, ['standard', 'swift', 'armoured']);
   for (const id of unlocked.ownedVehicleIds) {
     assert.equal(unlocked.shipStates[id].unlockedSlotCount, SLOT_MAX);
     assert.ok(Array.isArray(unlocked.shipStates[id].equippedModuleIds));

@@ -148,7 +148,8 @@ export function repairPrice(distance, run) {
 export function repairOffer(profile, run, visit, hull, maxHull, distance) {
   if (run.mode === 'continuous') return {cost: 0, reason: 'Continuous Run has no repair service', enabled: false};
   const cost = isDeveloperRun(run) ? 0 : repairPrice(distance, run);
-  const reason = visit.repaired ? 'Repair used at this Depot'
+  const reason = run.repairPurchases > 0 ? 'One repair used this run'
+    : visit.repaired ? 'Repair used at this Depot'
     : hull >= maxHull ? 'Hull already full'
     : profile.coins < cost ? `Need ${cost - profile.coins} more Coins` : '';
   return {cost, reason, enabled: !reason};
@@ -217,6 +218,7 @@ export function settleRun(profile, run, items, distance, banked, completed = fal
     const nextRunIds = [...settledRunIds.filter(id => id !== run.runId), run.runId];
     return {
       profile: {...profile, coins: profile.coins + quote.payout,
+        endlessBestDistance: Math.max(profile.endlessBestDistance ?? 0, Math.floor(distance)),
         totalRuns: profile.totalRuns + 1,
         settledRunIds: nextRunIds},
       run: settledRun, added: [], quote, cargoLost: banked ? 0 : hold - retained,
@@ -287,8 +289,6 @@ export function settleRun(profile, run, items, distance, banked, completed = fal
       completedLevels: completed
         ? [...new Set([...(bank.profile.completedLevels ?? []), run.levelId])]
         : bank.profile.completedLevels ?? [],
-      bestDistance: run.checkpointStart ? profile.bestDistance
-        : Math.max(profile.bestDistance, Math.floor(distance)),
       totalRuns: profile.totalRuns + 1, levelProgress, settledRunIds: nextRunIds},
     run: settledRun, added: bank.added, quote: bank.quote,
     cargoLost: banked ? 0 : cargoTotals(items).value,

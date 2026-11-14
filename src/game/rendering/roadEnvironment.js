@@ -50,6 +50,17 @@ export function createRoadEnvironment(scene, road, width, height) {
   const pixels = context.createImageData(texture.width, texture.height);
   const ambient = scene.add.image(width / 2, height / 2, key)
     .setDisplaySize(width + 64, height + 64).setBlendMode('MULTIPLY').setDepth(16).setVisible(false);
+  const renderer = scene.sys.game.renderer;
+  if (renderer.currentContext && renderer.blendModes[ambient.blendMode] !== 'multiply') {
+    // Phaser can cache source-over before its asynchronous Canvas blend probe completes.
+    const canvasContext = renderer.currentContext;
+    const previousOperation = canvasContext.globalCompositeOperation;
+    canvasContext.globalCompositeOperation = 'multiply';
+    const supported = canvasContext.globalCompositeOperation === 'multiply';
+    canvasContext.globalCompositeOperation = previousOperation;
+    if (!supported) throw new Error('Road lighting requires Canvas multiply blending.');
+    renderer.blendModes[ambient.blendMode] = 'multiply';
+  }
   const beams = [-1, 1].map(() => scene.add.image(0, 0, 'truck_headlight_cone')
     .setOrigin(0.5, 1).setDisplaySize(V.headlightWidth, V.headlightLength)
     .setBlendMode('ADD').setAlpha(V.headlightAlpha).setDepth(9).setVisible(false));

@@ -4,7 +4,7 @@ import {
   CARGO_CAPACITY_ID, STARTER_MODULE_IDS, STARTING_SLOT_COUNT,
 } from './modules.js';
 import {SLOT_MAX} from './economy.js';
-import {VEHICLES} from '../data/catalog.js';
+import {IMPLEMENTED_VEHICLE_IDS, VEHICLES} from '../data/catalog.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
 import {recordSectorProgress} from './progression.js';
 import {IMPLEMENTED_LEVELS} from './sectors.js';
@@ -12,7 +12,7 @@ import {IMPLEMENTED_LEVELS} from './sectors.js';
 const KEY = 'cargo-run-prototype-profile-v1'; // storage key kept so existing saves are found
 let unreadableSave = null;
 let saveReadFailed = false;
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 const LEVEL_IDS = GAME_BALANCE.progression.levelIds;
 
 const defaultShipState = (id, slots = GAME_BALANCE.vehicles[id]?.baseEquipmentSlots ?? STARTING_SLOT_COUNT) => ({
@@ -43,6 +43,7 @@ export const defaultProfile = () => ({
   deferredBlueprintRewards: [],
   bestDistance: 0,
   completedLevels: [],
+  endlessBestDistance: 0,
   totalRuns: 0,
   tutorialCompleted: false,
   rookieTrialRewardsCredited: false,
@@ -122,7 +123,7 @@ export function normalizeProfile(input) {
       ...oldSectorThresholds.filter(([, distance]) => data.bestDistance >= distance).map(([id]) => id),
     ]};
   }
-  if ([5, 6, 7, 8, 9, 10, 11].includes(data.schemaVersion)) {
+  if ([5, 6, 7, 8, 9, 10, 11, 12].includes(data.schemaVersion)) {
     data = {...data, schemaVersion: SCHEMA_VERSION};
   }
   if (data.schemaVersion !== SCHEMA_VERSION) return defaultProfile();
@@ -262,7 +263,7 @@ export function normalizeProfile(input) {
     blueprints: nonNegativeInt(data.blueprints),
     ownedVehicleIds,
     selectedVehicleId: ownedVehicleIds.includes(data.selectedVehicleId) &&
-      ['standard', 'swift'].includes(data.selectedVehicleId) ? data.selectedVehicleId : 'standard',
+      IMPLEMENTED_VEHICLE_IDS.includes(data.selectedVehicleId) ? data.selectedVehicleId : 'standard',
     blueprintRewardIds,
     completedLevels,
     deferredBlueprintRewards: Array.isArray(data.deferredBlueprintRewards)
@@ -271,6 +272,7 @@ export function normalizeProfile(input) {
         all.findIndex(other => other?.id === reward.id) === index &&
         !blueprintRewardIds.includes(reward.id)).map(({id, amount}) => ({id, amount})) : [],
     bestDistance,
+    endlessBestDistance: nonNegativeInt(data.endlessBestDistance),
     totalRuns,
     tutorialCompleted: data.tutorialCompleted === true || establishedProgress,
     rookieTrialRewardsCredited: data.rookieTrialRewardsCredited === true,
@@ -304,7 +306,8 @@ export function loadProfile(onWarning) {
   if (!raw) return defaultProfile();
   try {
     const data = JSON.parse(raw);
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION].includes(data?.schemaVersion)) {
+    if (!Number.isInteger(data?.schemaVersion) || data.schemaVersion < 1 ||
+        data.schemaVersion > SCHEMA_VERSION) {
       throw new Error('Unsupported local save schema');
     }
     return normalizeProfile(data);

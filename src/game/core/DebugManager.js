@@ -1,4 +1,5 @@
 import {GAME_BALANCE} from '../data/gameBalance.js';
+import {IMPLEMENTED_VEHICLE_IDS} from '../data/catalog.js';
 import {MODULE_DEFS, MILESTONES} from './modules.js';
 import {SLOT_MAX, METERS_PER_PIXEL, routeSpeedAtDistance, routeTimeAtDistance} from './economy.js';
 import {IMPLEMENTED_LEVELS} from './sectors.js';
@@ -45,7 +46,7 @@ function createDebugProfile(profile, unlockAll) {
   const next = structuredClone(profile);
   if (!unlockAll) return next;
   next.coins = 99_999;
-  next.ownedVehicleIds = ['standard', 'swift'];
+  next.ownedVehicleIds = [...IMPLEMENTED_VEHICLE_IDS];
   next.milestones = [...MILESTONES];
   for (const [levelId, sectors] of Object.entries(IMPLEMENTED_LEVELS)) {
     next.levelProgress[levelId] = {...next.levelProgress[levelId], unlocked: true,

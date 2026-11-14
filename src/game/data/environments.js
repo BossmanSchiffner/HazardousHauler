@@ -55,6 +55,12 @@ export const HAZARD_LIGHTS = Object.freeze({
   beaconPeriodMs: 1400, beaconIdleAlpha: 0.3,
 });
 
+export const HAZARD_READABILITY = Object.freeze({
+  depth: 16.05,
+  brightness: 1.12,
+  contrast: 1.08,
+});
+
 export const NEON_READABILITY = Object.freeze({
   roadAmbient: Object.freeze([150, 146, 180]),
   edgeAmbient: Object.freeze([210, 230, 245]),

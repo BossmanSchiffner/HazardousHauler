@@ -32,7 +32,7 @@ export function routeSpeedAtDistance(distance, levelId = 'level1', mode = 'norma
       throw new Error('Endless Run uses the global Level 1 route');
     }
     const rules = GAME_BALANCE.routes.continuous;
-    return Math.min(MAX_TRACK_SPEED, rules.startSpeedPxPerSecond +
+    return Math.min(MAX_TRACK_SPEED, rules.maximumSpeedPxPerSecond, rules.startSpeedPxPerSecond +
       Math.floor(Math.max(0, distance) / rules.speedStepIntervalMeters) * rules.milestoneSpeedStep);
   }
   const route = GAME_BALANCE.routes[levelId];
@@ -61,7 +61,9 @@ export function routeTimeAtDistance(distance, levelId = 'level1', mode = 'normal
     for (let from = 0; from < distance;) {
       const to = Math.min(distance, from + interval);
       const speed = routeSpeedAtDistance(from, levelId, mode);
-      if (speed === MAX_TRACK_SPEED) return seconds + (distance - from) / (speed * METERS_PER_PIXEL);
+      if (speed === Math.min(MAX_TRACK_SPEED, GAME_BALANCE.routes.continuous.maximumSpeedPxPerSecond)) {
+        return seconds + (distance - from) / (speed * METERS_PER_PIXEL);
+      }
       seconds += (to - from) / (speed * METERS_PER_PIXEL);
       from = to;
     }

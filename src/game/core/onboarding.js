@@ -6,13 +6,13 @@ import {DEPOT_RULES} from './depots.js';
 import {DEPOT_ECONOMY} from './depotEconomy.js';
 
 export const HINTS = Object.freeze({
-  steer: 'Drag left or right to steer.\nAvoid obstacles on the road.',
-  cargo: 'Cargo has value and adds Load.\nA fuller load makes steering slower.',
+  steer: 'Use the touchscreen to drag left or right to steer.\nUse Mouse or Arrow Keys on PC\nAvoid obstacles on the road.',
+  cargo: 'Cargo adds Coins and Weight.\nA bigger haul makes steering harder!.',
   stack: 'Better cargo appears farther into the run.\nIt can replace cheaper cargo if it fits.',
   hazard: 'Hits damage Hull and can lose cargo.\nAt zero Hull, the run ends.',
   depot: 'Green markers show the Depot side within 60 m.\nLine up with that bay to stop; other lanes bypass.',
-  depotEconomy: 'Normal stops refill equipped shields.\nBank & Continue secures cargo; then repair or resume.\nBank & End Run secures cargo and ends the run.\n\n' +
-    `Passing outside the indicated bay keeps cargo at risk and adds +${DEPOT_ECONOMY.riskStepPercent}% bonus, up to +${DEPOT_ECONOMY.riskCapPercent}%.\n\n` +
+  depotEconomy: 'Recharge 1 Shield charge when stopping at a depot.\nBank & Continue secures collected cargo and resumes the Run\nBank & End Run secures collected cargo and ends the run.\n\n' +
+    `Passing a Depot is risky but adds +${DEPOT_ECONOMY.riskStepPercent}% bonus, up to +${DEPOT_ECONOMY.riskCapPercent}%.\n\n` +
     `Repairs restore ${DEPOT_ECONOMY.repairHullRestored} Hull and cost wallet Coins.`,
 });
 

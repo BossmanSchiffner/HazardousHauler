@@ -38,8 +38,8 @@ Active runtime modes are `normal` and global `continuous`, not per-level
 Overdrive. MAX_TRACK_SPEED is exported once by gameBalance and reexported to
 balance/economy/generator; scene scrolling clamps through the same constant.
 Economy integrates the exact interpolated campaign/stepped Continuous clock.
-Continuous selects the fixed L1S2 challenge independently from its Mid-Day
-visual policy. The existing generator, validator, Depot scheduler and terminal
+Endless uses a four-stage, 2,000 m theme/challenge cycle, with an independent
+1,000 m speed step. The existing generator, validator, Depot scheduler and terminal
 receipt transaction serve both modes. Continuous adds no save schema/record:
 old Overdrive fields remain preserved history, with no new run updates.
 
@@ -87,11 +87,13 @@ to refactor them during a dead-code sweep.
 The scene creates one `RunFeedback` per `create`, before building the world.
 The scene creates one `RunFeedback` per `create`, before building the world.
 Capture-phase canvas pointerdown/document keydown unlock even when menu controls
-stop Phaser propagation. The `GameLogo.svg` and `BG_Music.mp3` are bundled from
+stop Phaser propagation. The `GameLogo.svg`, `BG_Music.mp3` and
+`Sunny_Coastal_Run.mp3` are bundled from
 `art-direction`; ordinary startup opens the Main Menu without a load-in screen.
 No new AudioContext, SDK or dependency.
 
-Background music uses a separate 0.35 gain and loops only during Normal runs.
+Background music uses a separate 0.35 gain: Normal loops `BG_Music.mp3`,
+while Endless loops `Sunny_Coastal_Run.mp3`. Switching modes stops the old source.
 The shared SFX gain is 0.525, 50% above its previous 0.35 level. Neither plays
 before the first real gesture; music follows audio suspension and stops at run end.
 Engine noise is removed by the 2 November owner revision; high-quality engine
@@ -119,11 +121,40 @@ removes owned DOM/scene/game listeners and disconnects nodes without closing
 Phaser's context or modifying other sound owners. Unlock errors and denied
 haptics warn once and remain nonfatal; unsupported APIs are optional-capability
 fallbacks. Delayed unlock promises cannot recreate a destroyed graph.
+Music suspension stops/disconnects the looping buffer source and retains its
+wrapped playback offset, rather than silently advancing the track at zero gain.
+Resume creates one replacement source at that offset only after suspension
+reasons clear. Ending a run resets the offset; fresh runs clear manual-pause
+state without clearing independent focus/visibility suspensions. Tutorial
+overlays continue to suspend effects without interrupting music.
 
 `RoutePrototypeScene` pauses on Space or touch release during active driving.
 The translucent overlay leaves the frozen run visible. Resume shows a lighter
 three-second countdown over the road; simulation and run distance remain stopped
 until it completes. This transient pause does not persist run state.
+The padded pause panel includes Resume, Sound On/Off and End Run. Sound toggles
+Phaser's shared master mute, so both feedback and music respect the setting;
+redrawing the pause controls never restarts gameplay or music.
+After the resume fade completes, touch-release pausing is blocked for 2,000 ms
+using the scene clock. Space remains available; fresh runs reset the deadline.
+Shared steering physics use 351 px/s speed and 1,440 px/s² acceleration, while
+normalized chassis ratings and handling bonuses remain unchanged.
+Route planning derives one reference from the configured Swift chassis with an
+empty hold and maximum Precision Steering through `loadoutStats`. Row spacing,
+Alpha/Beta admission and connected certificates share it; stock/loaded profiles
+do not veto generation. The 0.8 s reaction and >=6 px clearance remain in effect.
+
+Depot approach partitions replace only collision envelopes entering the final
+50 m, with a deterministic three-piece chicane in the half opposite the bay.
+Its distance anchors are independent of chunk/row boundaries. Earlier safe
+obstacles remain, and the post-Depot exit stays protected across the whole road.
+The advertised formation guides validation into the bay half; it permits a
+two-lane transfer and does not charge another reaction delay for each piece.
+Only actual chicane events reset bay-lane clear streaks; opposite-half pressure
+and ordinary mover bypass histories retain their usual enforcement.
+Repeated half-road obstacle concentration triggers nearest-donor relocation
+after one clear row, independently of the three-row individual-lane maximum.
+Roadside structures cannot participate in interior recomposition.
 
 New roadside guardrail containers ease in visually over 220 ms at spawn. Their
 world position, certified collision body and route timing are unchanged.
@@ -270,13 +301,25 @@ Pressure projection preserves standalone pinch offsets; it resolves only
 multi-row structure continuations. Candidate/Beta and bridge replay reject
 projected clear-streak violations. Selected bridge witnesses are emitted directly,
 without new augmentation that could diverge from their committed geometry.
+Baseline shaping relocates the nearest eligible static hazard into an overdue
+lane before considering a filler, preserving required lanes already covered.
+It applies to recovery and moving proposals too; mover reservations protect
+their bypass but never erase pressure debt. Mandatory recovery is tagged before
+augmentation, so aesthetic repeat avoidance and optional Forklift overlays
+cannot veto it. Level 2 may use a certified gate recovery when multiple lanes
+are overdue, without changing ordinary family selection.
+Street Sweeper clearing is limited to retained, unpublished rows, rejects
+overlong lane openings, and reprojects planning history after any accepted
+change. Sweeper bodies use their actual slower distance-domain footprint;
+their presence never grants permanent or full-sweep lane pressure. Final
+encounter signatures are refreshed after overlay edits.
 Seam speed certification indexes the previous/local segment instead of the
 next row. Fresh certification now includes the scene's committed 0.6 s launch
 lead-in at the actual first collision-window speed; Depot-reset approach is not
 double-counted. Certificates expose their configured `hz`, and each physical
-proof still requires completion and >=6 px clearance. The seed 153 fresh
-Continuous entry at 8,000 m (670 px/s), at the 9,000 m speed ceiling (680), and
-all 16 distinct actual-mode scoped route cases pass.
+proof still requires completion and >=6 px clearance. Continuous speed now
+starts at 460 px/s, rises by 20 each 1,000 m, and reaches its mode-specific
+620 px/s cap at 8,000 m; its route stages and Depot cadence are 2,000 m.
 
 Useful collision-bearing secondary fillers need not further narrow the straight
 corridor to be considered; they still require all existing connected, pressure,
@@ -513,6 +556,20 @@ and Depot exit. Level 1 maps Dawn/Dawn/Mid-Day/Mid-Day, Level 2 maps
 Dawn/Mid-Day/Mid-Day/Dusk. Night remains a supported future preset; Continuous
 uses Mid-Day from zero independently of campaign sector lighting. Lights/strobes/glints derive from the selected preset, not
 from an independent sector-number switch.
+
+On Canvas, road-environment creation verifies native `multiply` support and
+repairs Phaser's cached blend entry before showing the ambient mask. Phaser's
+asynchronous capability probe can otherwise leave that entry as `source-over`,
+turning the fully opaque lighting texture into a solid cover over the running
+game. WebGL blending is unchanged; unsupported Canvas blending fails explicitly.
+
+Hazard bodies render at `HAZARD_READABILITY.depth`, just above the ambient mask;
+warning beacons remain above their bodies in both daylight and darkness.
+Imported obstacle brightness/contrast processing and Canvas-only silhouette
+textures bake before gameplay. Canvas ignores sprite tint, so shadows select
+pre-baked dark textures through a shared lookup during pooled creation/sync,
+without runtime pixel processing or texture creation. Neon road baking crops
+partial top-edge props before seamless-wrap sampling to avoid ghost obstacles.
 
 Garage upgrade bindings:
 

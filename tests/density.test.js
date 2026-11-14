@@ -17,7 +17,7 @@ import {HAZARD_ROW_ENVELOPE_PX, hazardGeometry, physicalPressureMetrics, sideHaz
 import {sampleRoute, layoutMetrics, auditRoutes, minimumLaneChanges, depotPacing} from '../scripts/route-audit.mjs';
 import {DEPOT_RULES, nextMoverWindowAfter} from '../src/game/core/depots.js';
 import {DEPOT_APPROACH_HINT_M} from '../src/game/core/onboarding.js';
-import {IMPLEMENTED_SECTORS, IMPLEMENTED_LEVELS} from '../src/game/core/sectors.js';
+import {IMPLEMENTED_SECTORS, IMPLEMENTED_LEVELS, sectorAtDistance} from '../src/game/core/sectors.js';
 
 // Owner rule: routes must be geometrically open at >= 6 px; whether a build can steer them is decided by
 // upgrades, so route checks use the generator's own geometric certificate rather than the stock truck.
@@ -304,13 +304,10 @@ test('density targets are additive and bounded across sectors and Depot stretche
     }
     assert.throws(() => encounterDensityAtDistance(finish, levelId, 'overdrive'), /overdrive/);
   }
-  const continuous = GAME_BALANCE.routes.continuous;
-  const baselineDensity = encounterDensityAtDistance(
-    IMPLEMENTED_LEVELS[continuous.baselineLevelId][continuous.baselineSector - 1].startsAt,
-    continuous.baselineLevelId);
-  for (const distance of [0, 999, 1000, 8000, 1e6]) {
-    assert.equal(encounterDensityAtDistance(distance, 'level1', 'continuous'), baselineDensity,
-      'Continuous keeps the baseline sector density instead of compounding');
+  for (const distance of [0, 999, 2000, 3999, 4000, 6000, 8000, 1e6]) {
+    const stage = sectorAtDistance(distance, 'level1', 'continuous');
+    assert.equal(encounterDensityAtDistance(distance, 'level1', 'continuous'),
+      GAME_BALANCE.routes.level1.densityTargets[stage.difficultyStep]);
   }
 });
 
@@ -318,10 +315,10 @@ test('Continuous Run raises speed per Depot milestone to the single track cap wi
   const rules = GAME_BALANCE.routes.continuous;
   for (let milestone = 0; milestone < 12; milestone++) {
     const expected = Math.min(MAX_TRACK_SPEED, rules.startSpeedPxPerSecond + milestone * rules.milestoneSpeedStep);
-    const start = milestone * rules.depotIntervalMeters;
+    const start = milestone * rules.speedStepIntervalMeters;
     assert.equal(routeSpeedAtDistance(start, 'level1', 'continuous'), expected);
-    assert.equal(routeSpeedAtDistance(start + rules.depotIntervalMeters - 0.001, 'level1', 'continuous'), expected,
-      'speed steps at Depot milestones, not between them');
+    assert.equal(routeSpeedAtDistance(start + rules.speedStepIntervalMeters - 0.001, 'level1', 'continuous'), expected,
+      'speed steps at each 1,000 m milestone');
   }
   assert.equal(routeSpeedAtDistance(100000, 'level1', 'continuous'), MAX_TRACK_SPEED);
   assert.throws(() => routeSpeedAtDistance(0, 'level2', 'continuous'));
@@ -332,7 +329,7 @@ test('Continuous Run raises speed per Depot milestone to the single track cap wi
 test('Continuous route chunks remain traversable across speed milestones up to the track cap', () => {
   const rules = GAME_BALANCE.routes.continuous;
   const capped = Math.ceil((MAX_TRACK_SPEED - rules.startSpeedPxPerSecond) / rules.milestoneSpeedStep) *
-    rules.depotIntervalMeters;
+    rules.speedStepIntervalMeters;
   for (const seed of [1, 1234]) {
     const stream = createTrackStream(seed, 'level1', 'continuous');
     const chunks = [];

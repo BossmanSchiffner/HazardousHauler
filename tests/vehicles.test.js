@@ -78,6 +78,63 @@ test('cargo capacity and one shared steering calculation apply Swift trade-offs 
     'the full-load penalty is preserved under the chassis response multiplier');
 });
 
+test('Armoured Transport costs 12 Blueprints, stays unselected until equipped and survives save normalization', () => {
+  const initial = {...defaultProfile(), blueprints: 12};
+  assert.equal(vehicleStatus(initial, 'armoured').canPurchase, true);
+  assert.equal(purchaseVehicle({...initial, blueprints: 11}, 'armoured').reason, 'Not enough Blueprints');
+  assert.equal(selectVehicle(initial, 'armoured').ok, false);
+  const bought = purchaseVehicle(initial, 'armoured');
+  assert.equal(bought.ok, true);
+  assert.equal(bought.profile.blueprints, 0);
+  assert.equal(bought.profile.selectedVehicleId, 'standard');
+  assert.equal(bought.profile.shipStates.armoured.unlockedSlotCount, 2);
+  assert.deepEqual(bought.profile.shipStates.armoured.equippedModuleIds, []);
+  assert.equal(initial.blueprints, 12, 'purchase is immutable');
+  assert.equal(initial.ownedVehicleIds.includes('armoured'), false);
+  assert.equal(purchaseVehicle(bought.profile, 'armoured').reason, 'Already owned');
+  const restored = normalizeProfile(selectVehicle(bought.profile, 'armoured').profile);
+  assert.equal(restored.selectedVehicleId, 'armoured');
+  assert.ok(restored.ownedVehicleIds.includes('armoured'));
+  assert.deepEqual(restored.shipStates.armoured, bought.profile.shipStates.armoured);
+});
+
+test('retired chassis ownership and selection are removed from old saves without losing currency or modules', () => {
+  const profile = {...defaultProfile(), coins: 321, blueprints: 7,
+    ownedVehicleIds: ['standard', 'prospector'], selectedVehicleId: 'prospector',
+    ownedModules: {hand_precision: 2}};
+  profile.shipStates.prospector = structuredClone(profile.shipStates.standard);
+  const normalized = normalizeProfile(profile);
+  assert.deepEqual(normalized.ownedVehicleIds, ['standard']);
+  assert.equal(normalized.selectedVehicleId, 'standard');
+  assert.equal(normalized.shipStates.prospector, undefined);
+  assert.equal(normalized.coins, 321);
+  assert.equal(normalized.blueprints, 7);
+  assert.equal(normalized.ownedModules.hand_precision, 2);
+});
+
+test('Armoured chassis stats and equipped upgrades combine without losing its built-in shield', () => {
+  const base = purchaseVehicle({...defaultProfile(), blueprints: 12}, 'armoured').profile;
+  const stats = loadoutStats(base, 'armoured');
+  assert.equal(stats.hull, 4);
+  assert.equal(stats.shieldCapacity, 1);
+  assert.equal(stats.capacity, 16);
+  assert.equal(stats.vehicleSteeringMultiplier, 0.8);
+  assert.ok(Math.abs(steeringMultiplier(0, 16, 0, 0, stats.vehicleSteeringMultiplier) /
+    steeringMultiplier(0, 11, 0, 0) - 0.8) < 1e-12);
+  const upgraded = {...base, cargoCapacityRank: 8, ownedModules: {def_shield: 3, def_plating: 1},
+    shipStates: {...base.shipStates, armoured: {...base.shipStates.armoured, unlockedSlotCount: 6,
+      equippedModuleIds: ['cargo_expanded', 'def_plating', 'def_shield']}}};
+  const equipped = loadoutStats(upgraded, 'armoured');
+  assert.equal(equipped.capacity, 37, 'capacity upgrades preserve the chassis advantage');
+  assert.equal(equipped.hull, 5);
+  assert.equal(equipped.shieldCapacity, 4, 'three module charges add to the built-in charge');
+  assert.equal(loadoutStats(upgraded, 'standard').shieldCapacity, 0);
+  const trimmed = buyVehicleTrim({...base, coins: 750}, 'armoured', 'white-blue');
+  assert.equal(trimmed.ok, true);
+  assert.equal(normalizeProfile(selectVehicleTrim(trimmed.profile, 'armoured', 'white-blue').profile)
+    .shipStates.armoured.equippedColorId, 'white-blue');
+});
+
 test('equipment ranks are shared but slot purchases and loadouts belong to each ship', () => {
   const source = defaultProfile();
   const levelOneOnly = purchaseVehicle({...source, blueprints: SWIFT_BLUEPRINTS, coins: 3000,
@@ -95,22 +152,22 @@ test('equipment ranks are shared but slot purchases and loadouts belong to each 
   assert.ok(upgraded.ok);
   assert.equal(upgraded.profile.shipStates.swift.unlockedSlotCount, 4);
   assert.equal(upgraded.profile.shipStates.standard.unlockedSlotCount, 2);
-  const purchased = buyModule(upgraded.profile, 'coll_magnet', 'swift');
+  const purchased = buyModule(upgraded.profile, 'hand_precision', 'swift');
   assert.ok(purchased.ok);
-  assert.ok(purchased.profile.shipStates.swift.equippedModuleIds.includes('coll_magnet'));
-  assert.equal(purchased.profile.shipStates.standard.equippedModuleIds.includes('coll_magnet'), false);
-  assert.equal(purchased.profile.ownedModules.coll_magnet, 1);
-  const equippedOnStandard = equipModule(purchased.profile, 'coll_magnet', 'standard');
+  assert.ok(purchased.profile.shipStates.swift.equippedModuleIds.includes('hand_precision'));
+  assert.equal(purchased.profile.shipStates.standard.equippedModuleIds.includes('hand_precision'), false);
+  assert.equal(purchased.profile.ownedModules.hand_precision, 1);
+  const equippedOnStandard = equipModule(purchased.profile, 'hand_precision', 'standard');
   assert.ok(equippedOnStandard.ok);
-  assert.ok(equippedOnStandard.profile.shipStates.standard.equippedModuleIds.includes('coll_magnet'));
-  assert.equal(equippedOnStandard.profile.ownedModules.coll_magnet, 1);
+  assert.ok(equippedOnStandard.profile.shipStates.standard.equippedModuleIds.includes('hand_precision'));
+  assert.equal(equippedOnStandard.profile.ownedModules.hand_precision, 1);
   const sanitized = normalizeProfile({...equippedOnStandard.profile, shipStates: {
     ...equippedOnStandard.profile.shipStates,
     swift: {...equippedOnStandard.profile.shipStates.swift,
-      equippedModuleIds: ['coll_magnet', 'coll_magnet']},
+      equippedModuleIds: ['hand_precision', 'hand_precision']},
   }});
-  assert.deepEqual(sanitized.shipStates.swift.equippedModuleIds, ['coll_magnet']);
-  assert.ok(sanitized.shipStates.standard.equippedModuleIds.includes('coll_magnet'));
+  assert.deepEqual(sanitized.shipStates.swift.equippedModuleIds, ['hand_precision']);
+  assert.ok(sanitized.shipStates.standard.equippedModuleIds.includes('hand_precision'));
 });
 
 test('trim purchase and selection are persistent per ship and do not purchase on selection', () => {

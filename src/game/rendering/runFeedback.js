@@ -12,6 +12,7 @@ export class RunFeedback {
     this.context = scene.sound?.context;
     this.destination = scene.sound?.destination;
     this.navigator = navigator;
+    this.mobile = scene.game.device?.os?.desktop === false;
     this.report = report;
     this.warnings = new Set();
     this.voices = new Set();
@@ -23,6 +24,8 @@ export class RunFeedback {
     this.musicRequested = false;
     this.musicSource = null;
     this.musicGain = null;
+    this.musicOffset = 0;
+    this.musicStartedAt = 0;
     this.interacted = false;
     this.destroyed = false;
     this.unlocking = null;
@@ -104,7 +107,11 @@ export class RunFeedback {
     this.startMusicSource();
   }
 
-  startRunMusic(enabled) {
+  startRunMusic(enabled, buffer = this.musicBuffer) {
+    if (buffer !== this.musicBuffer) {
+      this.stopRunMusic();
+      this.musicBuffer = buffer;
+    }
     this.musicRequested = Boolean(enabled);
     if (!this.musicRequested) {
       this.stopRunMusic();
@@ -114,12 +121,13 @@ export class RunFeedback {
   }
 
   startMusicSource() {
-    if (!this.ready || !this.musicRequested || !this.musicBuffer || this.musicSource) return;
+    if (!this.ready || this.musicSuspensions.size || !this.musicRequested ||
+        !this.musicBuffer || this.musicSource) return;
     const source = this.context.createBufferSource();
     const gain = this.context.createGain();
     source.buffer = this.musicBuffer;
     source.loop = true;
-    gain.gain.setValueAtTime(this.musicSuspensions.size ? 0 : MUSIC_VOLUME, this.context.currentTime);
+    gain.gain.setValueAtTime(MUSIC_VOLUME, this.context.currentTime);
     source.connect(gain);
     gain.connect(this.destination);
     source.onended = () => {
@@ -131,11 +139,24 @@ export class RunFeedback {
     };
     this.musicSource = source;
     this.musicGain = gain;
-    source.start();
+    this.musicStartedAt = this.context.currentTime;
+    source.start(0, this.musicOffset);
   }
 
   stopRunMusic() {
     this.musicRequested = false;
+    this.musicOffset = 0;
+    this.stopMusicSource();
+  }
+
+  pauseMusicSource() {
+    if (!this.musicSource) return;
+    this.musicOffset = (this.musicOffset + this.context.currentTime - this.musicStartedAt) %
+      this.musicBuffer.duration;
+    this.stopMusicSource();
+  }
+
+  stopMusicSource() {
     if (!this.musicSource) return;
     const source = this.musicSource;
     const gain = this.musicGain;
@@ -149,6 +170,7 @@ export class RunFeedback {
 
   resetRun(x) {
     this.clearVoices();
+    this.resume('manualPause');
     this.lastScrape = -Infinity;
     this.resetSteering(x);
   }
@@ -163,13 +185,11 @@ export class RunFeedback {
   }
 
   steer(x) {
-    const lane = this.laneAt(x);
-    if (this.lane !== undefined && lane !== this.lane) this.vibrate(15);
-    this.lane = lane;
+    this.lane = this.laneAt(x);
   }
 
   vibrate(pattern) {
-    if (this.destroyed || !this.interacted || this.suspensions.size ||
+    if (!this.mobile || this.destroyed || !this.interacted || this.suspensions.size ||
         typeof this.navigator?.vibrate !== 'function') return;
     try {
       if (!this.navigator.vibrate(pattern)) this.warn('haptic', 'Vibration was declined by the browser.');
@@ -297,12 +317,11 @@ export class RunFeedback {
 
   cargoPickup() {
     this.playPickupChime();
-    this.vibrate(30);
   }
 
-  impact() {
+  impact({damaging = true} = {}) {
     this.playHardCrash();
-    this.vibrate([30, 20, 30]);
+    if (damaging) this.vibrate([30, 20, 30]);
   }
 
   airBrake() {
@@ -318,7 +337,6 @@ export class RunFeedback {
     this.playDepotWhoosh();
     this.tone(PICKUP_NOTES[3], 0.42, 0.18, 0.18);
     this.tone(PICKUP_NOTES[4], 0.6, 0.3, 0.18);
-    this.vibrate(200);
   }
 
   suspend(reason, {music = true} = {}) {
@@ -329,11 +347,8 @@ export class RunFeedback {
       this.master.gain.cancelScheduledValues(this.context.currentTime);
       this.master.gain.setValueAtTime(0, this.context.currentTime);
     }
-    if (this.musicGain && this.musicSuspensions.size) {
-      this.musicGain.gain.cancelScheduledValues(this.context.currentTime);
-      this.musicGain.gain.setValueAtTime(0, this.context.currentTime);
-    }
-    if (this.interacted && typeof this.navigator?.vibrate === 'function') this.vibrateStop();
+    if (this.musicSuspensions.size) this.pauseMusicSource();
+    if (this.mobile && this.interacted && typeof this.navigator?.vibrate === 'function') this.vibrateStop();
   }
 
   vibrateStop() {
@@ -352,7 +367,6 @@ export class RunFeedback {
       this.master.gain.setTargetAtTime(SFX_VOLUME, this.context.currentTime, 0.03);
     }
     if (this.master && !this.musicSuspensions.size) {
-      this.musicGain?.gain.setTargetAtTime(MUSIC_VOLUME, this.context.currentTime, 0.03);
       this.startMusicSource();
     }
   }

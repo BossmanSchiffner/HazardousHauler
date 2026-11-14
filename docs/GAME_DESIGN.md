@@ -19,11 +19,28 @@ New sessions begin directly on the Main Menu; there is no load-in video or image
 The first touch records touch controls, while a mouse click or key records
 desktop mode. No audio plays before that first interaction.
 
+The Main Menu stacks the Blueprint sprite and blue count below the Coins tally
+with matching left edges, independent of digit count, without a Blueprint text label or artificial count cap. Its distance
+record is **Endless Best** only: the greatest settled Endless distance, including
+crashes and Depot cash-outs. Older campaign/global records are not imported as
+Endless records. Per-level campaign progression and record rewards are unchanged.
+Normal Run tiles name Level 1 **Industrial Zone** and Level 2 **Dustlands**.
+Level cards reserve separate bounded regions for wrapped names/completion status,
+start buttons, distance records, and checkpoint details. They retain 16 px outer
+padding and 12 px vertical gaps; text fits within its region and taller cards
+scroll rather than compressing into adjacent content on smaller screens.
+Garage unlock milestone labels and availability come from each live
+`gameBalance.js` module requirement, including its Reach/Complete event.
+
 Automatic forward travel, continuous lateral steering, four obstacle lanes.
 Collect cargo, trade value against carried weight, choose Depot stops, and buy
 permanent improvements. The cab is the collision body; articulated cargo beds
 are cosmetic. A heavy load reduces steering response; buying capacity alone
 does not simulate carrying that weight.
+The shared physical steering baseline is 351 px/s lateral speed and
+1,440 px/s² acceleration, a 10% reduction from the previous tuning. Chassis
+ratings remain relative: Standard 100%, Swift 130%, Armoured 80%; equipment
+bonuses, load penalties and keyboard braking retain their existing rules.
 
 - Desktop: move the mouse over the roadway without holding a button, or hold
   A/D or Left/Right. Keyboard release brakes lateral velocity within 60 ms;
@@ -31,13 +48,19 @@ does not simulate carrying that weight.
   starts a three-second countdown over the visible road before the run continues.
 - Touch: press and drag. Lifting a finger during a run pauses it. Resume from
   the translucent pause overlay; the frozen run remains visible behind it. The
-  same three-second road-visible countdown applies. The top HUD band is excluded
+  same three-second road-visible countdown applies. Touch releases cannot
+  re-pause for two seconds after the resume overlay finishes fading out;
+  steering remains available and Space is unaffected. The top HUD band is excluded
   from steering input.
 - The pause menu offers End Run with confirmation. It shows coins banked this
   run, the current unbanked hold, and what is lost by ending. Normal loses the
-  unbanked hold and bonuses; Endless follows its existing wreck rule, retaining
-  25% of current cargo and losing the rest and its unbanked bonuses. The wallet
+  unbanked hold and bonuses. Endless unbanked cargo can only be earned by
+  cashing out at a Depot; voluntarily ending or crashing forfeits it. The wallet
   remains safe.
+- Music pauses with the run and resumes from the same position after the
+  countdown. The pause menu also has a Sound On/Off toggle controlling both music
+  and effects; toggling sound does not resume gameplay. Mute remains in effect
+  for subsequent runs in the current session.
 - Garage cards scroll; a drag/coasting/clipped card must not activate a purchase.
 - No active jumping, forced ads, audio SDK, online service or persistent run-resume save.
 
@@ -78,10 +101,11 @@ gaps. Levels 3-5 have non-interactive **Coming Soon** cards only; no additional
 levels are playable. Newly implemented entries use the same list/card path
 without an extra navigation screen. Endless Run retains one short rules screen
 before starting and returns directly to the main menu. Its overview gives only
-four main details: endless driving with increasing speed, no mid-run cargo
-banking, +10% cargo bonus per passed Depot capped at +100%, and stopping at a
-Depot to cash out and end the run. Starting settings, numerical pacing and wreck
-retention are omitted from this overview only; their gameplay rules are unchanged.
+four main details: cargo is worth much more, cashing out ends the run rather than
+banking and continuing, every passed Depot adds a cargo bonus, and difficulty
+keeps increasing. It ends with **How much will you risk?** Technical tuning,
+numerical pacing and route schedules are omitted from this overview only;
+gameplay rules are unchanged.
 
 Campaign speed interpolates smoothly between sector-start values:
 Level 1 320/350/380/410 px/s; Level 2 350/380/410/440 px/s. The last sector holds
@@ -89,10 +113,12 @@ its final value. One global ceiling is 680 px/s. Level 4 Sector 4 reaching that
 ceiling is a future target, not authorization to implement Levels 3/4.
 
 Per-level Overdrive is retired; saved records remain historical data.
-Separate **Endless Run** (internal mode `continuous`) unlocks after Level 1 completion. It starts at 0 m
-with Level 1 Sector 2 challenges and Mid-Day Industrial visuals, at 350 px/s.
-Each 1,000 m milestone raises speed by 40 px/s, capped at 680. Challenge/pickup
-baseline stays Sector 2, without campaign progress/completion or new levels.
+Separate **Endless Run** (internal mode `continuous`) unlocks after Level 1 completion. It starts at
+0 m and 460 px/s, gaining 20 px/s every 1,000 m to a 620 px/s cap. Depots recur every 2,000 m;
+cash-out ends the run, while Skip continues. Only Depot cash-out awards Coins, and a crash forfeits
+all held cargo. The four 2,000 m stages repeat indefinitely: Mid-Day Industrial with static hazards;
+Mid-Day Dustlands with horizontal Forklifts; Dusk Dustlands with Street Sweepers and Forklifts; and
+Dusk Neon Gridway with Level 4 Energy Orbs. Endless does not grant campaign progress or completion.
 
 ## Generation and collision contracts
 
@@ -148,11 +174,32 @@ generation policy. Geometry is expressed in world units, not PNG alpha bounds.
   mover quota, rather than a silently failed four-body requirement.
   Timed and explicitly tagged potential-lane patterns
   retain their distinct existing validation semantics.
-- Baseline selection uses stock Standard, half of the live baseline capacity,
-  0.8 s reaction and >=6 px connected clearance. Other loadouts/frame rates are
-  diagnostics and regression coverage, not permission for a parallel generator.
-- Clear-event limits are three in Normal and the Sector 2 Continuous baseline. Retries,
-  quota failures, connected access and object lifetime are required checks.
+- Route selection and row spacing use an empty Swift Runner with maximum-rank
+  Precision Steering (currently +75% handling and the Swift's 1.30x chassis
+  response), 0.8 s reaction and >=6 px connected clearance at 30/60/120 Hz.
+  Stock or loaded trucks are not guaranteed to clear these routes: upgrading
+  and retrying is intentional. Other loadouts are diagnostics, not generation gates.
+- Every lane may remain clear for at most three meaningful rows in Normal and
+  Endless; the fourth must contain collision-bearing pressure. Alpha and its
+  Betas form one row. An overdue lane first pulls the nearest eligible static
+  obstacle across (lane-distance order), rather than crowding the road with
+  another obstacle. Fixed structures and movers are not relocated.
+  If a whole half was clear on the previous row and the next layout again
+  stacks obstacles in the opposite half, pull the nearest movable obstacle
+  into the empty half immediately; do not wait for the three-row limit.
+  Mover bypass reservations cannot reset clear history. Street Sweeper overlays
+  must preserve the same limit and count only during their actual collision
+  windows. Depot/finish protection and >=6 px connected clearance remain mandatory.
+- During the final 50 m before a Depot, only its adjacent two lanes are protected:
+  lanes 0-1 for a left Depot, 2-3 for a right Depot. Three staggered barriers form
+  a chicane in the opposite half. They stop before the braking line; the existing
+  all-lane post-Depot exit protection is unchanged. The bay lanes are exempt from
+  the clear-row pressure rule during this approach, not the opposite half.
+  Certification guides the reference truck into the clear half, including a
+  two-lane approach when needed. The advance Depot warning covers the complete
+  formation; no additional reaction delay is charged for each announced piece.
+  Roadside structures always remain anchored to curb lanes 0 or 3. The Dusk
+  Dustlands ordinary-obstacle palette excludes roadside platforms.
 
 The latest scoped generator gate passes density, fresh Continuous entry,
 all configured physical proofs and resolved scenery tails. This is engineering
@@ -206,7 +253,11 @@ These are retained changes, not human/player acceptance. See
 
 Cargo stores value, mass and occupied slots. Pickups occur on the existing
 2-4-row rhythm; values progress by sector position through the configured
-5/10/20/25 tables; Continuous stays at the Sector 2 table. Freight mass and pickups share
+5/10/20/25 tables. Endless cargo pickups are worth 25 Coins before 6,000 m
+and 30 Coins from 6,000 m onward, including later theme cycles. Endless uses
+denser Alpha patterns and certified Beta slots at one-third, one-half and
+two-thirds of the row gap, preserving mover bypasses and Depot protection.
+Freight mass and pickups share
 existing value eligibility, not artwork-derived tiers. A full hold can replace
 one strictly cheaper item if the replacement fits.
 
@@ -252,7 +303,7 @@ banking, repair and confirmation, and returns on resume.
 
 Normal Depots occur at sector starts after Sector 1, not a periodic loop:
 Both levels stop at sector transitions: 1,000 / 2,000 / 3,000 m.
-Continuous Depots appear every 1,000 m from zero. Approach/exit protection and
+Continuous Depots appear every 2,000 m from zero. Approach/exit protection and
 the new threshold predicate use the existing Depot owner; bypass preserves the stream.
 The retained `loopMeters` field influences side placement, not periodic stops.
 
@@ -267,28 +318,30 @@ The retained `loopMeters` field influences side placement, not periodic stops.
   exits/services until Retry Banking succeeds.
 - Normal center bypass adds 20 percentage points, capped at 60%. No extra
   distance reward for ending safely at a Depot.
-- Repair restores one Hull per visit, paid from the wallet with increasing
-  difficulty/prior-run-repair cost. There is no current run-wide repair cap or
-  collectible repair voucher. Continuous has no repair menu.
+- Repair restores one Hull, paid from the wallet with the configured
+  difficulty-based cost. Normal runs may use repair only once total; the limit
+  remains spent after Bank & Continue and disables service at later Depots.
+  Continuous has no repair menu.
 - Continuous stopped menu offers End Run (terminal cash-out) or Skip (no banking,
   restores equipped shield charges before continuing). Arrival alone does not
   restore charges; neither does a straight center-lane bypass.
   Each passed Depot adds 10 percentage points to current-hold value, capped at
-  100% total bonus, not compounded. Wreck retains floor(25% of current-hold
-  Coins) without Depot bonus. Blueprint, distance, completion and no-damage
+  100% total bonus, not compounded. A crash forfeits all current-hold Coins.
+  Blueprint, distance, completion and no-damage
   rewards do not enter this settlement. Existing wallet Coins remain safe.
 - Normal crash consolation, records, completion and clean-run rewards use one
   settlement owner. First/repeat completion pays configured 500/250 Coins.
   Receipt IDs prevent duplicate terminal settlement.
 
-The prior one-bank-per-run/finite-repair proposal is **unimplemented**, not
-silently restored by documentation cleanup; see [decisions](DECISIONS.md).
+The prior one-bank-per-run proposal remains **unimplemented**; the current
+one-repair-per-Normal-run rule is recorded in [decisions](DECISIONS.md).
 
 ## Garage and equipment
 
-Standard and Swift are playable. Swift costs **6 Blueprints** after Level 2
+The four-truck roster is Standard, Swift, Armoured and Apex. The first three
+are playable; Apex is the only locked Coming Soon placeholder.
+Swift costs **6 Blueprints** after Level 2
 unlock, has 1.30x steering response and four fewer cargo slots at matching rank.
-Armoured, Prospector and Apex remain locked Coming Soon placeholders.
 
 Ranks are shared; equipment/loadout, purchased slots and colors are per ship.
 Standard starts with two slots, Swift with three; the current maximum is six.
@@ -331,6 +384,15 @@ a centered group, and popup labels/values share a centered row baseline.
 | Depot Shield | Complete Level 2 Sector 3; three ranks with exactly 1/2/3 charges |
 | Impact Pulse | Implemented effect, but new purchases gated to future Level 4 Sector 3 |
 
+The Standard Hauler starts with 2 Hull (its unmodified maximum); Reinforced
+Plating can increase that maximum. Swift retains 3 base Hull.
+Armoured Transport unlocks for 12 Blueprints, with no additional level gate.
+It starts with 4 Hull, 1 charged Shield, 16 cargo capacity, 80% steering response
+and 2 equipment sockets. Cargo upgrades retain its +5 capacity advantage;
+Depot Shield module charges add to its built-in charge. It uses the supplied
+Armoured truck artwork in runs and its separate display artwork in menus.
+Purchasing does not auto-equip; ownership, selection and per-truck equipment
+persist through saves. Apex remains a non-playable placeholder.
 Depot Shield starts charged and absorbs before Hull/cargo damage. Normal dock
 arrival refills it; Endless restores it only on Skip after an actual stop.
 No passive or bypass recharge; capacity remains the equipped 1/2/3-charge rank.
@@ -378,15 +440,28 @@ Desktop uses a centered FIT 390 x 844 portrait playfield, with pillarboxing
 rather than width stretching. Shorter phones preserve that same aspect ratio.
 Sector lighting is Level 1: Dawn / Dawn / Mid-Day / Mid-Day; Level 2:
 Dawn / Mid-Day / Mid-Day / Dusk. Night is retained only as a future-level
-preset. Continuous starts and stays Mid-Day. Soft 84 x 220 px headlights and roadside
+preset. Endless rotates Mid-Day Industrial, Mid-Day Dustlands, Dusk Dustlands,
+and Dusk Neon Gridway in 2,000 m stages. Soft 84 x 220 px headlights and roadside
 sodium pools activate in Level 2 Sector 4 Dusk; hazard strobes brighten then.
 In Dusk and the reserved Night preset, cargo pickup art (including its embedded
 drop shadow) uses a slight neutral dimming (230/255 brightness) above the heavy
-road mask; blue/gold pickup glows retain 90% of their normal pulsing intensity.
+road mask; soft green neon drop shadows retain 90% of their normal pulsing intensity.
+Cargo pickups in every theme also have a subtle green-white corner sparkle,
+animated from the scene clock using pooled images without per-pickup tweens.
 Dawn/Mid-Day/Overdrive presentation and the 35% rejected-pickup cue are preserved.
 Road cargo has no coin/value/load annotation underneath, in normal play or the
 steering sandbox. Pickup rasters, embedded shadows and pulsing glows are unchanged
 by label removal; cargo values, collection feedback and HUD totals remain active.
+Non-Neon road textures include baked branching cracks, faded repair patches and
+light scuffing. Wear is decorative only, preserves lane readability and adds no
+runtime objects; Neon road artwork remains unweathered.
+Neon road tiling excludes the supplied artwork's partial top-edge props before
+seam blending, so no non-colliding obstacle images appear on the road.
+Obstacle art receives a subtle baked brightness/contrast lift. Hazard bodies,
+including modular guardrails and energy orbs, stay above the ambient lighting
+mask in every level, preserving their midday visibility at dusk and night while
+the road and surrounding scene still change lighting. Canvas shadows use baked
+dark silhouettes rather than colored copies of the obstacle artwork.
 All road collectible bodies (four cargo sizes, Blueprints and converted Blueprint
 coin stacks) render another 5% smaller than the preceding 95% presentation:
 90.25% of the size before both reductions. The separate under-pickup
@@ -399,7 +474,9 @@ The Large (20-value) cargo pickup's cyan center is now orange, distinct from
 the blue Blueprint pickup. Its neutral casing and transparency are preserved.
 Sector/Depot bursts are 1.8 s visual
 cues, not gameplay speed multipliers. Shadows follow each rotated silhouette.
-The running HUD is a fixed three-column 70 px band with Hull and shield pips.
+The running HUD is a fixed three-column 78 px band with Hull and shield pips.
+Distance and Load remain visible; centered Depot Pass Bonus and Close Call Bonus
+use separate lines, with no Handling percentage text.
 
 Explicit URL flags enable internal God/bot/warp/unlock/fast tools with
 **temporary in-memory progress**. Approved fast mode is 3.5x. God plus bot
@@ -413,8 +490,9 @@ Engine noise is removed per the 2 November owner revision. High-quality
 engine audio will be considered later; there is no replacement loop, engine
 oscillator or velocity-driven audio during driving, docking or launch.
 Other sounds and haptics remain enabled. Real pointer/keyboard interaction
-unlocks playback; background music runs only during Normal runs at the previous
-SFX master level (0.35), while the SFX master is raised 50% to 0.525. Browser
+unlocks playback; Normal runs loop `BG_Music.mp3` and Endless runs loop
+`Sunny_Coastal_Run.mp3`, both at the previous SFX master level (0.35),
+while the SFX master is raised 50% to 0.525. Browser
 restrictions do not block play. Stronger impacts, air brakes and short UI clicks
 retain shared output compression. No extra AudioContext or gameplay speed change.
 The focused engine-removal gate passes **16/0**; the earlier Slice 5 **13/0**
@@ -429,12 +507,21 @@ actions play one click after the action; drags, aborted/foreign/repeated release
 do not. Bypass, panel repaint, immune overlaps and harmless grinding do not
 replay impact/braking/arrival feedback.
 
-Supported browsers vibrate 15 ms per lane crossing, 30 ms per crate,
-80 ms total double-pulse `[30,20,30]` on impact (including pause), and 200 ms
-at docking. Browser/OS decides intensity; desktop/unsupported-device fallback
-is no vibration. Feedback mutes/cancels when paused, asleep, hidden or blurred,
+Supported mobile browsers give the 80 ms double-pulse `[30,20,30]` only when
+a collision actually removes Hull. Steering, cargo pickups, Depot visits,
+shield-absorbed hits, God Mode contacts and harmless scrapes never vibrate.
+Browser/OS decides intensity; desktop/unsupported devices do not vibrate.
+Feedback mutes/cancels when paused, asleep, hidden or blurred,
 and cleans up on scene shutdown. No added currency, settings, SDK or save state.
 Human sound/mix and real-device haptic acceptance remain **PENDING**.
+
+The hidden Developer Tools menu includes a session-only God Mode toggle.
+It prevents collision damage to Hull, shields and cargo, and labels protected
+runs as developer runs so they cannot earn rewards, progression or records.
+Disabling it restores damage for subsequent ordinary runs; reloading clears
+the menu override. Existing explicit URL debug flags remain supported.
+Both centered in-run bonus lines use 10 px text, 25% larger than before, with
+separate measured lines inside the HUD.
 
 ## Not released / not authorized
 

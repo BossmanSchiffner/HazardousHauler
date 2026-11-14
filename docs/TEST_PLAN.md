@@ -25,30 +25,71 @@ Depot reset replay parity, dead-worker recovery and heartbeat behavior.
 
 ## Commands and scope
 
+### Hard three-row lane pressure
+
+```powershell
+node --test --test-name-pattern="clear-row rule:|all16|Endless stages|Endless emits|worker|replay|fallback|prepared" tests\clearRowRule.test.js tests\trackGenerator.test.js tests\routeStream.test.js
+```
+
+Verify nearest-donor relocation, independent per-lane history, protected mover
+bypasses without history resets, Depot seams, final signatures, deterministic
+streaming and actual Sweeper collision windows. The production-route checks
+retain the three-row maximum and connected >=6 px clearance at 30/60/120 Hz.
+The reference is an empty Swift Runner with maximum Precision Steering, not a
+stock Standard or an all-build/full-load guarantee. Row spacing and live
+Alpha/Beta certification use this same build.
+The existing certified-baseline minimum-open-run exceptions are separate
+diagnostics, never permission to exceed that maximum.
+
+The `upgraded Swift certification` regression checks a tight dodge that the
+upgraded Swift can clear but the stock half-loaded truck cannot. Do not restore
+the stock-truck guarantee when adjusting this test.
+
+Depot approach/Endless curb regressions:
+
+```powershell
+node --test --test-name-pattern="Depot approach|Depot approaches|Depot safety|clear-row rule: Depot" tests\depots.test.js tests\trackGenerator.test.js tests\clearRowRule.test.js tests\longObstacles.test.js
+```
+
+Verify left/right Depots keep only the adjacent two lanes clear, emit exactly
+three alternating opposite-half barriers, and retain full exit protection.
+Check all four campaign levels and two full 8 km Endless environment cycles;
+roadside bodies (including Dusk Dustlands platforms) must never occupy lanes 1-2.
+The half-road concentration regression verifies that a second layout stacking
+both obstacles on one side relocates the nearest donor into the previously
+empty half, without adding obstacles or moving fixed roadside structures.
+
 ### Title screen and run music
 
 ```powershell
-node --test --test-name-pattern="Normal-run music waits|ordinary startup shows" tests\rendering.test.js tests\sceneLifecycle.test.js
+node --test --test-name-pattern="Normal-run music waits|Endless music switches|run music selects|scene preloads|ordinary startup shows" tests\rendering.test.js tests\sceneLifecycle.test.js
 ```
 
 Browser checks: the Main Menu is the first ordinary screen at 320 x 568, 390 x
 844 and desktop aspect ratios; no load-in video or full-screen image is shown.
 The main menu uses the Hazardous Haul logo and contains no separate truck
 preview. Confirm touch starts classify as mobile, mouse/key starts as desktop,
-and no audio plays before the first gesture. Verify looped music during Normal runs,
-no music during Endless, pause muting, and the 0.525 SFX gain. Debug URLs bypass
+and no audio plays before the first gesture. Verify `BG_Music.mp3` loops during
+Normal runs and `Sunny_Coastal_Run.mp3` during Endless, both at 0.35 gain.
+Check mode switching stops the old track, pause muting, and the 0.525 SFX gain. Debug URLs bypass
 the title screen but still require interaction to unlock audio.
 
 ### Pause and resume
 
 ```powershell
-node --test --test-name-pattern='touch release pauses|Space pauses|pause End Run confirmation' tests\sceneLifecycle.test.js
+node --test --test-name-pattern='touch release pauses|Space pauses|mobile re-pause|pause End Run confirmation' tests\sceneLifecycle.test.js
+node --test tests\steering.test.js tests\vehicles.test.js tests\modules.test.js
 ```
 
 The focused lifecycle checks cover touch release versus mouse release, Space
 pause/resume, key-repeat handling, frozen run distance, HUD/audio suspension,
-the full three-second countdown, banked/unbanked confirmation amounts and
-mode-specific wreck retention.
+the full three-second countdown, the exact two-second mobile re-pause boundary
+after the fade, fresh-run reset, banked/unbanked confirmation amounts and
+Endless forfeiture of all unbanked cargo.
+Steering checks cover the 10% lower physical acceleration/speed, unchanged
+normalized chassis ratings and the existing 60 ms keyboard stop.
+The Garage has four trucks: three active chassis and only Apex Coming Soon;
+retired chassis data in old saves is discarded without resetting currency.
 
 ### Stale-fixture batch, tiered tracing and retired-mode reconciliation (4 November)
 
@@ -764,7 +805,7 @@ task; the density blocker above is not advanced.
 | Moving hazards | controlledMovers, hazards, sectors | Half-open 4-14-body banking quotas, canonical motion, paired/central/tagged pattern rules; no art-derived collider |
 | Cargo/collection | cargo, magnet, blueprints | Value/mass/slots, replacement, hit loss, eligibility, separate seeded Blueprint budget, reward deduplication |
 | Steering/collision | steering, collision, sceneLifecycle | Continuous loaded steering, keyboard braking, Shield-before-Hull, immunity, fatal contacts and harmless grinds |
-| Depot/economy | depots, depotEconomy, economy | Actual facility entry/protection, Normal banking/pass/repair, Continuous terminal cash-out/capped bonus/current-hold wreck retention, protected wallet and receipt idempotence |
+| Depot/economy | depots, depotEconomy, economy | Actual facility entry/protection, Normal banking/pass/repair, Endless 2,000 m Depot cadence, terminal cash-out/capped bonus/all-cargo crash loss, protected wallet and receipt idempotence |
 | Equipment/vehicles | modules, vehicles | Purchased versus equipped, shared ranks/per-ship states, slots/gates, Cargo/reinforcement, Standard/Swift/colors and future placeholders |
 | Saves/progression | saveMigration, progression, blueprints | Fresh and schemas 1-11, legacy Radar/Shield, independent level/checkpoint/sector evidence, unsupported-save backup, write-failure handling |
 | Presentation/resources | rendering, sceneLifecycle | Assets/source bytes, layer/tint/light falloff, shadows/hitches, object/attachment cleanup, guarded texture creation and bounded active populations |

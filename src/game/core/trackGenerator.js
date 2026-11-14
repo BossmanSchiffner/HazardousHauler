@@ -29,15 +29,19 @@ export {MAX_TRACK_SPEED} from '../data/gameBalance.js';
 const routeBalance = GAME_BALANCE.routes.level1;
 const trackBalance = GAME_BALANCE.routes.track;
 const baselineSelection = trackBalance.routeValidation.baseline;
-const baselineStats = loadoutStats({cargoCapacityRank: 0, ownedModules: {},
-  shipStates: {[baselineSelection.vehicleId]: {equippedModuleIds: []}}}, baselineSelection.vehicleId);
-const baselineReference = Object.freeze({
-  id: 'standard-stock-half', load: baselineStats.capacity * baselineSelection.loadFraction,
+const baselineModuleRanks = Object.fromEntries(baselineSelection.moduleIds.map(id =>
+  [id, Math.min(MAX_MODULE_LEVEL, GAME_BALANCE.upgrades.modules[id].values.length)]));
+const baselineStats = loadoutStats({cargoCapacityRank: 0, ownedModules: baselineModuleRanks,
+  shipStates: {[baselineSelection.vehicleId]: {equippedModuleIds: baselineSelection.moduleIds}}},
+baselineSelection.vehicleId);
+export const TRACK_VALIDATION_REFERENCE = Object.freeze({
+  id: baselineSelection.id, load: baselineStats.capacity * baselineSelection.loadFraction,
   capacity: baselineStats.capacity, handling: baselineStats.handling, loadRelief: baselineStats.loadRelief,
   vehicleMultiplier: baselineStats.vehicleSteeringMultiplier,
   reactionSeconds: GAME_BALANCE.routes.movingHazards.reactionMarginSeconds,
   geometric: trackBalance.routeValidation.certification === 'geometric',
 });
+const baselineReference = TRACK_VALIDATION_REFERENCE;
 export const DENSITY_TARGETS = routeBalance.densityTargets;
 const BETA_HAZARD_KIND = 'divider';
 const BETA_SLOTS = trackBalance.betaSlots;
@@ -110,11 +114,16 @@ export function staticIntersectsMoverAtRow(hazard, sourceDistance, reservation,
 
 const staticIntersectsMoverReservation = staticIntersectsMoverAtRow;
 
-export function shapeBaselineRows(rows, openLaneHistory = [], ordinalStart = 0) {
+export function shapeBaselineRows(rows, openLaneHistory = [], ordinalStart = 0, mode = 'normal') {
   const history = [...openLaneHistory];
-  const clearRows = GAME_BALANCE.routes.track.maximumClearEvents.normal;
+  const clearRows = GAME_BALANCE.routes.track.maximumClearEvents[mode];
   return rows.map((source, phase) => {
     const row = structuredClone(source);
+    if (row.emitted === false) return row;
+    if (row.depotApproach) {
+      history.length = 0;
+      return row;
+    }
     const setpiece = row.hazards.find(hazard => hazard.sideObstacle && hazard.spanRows > 1 &&
       [0, 3].includes(hazard.lane));
     if (setpiece && !row.hazards.some(hazard => hazard.movement)) {
@@ -129,19 +138,49 @@ export function shapeBaselineRows(rows, openLaneHistory = [], ordinalStart = 0) 
       .map(hazard => hazard.moverReservation).filter(Boolean);
     const bypassMask = reservations.reduce((mask, reservation) => mask | (1 << reservation.bypassLane),
       (row.moverBypassMask ?? 0) | (row.moverReservedMask ?? 0));
-    const requiredMask = history.length >= clearRows ? history.slice(-clearRows)
-      .reduce((mask, open) => mask & open, 0b1111) & ~bypassMask : 0;
+    let requiredMask = history.length >= clearRows ? history.slice(-clearRows)
+      .reduce((mask, open) => mask & open, 0b1111) : 0;
     let blockedMask = obstacleLaneMask([...row.hazards, ...(row.intermediates ?? [])]);
+    const halfRows = GAME_BALANCE.routes.track.maximumClearHalfRows;
+    if (history.length >= halfRows) {
+      const previouslyOpen = history.slice(-halfRows).reduce((mask, open) => mask & open, 0b1111);
+      for (const [half, nearestLane] of [[0b0011, 1], [0b1100, 2]]) {
+        const opposite = 0b1111 ^ half;
+        if ((previouslyOpen & half) === half && !(blockedMask & half) &&
+            (blockedMask & opposite) === opposite && !(bypassMask & half)) {
+          requiredMask |= 1 << nearestLane;
+        }
+      }
+    }
     for (const lane of TRACK_LANES) {
       if (!(requiredMask & (1 << lane)) || blockedMask & (1 << lane)) continue;
+      if (bypassMask & (1 << lane)) continue;
+      const donor = row.hazards.filter(hazard => !hazard.sideObstacle && !hazard.continuation &&
+        !hazardDefinition(hazard.kind).roadside &&
+        !hazard.movement && !hazard.motionBounds && !hazard.spanRows &&
+        !hazard.pinch && !hazard.moverCompanion &&
+        !(requiredMask & (1 << hazard.lane)))
+        .sort((a, b) => Math.abs(a.lane - lane) - Math.abs(b.lane - lane))
+        .find(hazard => {
+          const moved = {...hazard, lane, offsetX: 0};
+          return ![...row.hazards, ...(row.intermediates ?? [])].some(other =>
+            other !== hazard && hazardSweptArtOverlaps(moved, other));
+        });
+      if (donor) {
+        donor.lane = lane;
+        donor.offsetX = 0;
+        blockedMask = obstacleLaneMask([...row.hazards, ...(row.intermediates ?? [])]);
+        continue;
+      }
       const filler = {kind: 'barrier', lane, offsetX: 0, offsetY: 0,
         placement: 'alpha', sideObstacle: false, baselineFiller: true};
       row.hazards.push(filler);
       blockedMask = obstacleLaneMask([...row.hazards, ...(row.intermediates ?? [])]);
     }
     const openMask = (~blockedMask) & 0b1111;
-    history.push(openMask & ~bypassMask);
+    history.push(openMask);
     if (history.length > clearRows) history.shift();
+    row.requiredLaneMask = requiredMask;
     row.openLanesMask = openMask;
     row.baselineRhythm = true;
     row.safeLanes = TRACK_LANES.filter(lane => openMask & (1 << lane));
@@ -242,7 +281,39 @@ export function chunkCollisionCoverage(rows, {levelId = 'level1', mode = 'normal
     committedWitnessRows: witnessedRows.size};
 }
 
-/** Reject any Alpha/Beta envelope intersecting a facility approach or protected re-entry. */
+/** Canonical opposite-half chicane, partitioned by row so each obstacle is emitted exactly once. */
+export function depotApproachRow(row, distance, levelId = 'level1', mode = 'normal') {
+  const depot = nextDepotAfter(distance, DEPOT_RULES, levelId, mode);
+  if (!Number.isFinite(depot.distance)) return row;
+  const from = distance + (HAZARD_TRAVEL_PX - HAZARD_ROW_ENVELOPE_PX / 2) * METERS_PER_PIXEL;
+  const to = from + row.spacingPx * METERS_PER_PIXEL;
+  const approach = depotApproachMeters(depot.distance, levelId, mode);
+  if (to <= depot.distance - approach || from >= depot.distance) return row;
+  const clearLanes = depot.side === 'left' ? [0, 1] : [2, 3];
+  const chicaneLanes = depot.side === 'left' ? [2, 3] : [1, 0];
+  const intermediates = [];
+  for (let index = 0; index < DEPOT_RULES.approachChicaneCount; index++) {
+    const contact = depot.distance - approach +
+      approach * (index + 1) / (DEPOT_RULES.approachChicaneCount + 1);
+    if (contact < from || contact >= to) continue;
+    intermediates.push({kind: 'barrier', lane: chicaneLanes[index % 2],
+      offsetX: 0, offsetY: HAZARD_TRAVEL_PX - (contact - distance) / METERS_PER_PIXEL,
+      placement: 'beta', depotChicane: true});
+  }
+  const hazards = row.hazards.filter(hazard => hazardsBeforeDepot({hazards: [hazard]}, distance,
+    depot.distance, 0, levelId, mode));
+  if (!intermediates.length && hazards.length === row.hazards.length) return row;
+  const blocked = hazards.flatMap(hazardBlockedIntervals);
+  const safeLanes = clearLanes.filter(lane => !blocked.some(([left, right]) =>
+    LANE_CENTERS[lane] > left && LANE_CENTERS[lane] < right));
+  return {spacingPx: row.spacingPx, hazards, intermediates, safeLanes,
+    hazardLanes: TRACK_LANES.filter(lane => blocked.some(([left, right]) =>
+      LANE_CENTERS[lane] > left && LANE_CENTERS[lane] < right)),
+    cargoLanes: clearLanes.filter(lane => safeLanes.includes(lane)), depotApproach: depot.distance,
+    requiredLaneMask: 0, protectedLaneMask: clearLanes.reduce((mask, lane) => mask | (1 << lane), 0)};
+}
+
+/** Reject unsafe approach envelopes; only the authored opposite-half chicane may enter the approach. */
 export function hazardsBeforeDepot(row, distance, nextDepotDistance, protectedUntil = 0,
   levelId = 'level1', mode = 'normal') {
   const hazards = [...row.hazards, ...(row.intermediates ?? [])].filter(h => !h.continuation);
@@ -253,6 +324,19 @@ export function hazardsBeforeDepot(row, distance, nextDepotDistance, protectedUn
   const first = distance + head * METERS_PER_PIXEL;
   const last = distance + tail * METERS_PER_PIXEL;
   if (nextDepotDistance === Infinity) return first > protectedUntil;
+  if (row.depotApproach === nextDepotDistance) {
+    const depot = nextDepotAfter(distance, DEPOT_RULES, levelId, mode);
+    const clearMask = depot.side === 'left' ? 0b0011 : 0b1100;
+    return hazards.every(hazard => hazard.depotChicane
+      ? !hazard.movement && !(obstacleLaneMask([hazard]) & clearMask) &&
+        distance + (HAZARD_TRAVEL_PX - hazardRouteOffsetY(hazard) - envelope(hazard)) *
+          METERS_PER_PIXEL > Math.max(protectedUntil,
+          nextDepotDistance - depotApproachMeters(nextDepotDistance, levelId, mode)) &&
+        distance + (HAZARD_TRAVEL_PX - hazardRouteOffsetY(hazard) + envelope(hazard)) *
+          METERS_PER_PIXEL < nextDepotDistance
+      : hazardsBeforeDepot({hazards: [hazard]}, distance, nextDepotDistance,
+        protectedUntil, levelId, mode));
+  }
   return first > protectedUntil &&
     (last < nextDepotDistance - depotApproachMeters(nextDepotDistance, levelId, mode) ||
       first > nextDepotDistance + DEPOT_RULES.exitMeters);
@@ -349,6 +433,7 @@ function composeTrackIntermediates(rows, distance, random, levelId, mode, speed,
   let requestedIntermediates = 0;
   for (let i = 0; i < rows.length - 1; i++) {
     const previous = rows[i], next = rows[i + 1];
+    if (previous.depotApproach || next.depotApproach) continue;
     const suppressBeta = shouldSuppressBetaBetweenAlpha(previous, next, rows[i + 2]);
     const previousBlocked = previous.hazardLanes ?? TRACK_LANES.filter(lane => !previous.safeLanes.includes(lane));
     const nextBlocked = next.hazardLanes ?? TRACK_LANES.filter(lane => !next.safeLanes.includes(lane));
@@ -377,7 +462,7 @@ function composeTrackIntermediates(rows, distance, random, levelId, mode, speed,
       if (!sharedAlphaBlock) positions.push({lane: 1, offsetX: 36});
       const movers = [previous, next].flatMap(row => row.hazards.filter(hazard => hazard.movement));
       const centralMoverWindow = movers.length > 0 && movers.every(usesTimedMoverLanes);
-      const filler = allowFillers && (slot === 0 || previous.baselineRhythm || mode === 'normal') &&
+      const filler = allowFillers &&
         (!movers.length || centralMoverWindow);
       const activeProfile = challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId);
       const palette = filler ? activeProfile.obstaclePalette ?? activeProfile.fillerHazardFamilies : [];
@@ -387,7 +472,7 @@ function composeTrackIntermediates(rows, distance, random, levelId, mode, speed,
         : [BETA_HAZARD_KIND];
       const offset = trackBalance.laneSpacingPx / 4 * (0.5 + roll / 2);
       const firstLane = Math.floor(roll * TRACK_LANES.length);
-      const fillerLanes = mode === 'normal' && allowFillers && sharedAlphaBlock
+      const fillerLanes = allowFillers && sharedAlphaBlock
         ? [...new Set([...positionLanes, ...previousBlocked.filter(lane => nextBlocked.includes(lane))])]
         : positionLanes;
       const fillerPositions = [...fillerLanes.slice(firstLane), ...fillerLanes.slice(0, firstLane)]
@@ -455,15 +540,9 @@ export const WORST_CASE_LANE_CLEAR_SECONDS = laneClearTimeSeconds({
   load: 1, capacity: 1, handling: WORST_CASE_HANDLING,
   laneSpacing: LANE_SPACING_PX, clearDistance: MAX_HAZARD_HIT_X,
 });
-/** Best case: every chassis with maximum Precision Steering and an empty hold, zero reaction time. */
-export const BEST_CASE_LANE_CLEAR_SECONDS = Math.min(...Object.keys(GAME_BALANCE.vehicles).map(chassis => {
-  const precision = 'hand_precision';
-  const stats = loadoutStats({cargoCapacityRank: 0, ownedModules: {[precision]: MAX_MODULE_LEVEL},
-    shipStates: {[chassis]: {equippedModuleIds: [precision]}}}, chassis);
-  return laneClearTimeSeconds({load: 0, capacity: stats.capacity, handling: stats.handling,
-    loadRelief: stats.loadRelief, vehicleMultiplier: stats.vehicleSteeringMultiplier,
-    laneSpacing: LANE_SPACING_PX, clearDistance: MAX_HAZARD_HIT_X});
-}));
+/** The same empty, max-steering Swift used for certification, without reaction time. */
+export const BEST_CASE_LANE_CLEAR_SECONDS = laneClearTimeSeconds({...baselineReference,
+  laneSpacing: LANE_SPACING_PX, clearDistance: MAX_HAZARD_HIT_X});
 /** Reaction padding added to every row gap on top of the best-case clear time. */
 export const ROW_REACTION_SECONDS = trackBalance.rowReactionSeconds;
 /** Gap time between hazard rows as a multiple of the best-case clear time. */
@@ -471,8 +550,8 @@ const ROW_GAP_MARGIN_AT_START = trackBalance.rowGapMargin.start;
 const ROW_GAP_MARGIN_AT_END = trackBalance.rowGapMargin.end;
 
 /**
- * Reserve the full staggered collision envelope plus time for the best possible truck to clear the
- * widest hazard. Callers add ROW_REACTION_SECONDS of travel; openness is certified geometrically.
+ * Reserve the full staggered collision envelope plus time for the validation Swift to clear the
+ * widest hazard. Callers add ROW_REACTION_SECONDS of travel; live certification uses the same build.
  */
 export function rowSpacingAtSpeed(speed, mode = 'normal', distance = 0) {
   if (!Number.isFinite(speed) || speed <= 0) throw new Error('Scroll speed must be positive');
@@ -1134,6 +1213,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     const added = steps.flatMap(step => step.rows).map(physicalRow);
     const sequence = [...laneOpenHistory().map(physicalRow), ...added];
     for (let end = Math.max(STRAIGHT_RUN_ROWS, sequence.length - added.length + 1); end <= sequence.length; end++) {
+      if (sequence.slice(end - STRAIGHT_RUN_ROWS, end).some(row => row.depotApproach)) continue;
       if (hasStraightRoute(sequence.slice(end - STRAIGHT_RUN_ROWS, end))) return true;
     }
     return false;
@@ -1247,7 +1327,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       ? {...row, intermediates: seam.row.intermediates} : row);
     const proposed = rows.map((row, index) => ({...row, plannedDistance: positions[index],
       encounterId: encounter, family: row.family ?? family,
-      emitted: row.emitted ?? fitsDepot(row, positions[index])}));
+      emitted: row.emitted !== false && fitsDepot(row, positions[index])}));
     const allRows = [...prior, ...proposed];
     const spans = new Map(context.bodies.filter(body => body.hazard.sideObstacleId).map(body => [
       body.id, {start: body.sourceDistance, last: body.sourceDistance +
@@ -1282,7 +1362,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     // Short clear runs stay accepted only where a relaxed connected fallback already committed them.
     const shortKey = violation => `${violation.lane}@${Math.round(violation.distance * 1e3)}`;
     const waivedShort = new Set(context.waivedShort ?? []);
-    const rhythmic = rows.some(row => row.baselineRhythm);
+    const rhythmic = rows.some(row => row.baselineRhythm || row.depotApproach);
     const acceptable = history.violations.every(violation => violation.short &&
       (relaxMinimumClear || rhythmic || waivedShort.has(shortKey(violation))));
     if ((relaxMinimumClear || rhythmic) && acceptable) {
@@ -1625,6 +1705,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   });
   const compose = (source, distance, family, variant, addSide, sideVariant = 0,
     ordinalStart = rowOrdinal, bodies = structures) => {
+    if (source.some(row => row.hazards.some(hazard => hazardDefinition(hazard.kind).roadside &&
+      (![0, 3].includes(hazard.lane) || (hazard.offsetX ?? 0) !== 0)))) return null;
     if (family === 'moving_intercept') addSide = false;
     if (family === 'static_chicane' && !hasStaticChicanePinchReversal(source)) return null;
     const positions = [];
@@ -1633,6 +1715,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       positions.push(cursor);
       cursor += row.spacingPx * METERS_PER_PIXEL;
     }
+    if (mode === 'continuous' && source.some((row, phase) =>
+      row.hazards.some(hazard => hazard.kind === 'forklift' && hazard.movement) &&
+      !continuousWindowEligible({start: positions[phase]}))) return null;
     const preemptiveReservations = [...reservations.values()]
       .flatMap(reservation => reservation.moverReservations ?? []);
     const paired = levelId === 'level2' && family === 'moving_intercept' &&
@@ -1680,6 +1765,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     }
     const forbiddenStatic = (hazard, at) => preemptiveReservations.some(reservation =>
       staticIntersectsMoverAtRow(hazard, at, reservation, levelId, mode));
+    if (source.some((row, phase) => row.hazards.some(hazard =>
+      (hazard.sideObstacle || hazardDefinition(hazard.kind).roadside) &&
+      forbiddenStatic(hazard, positions[phase])))) return null;
     source = source.map((row, phase) => {
       const hazards = [];
       for (const hazard of row.hazards) {
@@ -1803,7 +1891,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             sideObstacleId: `${seed}:${levelId}:${mode}:pinch:${ordinal}:${hazard.lane}`} : hazard);
           continue;
         }
-        if (hazard.movement || hazard.moverCompanion || hazard.pinch) return null;
+        if (hazard.movement || hazard.moverCompanion || hazard.pinch ||
+            hazard.sideObstacle || hazardDefinition(hazard.kind).roadside) return null;
         // Recompose occupied gate positions into the remaining native lane slots;
         // compatible interior obstacles are never cleared along with an edge.
         const replacements = TRACK_LANES.map(lane => ({...hazard, lane}))
@@ -1840,7 +1929,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
     if (plannedPressure.rows.some(row => row.emitted !== false &&
         [...row.hazards, ...(row.intermediates ?? [])].some(hazard => incomingWindows.some(window =>
           staticIntersectsMoverReservation(hazard, row.plannedDistance, window))))) return null;
-    return {rows, body, positions, endDistance: cursor,
+    return {rows: rows.map((row, phase) => depotApproachRow(row, positions[phase], levelId, mode)),
+      body, positions, endDistance: cursor,
       ...(moverReservations.length ? {protectedMoverWindows: moverReservations} : {})};
   };
   const finishNative = (composed, family, distance, approach, states, context, encounter) => {
@@ -1881,8 +1971,10 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       (index + lane) % candidate.rows.length);
     for (const phase of order) {
       const row = candidate.rows[phase];
+      if (row.depotApproach) continue;
       if (row.hazards.some(hazard => hazard.movement)) continue;
       const distance = candidate.positions[phase];
+      if (!continuousWindowEligible({start: distance})) continue;
       const direction = (lane % 2 ? -1 : 1) * (mirrored ? -1 : 1);
       const movement = {minOffsetPx: 0, maxOffsetPx: LANE_SPACING_PX,
         speedPxPerSecond: moving.speedPxPerSecond, direction,
@@ -2285,8 +2377,10 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         [lanes[index], lanes[swap]] = [lanes[swap], lanes[index]];
       }
       const unpublishedRows = new Set(unpublished);
-      // Single-row statics in rows not yet published may give way to a quota sweeper; it occupies the lane anyway.
-      const clearable = (row, hazard) => unpublishedRows.has(row) && !Object.isFrozen(row) &&
+      const retainedRows = new Set(plannedPressure.rows.map(row => row.plannedDistance));
+      // Clearing cannot change a compacted history prefix or an already committed bridge witness.
+      const clearable = (row, hazard) => unpublishedRows.has(row) && retainedRows.has(row.plannedDistance) &&
+        !Object.isFrozen(row) && !candidate.witness?.length && !obligations.length &&
         !hazard.movement && !hazard.motionBounds && !hazard.continuation && !hazard.spanRows &&
         !hazard.sideObstacle && !hazard.pinch && !hazard.guardrail && hazard.kind !== 'guardrail';
       const blockersIn = candidateLane => {
@@ -2307,6 +2401,16 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       const fitsLane = (candidateLane, clearing = false) => {
         const blockers = blockersIn(candidateLane);
         if (clearing ? blockers.some(blocker => blocker.fixed) : blockers.length) return false;
+        if (blockers.length) {
+          const removed = new Set(blockers.map(blocker => blocker.hazard));
+          const rows = known.map(row => ({...row, emitted: fitsDepot(row, row.plannedDistance),
+            hazards: row.hazards.filter(hazard => !removed.has(hazard)),
+            intermediates: row.intermediates.filter(hazard => !removed.has(hazard)),
+            sweepers: row === source ? [sweeperForLane(candidateLane)] : row.sweepers}));
+          const projection = projectPhysicalEvents(rows, {levelId, mode});
+          if (advancePressureHistory([0, 0, 0, 0], projection.events, {mode})
+            .violations.some(violation => !violation.short)) return false;
+        }
         if (publishedHistory.some(row => row.cargoLanes.includes(candidateLane) &&
           overlaps(row, 0, PICKUP_RADIUS_PX))) return false;
         const escape = row => (row.safePickupLanes?.length ? row.safePickupLanes : row.safeLanes)
@@ -2314,6 +2418,9 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         return [open => open < candidateLane, open => open > candidateLane].some(side =>
           alongside.every(row => escape(row).some(side)));
       };
+      const sweeperForLane = lane => ({kind: 'sweeper', lane, offsetX: 0,
+        offsetY: sweeperBalance.spawnOffsetPx, placement: 'alpha', streetSweeper: true,
+        movement: {axis: 'forward', forwardSpeedRatio: sweeperRatio}});
       const sideOf = candidateLane => candidateLane < TRACK_LANES.length / 2 ? 'left' : 'right';
       // Sweepers alternate halves; only a sector about to miss its quota may repeat a side.
       const fresh = candidateLane => sideOf(candidateLane) !== lastSweeperSide;
@@ -2328,9 +2435,14 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         row.hazards = row.hazards.filter(entry => entry !== hazard);
         row.intermediates = row.intermediates.filter(entry => entry !== hazard);
       }
-      source.sweepers = [{kind: 'sweeper', lane, offsetX: 0, offsetY: sweeperBalance.spawnOffsetPx,
-        placement: 'alpha', streetSweeper: true,
-        movement: {axis: 'forward', forwardSpeedRatio: sweeperRatio}}];
+      source.sweepers = [sweeperForLane(lane)];
+      const actualRows = new Map(known.map(row => [row.plannedDistance, row]));
+      plannedPressure = compactPressure(projectPressure([], [], null, {...plannedPressure,
+        rows: plannedPressure.rows.map(row => {
+          const actual = actualRows.get(row.plannedDistance);
+          return actual ? {...row, hazards: actual.hazards, intermediates: actual.intermediates,
+            sweepers: actual.sweepers} : row;
+        })}));
       // Pickups would sit under the truck, so its lane is withdrawn from cargo in the rows it overlaps.
       for (const row of nearby.filter(row => overlaps(row, 0, PICKUP_RADIUS_PX))) {
         row.cargoLanes = row.cargoLanes.filter(open => open !== lane);
@@ -2469,7 +2581,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       const edgeDemand = composed => [composed, ...(composed.witness ?? [])]
         .some(step => step.rows.some(demandsEdgeLane));
       // Long chunks must not carry a middle-lane-only stretch past the limit either.
-      const edgeOk = composed => edgeDemand(composed) || !edgeDue &&
+      const edgeOk = composed => composed.rows.some(row => row.depotApproach) || edgeDemand(composed) || !edgeDue &&
         composed.positions.at(-1) - edgeAnchor < edgeDemandMeters;
       const approachOpen = Boolean(pending.at(-1)) && fitsDepot(previousRow, pending.at(-1).lastDistance);
       const traceProposal = trace ? (family, stage, composed) => {
@@ -2480,7 +2592,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           {levelId, mode, witnessStartRow: composed.rows.length})});
       } : null;
       const proposal = (family, lane, mirror, variant, allowSide,
-        source = recipe(family, lane, mirror, spacing)) => {
+        source = recipe(family, lane, mirror, spacing), fallback = false) => {
         if (!sideBodiesFit) allowSide = false;
         progress();
         for (let sideVariant = 0; sideVariant < (allowSide ? 2 : 1); sideVariant++) {
@@ -2489,10 +2601,12 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             trace?.({type: 'rejected', stage: 'compose', distance, family});
             continue;
           }
-            if (mode === 'normal' && family !== 'moving_intercept' && !relaxMinimumClear &&
-              next.rows.every((row, phase) => fitsDepot(row, next.positions[phase]))) {
-            next = {...next, rows: shapeBaselineRows(next.rows, openLaneHistory, rowOrdinal)};
-            if (next.rows.some(row => !row.safeLanes.length)) continue;
+          {
+            next = {...next, rows: shapeBaselineRows(next.rows.map((row, phase) =>
+              ({...row, emitted: fitsDepot(row, next.positions[phase])})), openLaneHistory, rowOrdinal, mode)};
+            if (next.rows.some(row => row.emitted !== false && (!row.safeLanes.length ||
+                (obstacleLaneMask([...row.hazards, ...row.intermediates]) &
+                  row.requiredLaneMask) !== row.requiredLaneMask))) continue;
             if (next.protectedMoverWindows?.length) {
               next.rows = next.rows.map((row, phase) => {
                 const conflicting = hazard => next.protectedMoverWindows.some(window =>
@@ -2519,7 +2633,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             }
           }
           let overlayApplied = false;
-            if (schedule.due && movingEligible &&
+            if (schedule.due && movingEligible && !fallback &&
               !next.rows.some(row => row.hazards.some(hazard => hazard.movement))) {
               const streaks = plannedPressure.history?.streaks ?? plannedPressure.streaks;
               const requiredThreatMask = mode === 'continuous'
@@ -2555,6 +2669,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             trace?.({type: 'rejected', stage: 'resolvedBody', distance, family});
             continue;
           }
+          composed.fallback = fallback;
           const augmented = augmentCandidate(composed, family, distance, composed.witness, pacing);
           if (!augmented) traceProposal?.(family, 'rejectedPressure', composed);
           return augmented;
@@ -2629,7 +2744,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         } else pacing = priorPacing;
       }
       const belowMinimumSideQuota = sideQuotaShort;
-      if (!candidate && mode === 'normal' && (levelId === 'level2' || pacing !== 'recovery') &&
+      if (!candidate && (mode === 'continuous' || levelId === 'level2' || pacing !== 'recovery') &&
           !schedule.due && !structures.length && !belowMinimumSideQuota) {
         const activeProfile = challengeProfile(sector.challengeProfileId);
         const motifs = activeProfile.motifs;
@@ -2834,7 +2949,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           Number(streaks[b] === 1) - Number(streaks[a] === 1) || streaks[a] - streaks[b]);
         const fallback = levelId === 'level2' && mode === 'normal'
           ? [...TRACK_LANES.map(lane => ['single_pressure', lane]),
-            ...TRACK_LANES.map(lane => ['risk_reward', lane])]
+            ...TRACK_LANES.map(lane => ['risk_reward', lane]),
+            ...(urgent.length > 1 ? openings.map(lane => ['split_gate', lane]) : [])]
           : [...openings.map(lane => ['split_gate', lane]),
             ...(urgent.length === 1 ? openings.map(lane => ['single_pressure', lane])
               : urgent.length ? [] : [0, 3, 1, 2].map(lane => ['single_pressure', lane]))];
@@ -2844,7 +2960,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
           try {
             for (const [family, lane] of fallback) {
               const composed = proposal(family, lane, false, lane, false,
-                recipe(family, lane, false, spacing));
+                recipe(family, lane, false, spacing), true);
               if (!composed) continue;
               // Prefer a certified fallback that also closes straight runs; never drop the connected route.
               if (opensStraightRun([composed, ...(composed.witness ?? [])])) {
@@ -2872,7 +2988,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             const lane = variant % TRACK_LANES.length;
             const mirror = variant >= TRACK_LANES.length;
             const source = recipe('moving_intercept', lane, mirror, spacing, distance, false, true);
-            const composed = proposal('moving_intercept', lane, mirror, variant, false, source);
+            const composed = proposal('moving_intercept', lane, mirror, variant, false, source, true);
             if (!composed || opensStraightRun([composed, ...(composed.witness ?? [])])) continue;
             candidate = {family: 'moving_intercept',
               signature: signatureFor('moving_intercept', composed.rows), ...composed, fallback: true};
@@ -2886,7 +3002,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
             for (const lane of recoveryLanes) {
               attempts++;
               const source = recipe('single_pressure', lane, false, spacing + extraSpacing);
-              const composed = proposal('single_pressure', lane, false, lane, false, source);
+              const composed = proposal('single_pressure', lane, false, lane, false, source, true);
               if (!composed || opensStraightRun([composed, ...(composed.witness ?? [])])) continue;
               candidate = {family: 'single_pressure', signature: signatureFor('single_pressure', composed.rows),
                 ...composed, fallback: true};
@@ -2947,13 +3063,11 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         row.moverReservations = row.hazards.filter(hazard => hazard.movement)
           .map(hazard => hazard.moverReservation ?? moverReservation(hazard, distance, levelId, mode)).filter(Boolean);
         if (fitsDepot(row, distance)) {
-          if (demandsEdgeLane(row)) lastEdgeDemandDistance = distance;
-          const bypassMask = row.moverReservations.reduce((mask, reservation) =>
-            mask | (1 << reservation.bypassLane), 0);
-          const resetMask = bypassMask | (row.moverReservedMask ?? 0);
+          if (demandsEdgeLane(row) || row.depotApproach) lastEdgeDemandDistance = distance;
           const openMask = (~obstacleLaneMask([...row.hazards, ...row.intermediates])) & 0b1111;
           row.openLanesMask = openMask;
-          openLaneHistory = [...openLaneHistory.map(mask => mask & ~resetMask), openMask & ~resetMask].slice(-clearLimit);
+          openLaneHistory = [...openLaneHistory, openMask].slice(-clearLimit);
+          if (row.depotApproach) openLaneHistory = [];
         }
         for (const body of structures) {
           const hazard = row.hazards.find(hazard => hazard.sideObstacleId === body.hazard.sideObstacleId);
@@ -3003,7 +3117,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       for (const row of candidate.rows) {
         const rowDistance = row.plannedDistance;
         const rowProfile = challengeProfile(sectorAtDistance(rowDistance, levelId, mode).challengeProfileId);
-        if (!rowProfile.allowEnergyOrb || !fitsDepot(row, rowDistance) ||
+        if (!rowProfile.allowEnergyOrb || row.depotApproach || !fitsDepot(row, rowDistance) ||
             (mode === 'normal' && rowDistance >= route.finishDistanceMeters)) continue;
         const [minimum, maximum] = rowProfile.orbSpawnIntervalM;
         if (nextOrbDistance === null) nextOrbDistance = rowDistance + minimum +
@@ -3020,6 +3134,8 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         nextOrbDistance = rowDistance + minimum + orbRandom() * (maximum - minimum);
       }
       placeStreetSweepers(candidate);
+      refreshSignatures();
+      candidate.signature = signatureFor(candidate.family, candidate.rows);
       // Only a selected, fully certified candidate may bind subsequent choices.
       // The exact seeded sources and proof results are reused without new modifiers.
       obligations.push(...(candidate.witness ?? []));

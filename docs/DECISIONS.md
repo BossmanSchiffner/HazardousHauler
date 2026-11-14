@@ -1,6 +1,7 @@
 | Title/input/audio | No load-in screen: ordinary startup opens Main Menu directly, with no title video or image. First touch classifies mobile; mouse/key classifies desktop. Audio remains locked until the first real interaction. `BG_Music.mp3` loops only for Normal runs at 0.35; SFX master is 0.525 (+50%). Preserve the shared context, 12-voice cap and bounded lifecycle. |
 | Full viewport / 7 November | Supersedes the earlier FIT canvas policy: Phaser RESIZE fills the browser viewport without CSS canvas stretching. The scene retains logical 390 x 844 gameplay geometry and responsive camera framing. Shared page styles use 100dvh, viewport-fit=cover, no outer safe-area padding, and #05080f. Mobile 390 x 844 and desktop 1280 x 800 canvas/video coverage were observed; keyboard and pointer dismissal preserved storage. |
 | Slice 5 feedback | Reuse Phaser's shared Web Audio context/master destination with real pointer/keyboard unlock. Engine noise remains removed; high-quality engine audio deferred. Each accepted crate plays C4/D4/E4/G4/C5; Hull/shield hits use sub-bass and filtered-noise crashes; held wall grinds use rate-limited metal scrapes; completed Depot arrival uses a filtered whoosh and two-note chime. Once-only air brake, confirmed button/tile clicks and shared effects compression remain. Browser haptics 15/30/80-total-double/200 ms for lane/pickup/impact/dock; no native dependency or save preference. Twelve-voice cap and bounded lifecycle remain; actual listening/phone acceptance pending |
+| HUD and Depot service / 14 November | Remove the in-run Handling percentage; show centered Depot Pass Bonus and Close Call Bonus on separate lines. Normal runs allow one paid repair total, shared across every Depot and preserved after Continue; new runs reset that allowance. Endless repair rules remain unchanged. Keep modal content measured and scrollable, and bound button text to its actual control. |
 # Hazardous Haul - Active Decisions and Overrides
 
 Updated 4 November 2026. Latest explicit owner decisions outrank superseded
@@ -28,14 +29,28 @@ See [design](GAME_DESIGN.md), [architecture](ARCHITECTURE.md),
 
 ## Overrides preserved from current owner work
 
+### Neon Gridway readability (14 November 2026)
+
+Level 4 keeps its dark-purple shoulders while the playable road has an ambient
+brightness floor, cyan curb rails and muted blue-grey lane marks. The separate
+hex grate overlay is disabled while the complete base road artwork, including
+its central neon pipes and grid, remains visible. All runs retain the
+complete portrait course with plain dark unused side areas, not repeated scenery.
+Cargo uses a soft green neon drop shadow and a subtle corner sparkle in every
+theme to distinguish collectibles from obstacles. Per the owner's
+follow-up, hazards have no surrounding rings, outlines or halos, including the
+Level 4 energy orb's outer bloom. Small amber warning lights remain on obstacles.
+Reuse the existing visual pool slots;
+no geometry, rewards, player headlights or spotlight cone changes.
+
 | Area | Current override |
 | --- | --- |
 | Route topology | Owner update (7 November): Level 1 ends at 2,000 m, with Depots at 500/1,000/1,500 m. Level 2 ends at 3,000 m, with Depots at 500/1,000/2,000 m. Each retains four sectors; both Sector 3 checkpoints are at 1,000 m. Endless cadence, saved progress and reward amounts are unchanged. |
 | Finish clearance | Normal runs remove all roadway hazards at 10 m before the level finish and do not spawn hazards at or beyond that point. Continuous Run has no finish boundary; cargo and Blueprint pickups are unchanged |
-| Pause End Run | The pause menu can end either run after confirmation. Show banked-this-run coins and the unbanked amount at risk. Normal loses the unbanked hold/bonuses; Endless uses the existing 25% wreck retention, not a mid-run cash-out. Wallet funds remain secure |
-| Run navigation | Four home buttons: Normal Run / Endless Run / Garage & Upgrades / How-To. Owner confirmed level cards with titles above paired Sector 1 and Checkpoint - Sector 3 tabs; enabled tabs launch immediately from the level list. No Normal mode/start/reward confirmation screens. Checkpoints stay grey/locked per level; non-playable Coming Soon cards for Levels 3-5 only. Endless overview gives only endless increasing speed, no mid-run banking, passed-Depot +10% cargo bonus capped +100%, and stopping to cash out/end; no starting settings or technical pacing. Existing Level 1 completion unlock and internal `continuous` gameplay rules are unchanged |
-| Active modes / speed | Normal campaign only per level; separate Continuous Run unlocked after Level 1. Single MAX_TRACK_SPEED 680 owner. Smooth campaign sector-start interpolation: L1 320/350/380/410, L2 350/380/410/440; L4S4 680 is future-only. Continuous starts 0 m with L1S2 challenge/pickup baseline, Mid-Day Industrial, speed 350 +40 per 1,000 m capped 680. No inherited per-level Overdrive density/spacing stages; three-clear-event baseline. Saved Overdrive records stay historical |
-| Continuous economy | Depots every 1,000 m; each passed Depot +10 additive percentage points capped at 100%. Stopped End Run cashes out terminally; stopped Skip restores equipped shields and continues without banking. Center bypass never recharges. No bank-and-continue/repair. Wreck retains floor(25% current cargo Coins), no Depot bonus. Only current hold at settlement, not lifetime collected value; exclude Blueprint/distance/completion/no-damage rewards and campaign progress |
+| Pause End Run | The pause menu can end either run after confirmation. Show banked-this-run coins and the unbanked amount at risk. Normal loses the unbanked hold/bonuses; Endless loses all unbanked cargo unless the player cashes out at a Depot. Wallet funds remain secure |
+| Run navigation | Four home buttons: Normal Run / Endless Run / Garage & Upgrades / How-To. Owner confirmed level cards with titles above paired Sector 1 and Checkpoint - Sector 3 tabs; enabled tabs launch immediately from the level list. No Normal mode/start/reward confirmation screens. Checkpoints stay grey/locked per level. Endless overview explains 460 px/s start, +20 px/s each 1,000 m to 620, 2,000 m Depot cadence, the repeating four-stage environment cycle, terminal Depot cash-out, and total cargo loss on crash. Existing Level 1 completion unlock and internal `continuous` gameplay rules are unchanged |
+| Active modes / speed | Normal campaign only per level; separate Endless Run (`continuous`) unlocked after Level 1. Global MAX_TRACK_SPEED remains 700. Smooth campaign sector-start interpolation: L1 320/350/380/410, L2 350/380/410/440; Level 4 follows its authored route speeds. Endless starts at 0 m and 460 px/s, gaining 20 every 1,000 m to its own 620 cap. Saved Overdrive records stay historical |
+| Continuous economy | Depots every 2,000 m; each passed Depot +10 additive percentage points capped at 100%. Cash-out at a Depot ends the run; Skip continues without banking and restores equipped shields. No bank-and-continue/repair. A crash forfeits all cargo. Only current hold at cash-out, not lifetime collected value; exclude Blueprint/distance/completion/no-damage rewards and campaign progress |
 | Themes | Level 1 Industrial / Level 2 Dustlands; sector position drives difficulty/cargo, not artwork |
 | Side hazards | 3-6% emitted collision bodies, target 4.5%; one-lane modular walls; opposite starts staggered |
 | Chicanes | Entry + full middle + exit, approved extra 54 px transition; mirrored entry artwork Lane 0 flipped / Lane 3 unflipped |
@@ -46,7 +61,7 @@ See [design](GAME_DESIGN.md), [architecture](ARCHITECTURE.md),
 | Obstacle purge | Owner selected active hazard-kind remapping and normal recertification, not merely reskinning unsupported hitboxes. Container -> Barrier; machinery/wreckage -> Rock Slab; procedural future/fallback pool entries removed. Preserve authored 126 rows / 252 bodies, quotas and retired-pylon policy |
 | Challenge boundary / fillers | Structural families live in challengeProfiles.js and are selected by challengeProfileId, independently from visualThemeId. Industrial fillers use existing Barrier/Rock Slab/Signal Cabinet art; no pylon reinstatement |
 | Menu text centering | Latest owner centers all menu/card/tile text in its padded region, keeping two-column truck cards with text centered in its column beside the image. Upgrade text shares its image center line. Title/subtitle button and tile stacks are vertically centered; coin-image amounts stay grouped. Shared card title origin is center/top at the same 16 px top / 12 px side inset. Preserve 12 px gaps, 35%/30% peeks, measured-header accumulator, prices, saves and gesture protections |
-| Fairness reference | Stock Standard at half live capacity, 0.8 s reaction, >=6 px connected clearance; do not restore obsolete universal full-load guarantees |
+| Fairness reference | Empty Swift Runner with maximum Precision Steering, 0.8 s reaction, >=6 px connected clearance at 30/60/120 Hz; stock/loaded trucks are not generation gates |
 | Persistence / Slice 6 | Preserve schema 11 and the deployed key. Hint seen-state commits only after save success. Startup recovery reports an error toast; preserve raw unreadable saves and earlier distinct backups before allowing a replacement. Failed backup blocks writes until backup retry succeeds; failed reads block writes until a successful reload. Do not reset tester storage. The stale five-socket/Traction Cleats/automatic Swift language in the slice prompt does not override the current six-slot roster, future-gated grandfathered Impact Pulse or six-Blueprint Swift purchase |
 | Slots | Six actual slots per ship; Standard starts two, Swift three; owner chose all six visible in one compact socket row |
 | Swift | Current config: six Blueprints after Level 2 unlock, 1.30x steering, -4 cargo capacity |
@@ -57,13 +72,14 @@ See [design](GAME_DESIGN.md), [architecture](ARCHITECTURE.md),
 | Garage clarity | Matching supplied sprites in cards, details and purchase confirmations; simple descriptions and exact current/next/max bonuses. Separate titles/wallets, readable card padding and stats below truck art. Presentation only: preserve all prices, progression gates, effects and saves |
 | Lighting | Level 1 Dawn/Dawn/Mid-Day/Mid-Day; Level 2 Dawn/Mid-Day/Mid-Day/Dusk. Reserve Night for future levels. Keep softer 84 x 220 headlights/strobes/pools and 1.8 s visual bursts; no pace changes |
 | Slice 5 feedback | Reuse Phaser's shared Web Audio context/master destination with real pointer/keyboard unlock. Engine noise remains removed; high-quality engine audio deferred. Each accepted crate plays C4/D4/E4/G4/C5; Hull/shield hits use sub-bass and filtered-noise crashes; held wall grinds use rate-limited metal scrapes; completed Depot arrival uses a filtered whoosh and two-note chime. Once-only air brake, confirmed button/tile clicks and shared effects compression remain. Browser haptics 15/30/80-total-double/200 ms for lane/pickup/impact/dock; no native dependency or save preference. Twelve-voice cap and bounded lifecycle remain; actual listening/phone acceptance pending |
-| Low-light cargo | Dusk/Night cargo art and embedded shadows remain readable above the road mask with 230/255 neutral brightness and 90% pulsing blue/gold glows; preserve daylight and rejected-pickup cues |
+| Low-light cargo | Dusk/Night cargo art and embedded shadows remain readable above the road mask with 230/255 neutral brightness and 90% pulsing green glows; pooled corner sparkles preserve rejected-pickup cues |
 | Pickup labels | No coin/value/load annotations beneath road cargo in normal play or sandbox; keep the actual pickup visual, HUD totals and collection feedback |
 | Collectible size | Road cargo, Blueprints and converted reward bodies are another 5% smaller (0.95 x 0.95 = 0.9025 of pre-reduction presentation); separate under-pickup shadow/glow layers retain their original size and offset. No change to collision ranges, trailer or UI art |
 | Run truck size / Large pickup color | Standard/Swift active-run truck artwork is 5% larger, preserving trim selection, hitboxes, suspension and menu previews. Large cargo core changes cyan to orange during cached texture baking; neutral casing/alpha and Blueprint artwork stay unchanged |
 | Level 2 movers / latest owner revision (2 November) | **Supersedes the Slice 4 Level 2 Sweeper.** Level 2 generates lateral Forklifts only: 0.5 s beacon warning, then patrol three contiguous lane centers where static geometry permits, otherwise two. Level 3 will introduce the forward/vertical mover as a StreetSweeper with its own sprite; Level 3 is not implemented or authorized. Retain the Sweeper hazard definition, motion projection, art entry, pool bound and unit fixtures for that future owner, but never select it in Level 2. Under the 7 November pacing update, Sector 2 starts at 500 m; eligible quota intervals are 500-1,000 / 1,000-2,000 / 2,000-3,000 m, with 4-14 bodies, 40 m separation and connected certification unchanged |
 | Surgical mover placement / latest 7 November revision | Supersedes broad warning/travel-window exclusions: evaluate the canonical predicted mover footprint at each static row's arrival time with a 15 px visual gap. Relocate conflicting single slots to adjacent free lanes or omit only that slot; do not clear surrounding rows. Level 2 offers paired candidates first, with crossing patrols restricted to lanes 1 and 2 and static pressure retained in lanes 0 and 3. Rule A and Rule C remain active outside specific crossing rows; no forecast screen-clearing zones or permanently empty outer bypass. Beta additions and baseline fillers share row-local checks. Level 1 generation, 25.08 px cab width, and 30/60/120 Hz connected >=6 px proofs are preserved. |
-| Static baseline density / latest 7 November correction | All Normal sectors use the shared entry-oriented sweep, with certified Alpha/Beta composition and local mover overrides. Normal Beta slots are one-third, one-half and two-thirds; Continuous keeps its previous two-slot timing. Neutral fillers can use lanes blocked by both endpoint Alphas while pressure Betas retain shared-open-lane and sandwich/squeeze checks. Three clear rows are allowed, then row four must receive pressure. Normal sampling retires the six-row held-opening offset-pair template. Density, physical clearance and mandatory Depot/finish safety gates remain unchanged. |
+| Static baseline density | Normal and Endless use certified Alpha/Beta composition and local mover overrides. Both use Beta slots at one-third, one-half and two-thirds. Endless also uses the shared baseline shaping and dense motif selection. Neutral fillers can use lanes blocked by both endpoint Alphas while pressure Betas retain shared-open-lane and sandwich/squeeze checks. Connected physical clearance and mandatory Depot/finish safety gates remain unchanged. |
+| Hard three-row lane pressure | An overdue lane pulls the nearest eligible static obstacle before adding a filler. Movers and fixed structures stay intact. Reserved bypasses no longer erase clear history; recovery can override repeat avoidance and optional mover overlays, never connected >=6 px clearance. Level 2 permits a certified gate recovery when multiple lanes are overdue. Street Sweeper clearing must preserve the limit and reproject actual planning history; its slower collision body, not its whole travel window, supplies pressure. |
 | Recovery / 7 November | Restore the validated dense baseline rather than weaken its density or clearance gates. Remove unaccepted hard pair rejection, experimental road-sweep templates and speculative cargo state. Preserve current routes, sector value tables and mover safety. Four-row single-lane and adjacent-pair camping remains a diagnostic backlog item; only actual certified off-band cargo or simultaneous blockers can satisfy that diagnostic. 44 focused recovery checks passed; full-suite and final human acceptance are not claimed. |
 | Across-board sweep / subsequent 7 November acceptance | Supersedes the earlier diagnostic-only recovery status: the generated Normal courses pass the four-row lane/adjacent-pair regression over eight seeds in each complete level. Static sweeps close all adjacent bands; Level 2 production crossing courses preserve that rhythm with two static recovery rows between crossings. Paired courses have six rows and mover phases 0/3, central patrol lanes 1/2, and one safe outer bypass at a time. 41 focused checks pass, including quotas, worker replay, visual exclusion and 30/60/120 Hz >=6 px proofs. This is measured engineering acceptance, not final human playtest acceptance. |
 | Optional decisions / subsequent 7 November work in progress | Latest owner rejects a single forced slalom and requests meaningful optional cargo risk. Current unaccepted work retains safe/cargo branch histories through a common exit, caps decision-row Betas at two per lane, and uses deterministic row cargo cues without changing sector value tables. Focused decision/cargo/density checks pass (3); the mandatory combined four-row check fails (1): all eight Level 1 seeds pass, but Level 2 seed 0 has six violations at mover/decision seams. Sector 1 five-value cargo counts as a load incentive only with actual completed >=6 px pickup witnesses; later five-value cargo does not. No full cargo/mover/worker suite, build or final human acceptance is claimed for this revision. The earlier accepted sweep evidence does not certify the current decision-route revision. |
@@ -99,11 +115,10 @@ gate are complete. Broader gates and human/device checks remain
 pending. History below records older checkpoints, not the active
 window or permission to waive quotas, pressure or clearance.
 
-1. **Depot/repair proposal versus implementation.** The earlier v4 roadmap asked
-   for one bank per run, service without skip bonus, a finite paid-repair budget
-   and one collectible repair/voucher. Current code still banks/repairs per visit,
-   has no free-repair pickup; Continuous uses its separately authorized cash-out/pass rules. Record this as
-   an unfinished workstream requiring a dedicated owner-approved behavior task.
+1. **Depot/repair proposal versus implementation.** Banking remains available at
+   each Normal Depot, while one paid repair is allowed for the entire Normal run.
+   No free-repair pickup/voucher is implemented. Endless retains its separately
+   authorized cash-out/pass rules and has no repair service.
 2. **Future tiers versus Reinforced Cargo.** Tier 2 was proposed after genuine
    Level 3 completion and Tier 3 after Level 7, with prior-line mastery and one
    occupied slot per line. Current Reinforced Cargo is already available after
@@ -119,7 +134,7 @@ window or permission to waive quotas, pressure or clearance.
    while its stubbed full-clear regression passes. Real timing/load paths require
    investigation. Never silently enable God or waive collisions to obtain a pass.
 5. **Future catalog reachability.** Impact Pulse has a live effect/legacy saves
-   but new purchases require unimplemented Level 4. Armoured/Prospector/Apex and
+   but new purchases require unimplemented Level 4. Apex and
    many catalog modules are future/tested scaffolding, not disposable dead code
    or permission to make them playable.
 6. **Concurrent tabs and receipt growth.** Hint failure handling and unreadable
@@ -177,7 +192,7 @@ decisions, not dependencies of normal play.
 
 Planned Apex boosts only beneficial numeric effects of equipped modules by 25%;
 not base stats, drawbacks or payouts. Its prerequisites/BP substitution helpers
-remain tested. Future Prospector/Apex utility and viable earlier chassis need
+remain tested. Future Apex utility and viable earlier chassis need
 their own product decision before implementation.
 
 ## Maintenance rule

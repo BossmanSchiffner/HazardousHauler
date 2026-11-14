@@ -3,6 +3,7 @@ import {CARGO_CAPACITY_ID, WORST_CASE_HANDLING, loadoutStats} from './modules.js
 import {hazardX, movingHazardOffset, usesPotentialMoverLanes, usesTimedMoverLanes,
   hazardRouteGeometry, hazardRouteOffsetY, hazardScrollScale, LANE_CENTERS, HAZARD_ROW_ENVELOPE_PX} from './hazards.js';
 import {GAME_BALANCE} from '../data/gameBalance.js';
+import {IMPLEMENTED_VEHICLE_IDS} from '../data/catalog.js';
 import {HAZARD_TRAVEL_PX} from '../data/route.js';
 import {METERS_PER_PIXEL, routeTimeAtDistance} from './economy.js';
 
@@ -206,11 +207,16 @@ export function validateTrackSequence(rows, speed, options = {}) {
     const candidates = [];
     for (const to of rows[i].safeLanes) {
       for (const path of paths) {
-        if (Math.abs(path.lane - to) > maximumLaneChangesPerRow) continue;
+        const laneLimit = rows[i].depotApproach
+          ? GAME_BALANCE.routes.track.lanes.length / 2 : maximumLaneChangesPerRow;
+        if (Math.abs(path.lane - to) > laneLimit) continue;
         for (const delay of path.lane === to ? [0] : departureDelays) {
           const result = driveTrackTransition(rows[i - 1], rows[i], path.lane, to,
             typeof speed === 'function' ? speed(i) : speed,
-            {...options, reactionSeconds: reaction + delay, initialState: path.state});
+            {...options,
+              // The Depot warning announces the whole chicane; its successive pieces aren't new surprises.
+              reactionSeconds: (rows[i].depotApproach || rows[i - 1].depotApproach ? 0 : reaction) + delay,
+              initialState: path.state});
           if (result.completed && result.clearance >= minimumClearance) candidates.push({lane: to, lanes: [...path.lanes, to],
             state: result.state,
             clearance: Math.min(path.clearance, result.clearance)});
@@ -240,7 +246,7 @@ export function validateTrackSequence(rows, speed, options = {}) {
 export function supportedTrackProfiles(levelId = 'level1') {
   const steering = levelId === 'level1' ? 1 : 2;
   const profiles = [];
-  for (const chassis of ['standard', 'swift']) {
+  for (const chassis of IMPLEMENTED_VEHICLE_IDS) {
     for (const [cargoRank, rank, loadCase, nominal] of [
       [0, steering, 'full', true], [1, steering + 1, 'full', true],
       [0, 0, 'empty', false], [0, 0, 'mid', false], [0, 0, 'full', false],

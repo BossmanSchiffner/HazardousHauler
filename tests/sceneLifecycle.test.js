@@ -23,18 +23,19 @@ import {awardBlueprint, createBlueprintRun, releaseDeferredBlueprints, blueprint
 import {addModuleIcon, colorText, hazardTexture, MODULE_CAPTIONS, garageUpgradeBenefit, PALETTE, vehicleTint,
   preloadStandardHauler, STANDARD_HAULER_ART, preloadObstacleArt, OBSTACLE_ART,
   preloadSwiftRunner, SWIFT_RUNNER_ART,
+  preloadArmouredTransport, ARMOURED_TRANSPORT_ART,
   GARAGE_DISPLAY_ART, preloadGarageDisplayArt,
   GARAGE_UPGRADE_ART, preloadGarageUpgradeArt,
   preloadCollectibleArt, COLLECTIBLE_ART, syncBlueprintVisuals, syncCargoPickupVisuals, syncHaulerEffects,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y,
   SPRITE_ART_SCALE, scaleSpriteArt,
-  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo, stopHaulerExhaust,
+  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, stopHaulerExhaust,
   vehicleTexture, vehicleTrimName, addGoldPreviewSparkles,
   createSilhouetteShadow, syncSilhouetteShadow, createDepotFacility, depotFacilityHeight, SHADOW_TINT,
   createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon, addHudBacking, GUARDRAIL_ART,
   playImpactSparks} from '../src/game/rendering/industrial.js';
 import {balance} from '../src/game/data/balance.js';
-import {ENVIRONMENT_VISUALS, NEON_SHOULDER_SIGNS, resolveVisualTheme, SECTOR_LIGHTING, OVERDRIVE_LIGHTING} from '../src/game/data/environments.js';
+import {ENVIRONMENT_VISUALS, HAZARD_READABILITY, NEON_SHOULDER_SIGNS, resolveVisualTheme, SECTOR_LIGHTING, OVERDRIVE_LIGHTING} from '../src/game/data/environments.js';
 import {lightingForSector, setRoadLighting, setRoadEnvironmentVisible, startRoadBurst,
   stopRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
 import {cargoOffer, cargoTotals, collectCargo, damageCargo, createCargoTrail} from '../src/game/core/cargo.js';
@@ -53,7 +54,7 @@ import {HINTS, hintForEvent, markHintSeen} from '../src/game/core/onboarding.js'
 import {createRunContext, HELP_SECTIONS, resultTip} from '../src/game/core/playerGuidance.js';
 import {adaptiveCardMetrics, advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics, upgradeTileContentMetrics} from '../src/game/core/menuLayout.js';
 import {vehicleStatus, selectVehicle, purchaseVehicle, buyVehicleTrim, selectVehicleTrim} from '../src/game/core/vehicles.js';
-import {VEHICLES} from '../src/game/data/catalog.js';
+import {IMPLEMENTED_VEHICLE_IDS, VEHICLES} from '../src/game/data/catalog.js';
 
 // Exercise the actual scene lifecycle without requiring Phaser's browser renderer in Node.
 let savedProfile;
@@ -93,7 +94,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
     };
   } }, Geom: {Rectangle}, BlendModes: {ADD: 1}, Math: {Clamp: (value, min, max) => Math.max(min, Math.min(max, value))}},
   routeImage, releaseRouteVisual,
-  balance, depotWorldY, depotFacilityHeight, ENVIRONMENT_VISUALS, fitRoadToView() {},
+  balance, depotWorldY, depotFacilityHeight, ENVIRONMENT_VISUALS, HAZARD_READABILITY, fitRoadToView() {},
   lightingForSector, setRoadLighting, setRoadEnvironmentVisible, startRoadBurst,
   stopRoadBurst, updateRoadEnvironment,
   createSilhouetteShadow: (...args) => visualHooks.createSilhouetteShadow(...args),
@@ -103,7 +104,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   isGuardrail, guardrailContact, syncGuardrailSparks, syncGuardrailBeacon, addHudBacking,
   BUILD_ID, routeFinishDistance, movingHazardOffset, canonicalMotionAge, hazardScrollScale, continuousStageAtDistance, SLOT_MAX, steeringMultiplier,
   adjustDeveloperCoins, isDeveloperRun, markDeveloperRun, DebugManager,
-  GAME_BALANCE, MAX_TRACK_SPEED, VEHICLES,
+  GAME_BALANCE, MAX_TRACK_SPEED, IMPLEMENTED_VEHICLE_IDS, VEHICLES,
   vehicleStatus, selectVehicle, purchaseVehicle, buyVehicleTrim, selectVehicleTrim,
   adaptiveCardMetrics, advanceMenuScroll, managementLayout, measureMenuContent, MENU_SPACING, peekingCardMetrics, responsiveViewport, squareGridMetrics, upgradeTileContentMetrics,
   createRunContext, HELP_SECTIONS, resultTip,
@@ -119,11 +120,11 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   buyModule, upgradeModule, unlockNextSlot, upgradeCost,
   createTrackStream, createRouteStream, ROUTE_STREAM_LATE_ROW_MS, warmRouteStreamWorkers, createBlueprintRun, depotResumeFirstDistance, routeSpeedAtDistance, syncSectorRoad() {},
   PALETTE, colorText, hazardTexture, vehicleTint, preloadStandardHauler, preloadObstacleArt,
-  preloadSwiftRunner, preloadGarageDisplayArt, GARAGE_UPGRADE_ART, preloadGarageUpgradeArt,
+  preloadSwiftRunner, preloadArmouredTransport, preloadGarageDisplayArt, GARAGE_UPGRADE_ART, preloadGarageUpgradeArt,
   preloadCollectibleArt, syncBlueprintVisuals, syncCargoPickupVisuals, syncHaulerEffects,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y,
   SPRITE_ART_SCALE, scaleSpriteArt,
-  preloadDepotArt, preloadNeonVisuals() {}, NEON_SHOULDER_SIGNS, resolveVisualTheme, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo, stopHaulerExhaust,
+  preloadDepotArt, preloadNeonVisuals() {}, NEON_SHOULDER_SIGNS, resolveVisualTheme, createBarrierLights, syncBarrierLights, stopHaulerExhaust,
   vehicleTexture, vehicleTrimName, addGoldPreviewSparkles,
   cargoOffer, cargoTotals, collectCargo, damageCargo, createCargoTrail, advanceSteering, KEYBOARD_BRAKE_SECONDS,
   HAZARD_ROW_ENVELOPE_PX, hazardDefinition, hazardGeometry, hazardHits, hazardX, LANE_CENTERS,
@@ -132,7 +133,7 @@ const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeSc
   DEPOT_RULES, nextDepotAfter, depotEntryAllowed, depotDockingStart, depotMotionStep, METERS_PER_PIXEL, syncDepotEntrance() {},
   DEPOT_APPROACH_HINT_M: DEPOT_RULES.noticeMeters, addMilestones, milestonesForDistance, releaseDeferredBlueprints,
   crashReward, blueprintEligible,
-  runMusicUrl: 'BG_Music.mp3', logoUrl: 'GameLogo.svg',
+  runMusicUrl: 'BG_Music.mp3', endlessMusicUrl: 'Sunny_Coastal_Run.mp3', logoUrl: 'GameLogo.svg',
   saveProfile(profile) { if (storageAvailable) savedProfile = profile; return storageAvailable; },
   loadProfile(onWarning) {
     if (startupWarning) onWarning(startupWarning);
@@ -440,6 +441,7 @@ function depotScene() {
     ...GUARDRAIL_ART.map(art => art.key), 'divider_dustlands', 'divider_neon',
     'divider_reactor', 'divider_overdrive']);
   scene.textures = {exists: key => cachedTextures.has(key)};
+  scene.sound = {mute: false, setMute(value) { this.mute = value; }};
   scene.ship = {x: 195, y: 684, setScale() {}, setTexture() {}, setTint() {}, clearTint() {}};
   scene.shieldRing = {setPosition() { return this; }, setVisible(value) { this.visible = value; return this; }};
   scene.profile = defaultProfile();
@@ -488,6 +490,8 @@ function depotScene() {
     setY() { return this; },
     setLineSpacing() { return this; },
   });
+  scene.addCardText = (message, left, y, width, size, color) =>
+    scene.addLabel(message, left + width / 2, y, size, color, width);
   scene.startRun();
   scene.runEconomy.fullStart = false;
   return scene;
@@ -591,10 +595,11 @@ test('URL debug temporary Garage purchases and hints cannot save to the real pro
   assert.equal(savedProfile, realProfile);
 });
 
-test('URL debug God contacts preserve Hull, shields and cargo while firing real impact feedback', () => {
-  for (const hull of [1, 3]) for (const shieldCharges of [0, 3]) {
+test('URL and menu God Mode contacts preserve Hull, shields and cargo while firing real impact feedback', () => {
+  for (const source of ['url', 'menu']) for (const hull of [1, 3]) for (const shieldCharges of [0, 3]) {
     const scene = depotScene();
-    scene.debugManager = new DebugManager('?god=true');
+    scene.debugManager = new DebugManager(source === 'url' ? '?god=true' : '');
+    if (source === 'menu') scene.developerGodMode = true;
     scene.ship.setAlpha = () => {};
     scene.lines = [];
     scene.spawnTimer = 10;
@@ -886,16 +891,18 @@ test('shield absorption feedback preserves the remaining charges and refreshes H
   assert.equal(scene.shieldRing.visible, false);
 });
 
-test('scene preloads the approved Standard, Swift and object sprites before creating the existing world', () => {
+test('scene preloads the approved Standard, Swift, Armoured and object sprites before creating the existing world', () => {
   const scene = new Scene();
   const loads = [], audio = [];
   scene.textures = {exists: () => false};
   scene.load = {image: (...args) => loads.push(args), audio: (...args) => audio.push(args)};
   scene.preload();
-  assert.deepEqual(audio, [['cargo_run_music', 'BG_Music.mp3']]);
+  assert.deepEqual(audio, [['cargo_run_music', 'BG_Music.mp3'],
+    ['cargo_endless_music', 'Sunny_Coastal_Run.mp3']]);
   assert.deepEqual(loads, [['hazardous_haul_logo', 'GameLogo.svg'],
     [STANDARD_HAULER_ART.sourceKey, STANDARD_HAULER_ART.url],
     [SWIFT_RUNNER_ART.sourceKey, SWIFT_RUNNER_ART.url],
+    [ARMOURED_TRANSPORT_ART.sourceKey, ARMOURED_TRANSPORT_ART.url],
     ...GARAGE_DISPLAY_ART.map(art => [art.key, art.url]),
     ...GARAGE_UPGRADE_ART.map(art => [art.key, art.url]),
     ...OBSTACLE_ART.map(art => [art.sourceKey, art.url]),
@@ -1018,7 +1025,7 @@ test('long continuous spawning releases actual scene objects and keeps the activ
     created++;
     return {x, y,
       setDepth() { return this; }, setFlipX() { return this; }, setOrigin() { return this; },
-      setTint() { return this; },
+      setTint() { return this; }, setScale() { return this; },
       setDisplaySize() { return this; }, setAlpha() { return this; },
       setBlendMode() { return this; }, setRotation() { return this; },
       setX(x) { this.x = x; return this; }, setY(y) { this.y = y; return this; },
@@ -1133,6 +1140,38 @@ test('main menu exposes the mobile release build ID without changing saved progr
   assert.equal(JSON.stringify(scene.profile), before, 'build presentation never touches progression');
 });
 
+test('main menu uses a blue Blueprint sprite tally below Coins and shows only the Endless record', () => {
+  const scene = depotScene();
+  scene.profile.coins = 1234;
+  scene.profile.blueprints = 12;
+  scene.profile.endlessBestDistance = 4321;
+  scene.profile.levelProgress.level1.bestDistance = 90000;
+  const before = JSON.stringify(scene.profile);
+  const labels = [];
+  scene.addLabel = (text, x, y) => { labels.push({text, x, y}); };
+  scene.showMenu();
+  const coins = scene.uiCurrency.find(item => item.value === 1234);
+  const blueprints = scene.uiCurrency.find(item => item.iconKey === 'cargo_blueprint');
+  assert.equal(blueprints.value, 12);
+  assert.equal(blueprints.x, coins.x);
+  assert.equal(blueprints.align, 'left');
+  assert.equal(coins.align, 'left');
+  assert.ok(blueprints.y > coins.y);
+  assert.equal(blueprints.color, '#74b9ff');
+  assert.ok(labels.some(item => item.text === 'ENDLESS BEST\n4,321 m'));
+  assert.ok(!labels.some(item => /BLUEPRINT|90,000|LEVEL 1 BEST/.test(item.text)));
+  assert.equal(JSON.stringify(scene.profile), before);
+});
+
+test('Normal Run tiles name Industrial Zone and Dustlands', () => {
+  const scene = depotScene();
+  const labels = [];
+  scene.addLabel = text => { labels.push(text); };
+  scene.showLevelSelect();
+  assert.ok(labels.includes('LEVEL 1: INDUSTRIAL ZONE'));
+  assert.ok(labels.includes('LEVEL 2: DUSTLANDS'));
+});
+
 test('menu footer actions keep frame padding and separate touch targets at phone sizes', () => {
   for (const [width, height] of [[320, 568], [390, 844], [420, 844], [430, 932]]) {
     const scene = new Scene();
@@ -1158,9 +1197,14 @@ test('menu footer actions keep frame padding and separate touch targets at phone
   }
 });
 
-test('run menu level cards contain paired start tabs and scroll independently of the fixed footer at phone sizes', () => {
-  for (const [width, height] of [[320, 568], [360, 800], [390, 844], [420, 844]]) {
+test('run menu level cards pad wrapped headings and paired start tabs independently of the fixed footer at viewport sizes', () => {
+  for (const completed of [false, true]) for (const [width, height] of
+    [[320, 568], [360, 800], [390, 844], [420, 844], [844, 390], [1920, 1080]]) {
     const scene = depotScene();
+    for (const progress of Object.values(scene.profile.levelProgress)) {
+      progress.completed = completed;
+      progress.bestDistance = 999999999999999;
+    }
     scene.menuHeight = responsiveViewport(width, height, 390).worldHeight;
     scene.setScreenRenderer = () => {};
     const before = JSON.stringify(scene.profile);
@@ -1172,13 +1216,14 @@ test('run menu level cards contain paired start tabs and scroll independently of
     scene.addButton = (text, y, action, options = {}) => {
       const height = options.height ?? 54;
       const row = {text, x: options.x ?? 195, top: y - height / 2,
-        bottom: y + height / 2, width: options.width ?? 326};
+        bottom: y + height / 2, width: options.width ?? 326, button: true};
       if (scrolling) rows.push(row);
       else footer = row;
     };
     scene.addLabel = (text, x, y, size, color, width) => {
       const lines = Math.ceil(text.length / Math.floor(width / (size * 0.6)));
       const row = {text, top: y, height: lines * size * 1.2, width,
+        bottom: y + lines * size * 1.2,
         setLineSpacing(gap) {
           this.height += (lines - 1) * gap;
           this.bottom = this.top + this.height;
@@ -1187,11 +1232,21 @@ test('run menu level cards contain paired start tabs and scroll independently of
       rows.push(row);
       return row;
     };
+    scene.addCardText = (text, left, y, width, size, color, {maxHeight}) => {
+      const row = scene.addLabel(text, left + width / 2, y, size, color, width);
+      row.height = Math.min(row.height, maxHeight);
+      row.top = y - row.height / 2;
+      row.bottom = y + row.height / 2;
+      return row;
+    };
     scene.showLevelSelect();
     assert.equal(cards.length, 5);
     assert.equal(viewport.top, cards[0].top);
     assert.ok(footer.top - viewport.bottom >= 16);
-    assert.ok(cards[0].bottom < viewport.bottom);
+    assert.ok(viewport.bottom > viewport.top);
+    if (viewport.bottom - viewport.top >= cards[0].bottom - cards[0].top) {
+      assert.ok(cards[0].bottom <= viewport.bottom);
+    }
     assert.ok(cards.at(-1).bottom > viewport.bottom, 'future entries remain scrollable, not under the footer');
     const tabs = rows.filter(row => row.text === 'SECTOR 1' || row.text === 'CHECKPOINT\nSECTOR 3');
     assert.equal(tabs.length, IMPLEMENTED_LEVELS.level1.length * 2,
@@ -1205,6 +1260,15 @@ test('run menu level cards contain paired start tabs and scroll independently of
       assert.ok(right.x + right.width / 2 <= 358 - 16);
       assert.equal(right.x - right.width / 2 - (left.x + left.width / 2), 12);
       assert.ok((left.bottom - left.top) * width / 390 >= 44);
+      const labels = rows.filter(row => !row.button && row.top >= card.top && row.top < card.bottom);
+      assert.equal(labels.length, 3);
+      const [heading, record, checkpoint] = labels;
+      assert.ok(heading.top >= card.top + MENU_SPACING.padding);
+      assert.ok(left.top - heading.bottom >= MENU_SPACING.gap,
+        `${width}x${height}: wrapped completion heading clears the buttons`);
+      assert.ok(record.top - left.bottom >= MENU_SPACING.gap);
+      assert.ok(checkpoint.top - record.bottom >= MENU_SPACING.gap);
+      assert.ok(card.bottom - checkpoint.bottom >= MENU_SPACING.padding);
     }
     for (let index = 1; index < cards.length; index++) assert.equal(cards[index].top - cards[index - 1].bottom, 12);
     assert.equal(JSON.stringify(scene.profile), before);
@@ -1490,11 +1554,30 @@ test('Garage upgrade summaries distinguish full prices from shortfalls and prese
   assert.equal(rack.locked, true);
   assert.equal(rack.requirement, 'Complete L1 · S3');
   const future = scene.upgradeTileModel({kind: 'module', id: 'util_impact_pulse'}, 'standard');
-  assert.equal(future.requirement, 'Reach L4 · S3\nNot available yet');
-  assert.equal(future.future, true);
+  assert.equal(future.requirement, 'Reach L4 · S3');
+  assert.equal(future.future, false, 'implemented Level 4 unlocks no longer use a future-level warning');
   const magnet = scene.upgradeTileModel({kind: 'module', id: 'coll_magnet'}, 'standard');
-  assert.equal(magnet.locked, false);
+  assert.equal(magnet.locked, true);
+  assert.equal(magnet.requirement, 'Reach L3 · S1');
   assert.equal(JSON.stringify(scene.profile), before);
+});
+
+test('Garage unlock tile labels and availability follow every live GameBalance module requirement', () => {
+  const scene = new Scene();
+  for (const [id, tuning] of Object.entries(GAME_BALANCE.upgrades.modules)) {
+    if (!tuning.unlock) continue;
+    const {levelId, sector, event} = tuning.unlock;
+    scene.profile = defaultProfile();
+    const locked = scene.upgradeTileModel({kind: 'module', id}, 'standard');
+    assert.equal(locked.locked, true, id);
+    assert.equal(locked.requirement,
+      `${event === 'reach' ? 'Reach' : 'Complete'} L${levelId.slice(5)} · S${sector}`, id);
+    const progress = scene.profile.levelProgress[levelId];
+    progress[event === 'reach' ? 'reachedSectors' : 'completedSectors'] = [sector];
+    const unlocked = scene.upgradeTileModel({kind: 'module', id}, 'standard');
+    assert.equal(unlocked.locked, false, id);
+    assert.equal(unlocked.requirement, null, id);
+  }
 });
 
 test('Garage upgrade grid preserves unlock ordering, existing reinforcement and detail routes', () => {
@@ -1618,10 +1701,11 @@ test('equipment Level 2 start records reach separately from access and Level 2 c
   assert.equal(scene.distance, 0);
   assert.equal(moduleStatus(scene.profile, 'util_insurance').unlocked, true);
   assert.equal(savedProfile, scene.profile);
-  scene.distance = 2500;
+  const shieldGate = GAME_BALANCE.routes.level2.sectorEndsMeters[2];
+  scene.distance = shieldGate - 1;
   scene.recordMilestones();
   assert.equal(moduleStatus(scene.profile, 'def_shield').unlocked, false);
-  scene.distance = 4000;
+  scene.distance = shieldGate;
   scene.recordMilestones();
   assert.equal(moduleStatus(scene.profile, 'def_shield').unlocked, true);
   assert.equal(moduleStatus(scene.profile, 'cargo_light').unlocked, false,
@@ -1712,9 +1796,11 @@ test('cargo tier transition, purchases and equip actions share one saved equipme
   const labels = [], buttons = [];
   let title, subtitle;
   scene.panel = () => {};
-  scene.addLabel = (text, x, y) => {
-    if (y === 84) title = text;
-    if (y === 120) subtitle = text;
+  let previousWasTitle = false;
+  scene.addLabel = (text, x, y, size, color) => {
+    if (previousWasTitle && size === 12 && color === '#b8c9d8') subtitle = text;
+    previousWasTitle = size === 22 && color === '#a0f4ff';
+    if (previousWasTitle) title = text;
     labels.push(text);
     return {text, x, y, height: 24};
   };
@@ -2008,13 +2094,18 @@ test('Garage Upgrades header and socket bay preserve all six per-ship equipped, 
       unlockedSlotCount: count, equippedModuleIds: count === 6 ? ids : ['hand_precision']};
     ids.forEach(id => { if (id !== CARGO_CAPACITY_ID) profile.ownedModules[id] = 1; });
     const before = JSON.stringify(profile);
-    const {scene, buttons, cards} = shipMenuScene(profile);
+    const {scene, buttons, cards, labels} = shipMenuScene(profile);
     scene.addUpgradeGridTile = () => {};
     scene.showGarage('', false, 'upgrades');
     assert.equal(scene.heading.title, 'UPGRADES');
     assert.equal(scene.menuScrollKey, 'garage:upgrades');
-    assert.ok(buttons.some(button => button.label === 'TRUCKS' && button.y === 90));
-    assert.ok(buttons.some(button => button.label === 'UPGRADES' && button.y === 90));
+    const tabs = buttons.filter(button => ['TRUCKS', 'UPGRADES'].includes(button.label));
+    assert.equal(tabs.length, 2);
+    assert.equal(new Set(tabs.map(button => button.y)).size, 1, 'garage tabs share one row');
+    const header = labels.find(label => label.text.startsWith('MODULES'));
+    assert.ok(tabs.every(button => button.y - button.height / 2 >= 98 &&
+      button.y + button.height / 2 + 8 <= header.y),
+    'tabs remain below the header banner and clear the measured section heading');
     const sockets = cards.filter(card => card.height === 50);
     assert.equal(sockets.length, 6);
     assert.equal(new Set(sockets.map(card => card.y)).size, 1);
@@ -2112,7 +2203,9 @@ test('Garage upgrade cards bind supplied art and display exact ranks, bonuses an
         assert.equal(action.disabled, owned || variant === 'poor');
         if (owned) {
           assert.equal(action.fill, variant === 'max' ? PALETTE.steelDark : PALETTE.cyan);
-          assert.ok(card.objects.some(object => object.text === `+${variant === 'max' ? 90 : 10}% STEERING`));
+          const rank = variant === 'max' ? 5 : 1;
+          const benefit = Math.round(GAME_BALANCE.upgrades.modules.hand_precision.values[rank - 1] * 100);
+          assert.ok(card.objects.some(object => object.text === `+${benefit}% STEERING`));
         }
       }
       if (id === 'cargo_expanded') {
@@ -2140,6 +2233,7 @@ test('Garage upgrade cards bind supplied art and display exact ranks, bonuses an
 test('Garage upgrade card purchase confirms exact existing price, preserves save failures and updates equipped sockets', () => {
   const profile = defaultProfile();
   profile.coins = 2000;
+  profile.levelProgress.level3 = {...profile.levelProgress.level3, reachedSectors: [1]};
   const {scene, buttons, cards} = shipMenuScene(profile);
   scene.showGarage('', false, 'upgrades');
   const price = moduleStatus(profile, 'coll_magnet').def.price;
@@ -2242,7 +2336,7 @@ test('Garage overlay cleanup destroys the old scrolling container and resets cli
   assert.equal(scene.overlayObjects.length, 0);
 });
 
-test('Garage truck concept cards retain preview/equip/unlock gates and three inert Coming Soon placeholders', () => {
+test('Garage truck concept cards retain preview/equip/unlock gates and only Apex as Coming Soon', () => {
   for (const variant of ['selected', 'owned', 'swift-selected', 'level-locked', 'shortfall', 'purchasable']) {
     const profile = defaultProfile();
     if (['owned', 'swift-selected'].includes(variant)) {
@@ -2254,15 +2348,15 @@ test('Garage truck concept cards retain preview/equip/unlock gates and three ine
     profile.levelProgress.level2.unlocked = variant !== 'level-locked';
     profile.blueprints = variant === 'shortfall' ? 1 : GAME_BALANCE.vehicles.swift.blueprintCost;
     const before = JSON.stringify(profile);
-    const {scene, buttons, cards} = shipMenuScene(profile);
+    const {scene, buttons, cards, labels} = shipMenuScene(profile);
     scene.showGarage('', false, 'garage');
-    assert.equal(cards.length, 5, variant);
+    assert.equal(cards.length, 4, variant);
     assert.equal(scene.heading.title, 'GARAGE');
     assert.equal(buttons[0].label, 'TRUCKS');
     assert.equal(buttons[1].label, 'UPGRADES');
     const actions = buttons.filter(button => ['PREVIEW', 'EQUIP', 'EQUIPPED'].includes(button.label));
     assert.equal(JSON.stringify(scene.profile), before, 'browsing has no persistence effects');
-    for (const [index, id] of ['standard', 'swift'].entries()) {
+    for (const [index, id] of IMPLEMENTED_VEHICLE_IDS.entries()) {
       const status = vehicleStatus(profile, id);
       const card = cards[index];
       const preview = buttons.find(button => button.label === 'PREVIEW' &&
@@ -2279,7 +2373,11 @@ test('Garage truck concept cards retain preview/equip/unlock gates and three ine
         'both controls retain a 44px touch height at 320px width');
       assert.equal(equip.y, preview.y, 'actions share one row to leave a next-card peek');
       assert.ok(equip.x - equip.width / 2 - (preview.x + preview.width / 2) >= MENU_SPACING.gap);
-      assert.equal(card.height, peekingCardMetrics(142, scene.menuMetrics().contentBottom).height);
+      const sectionHeader = labels.find(label =>
+        label.text.startsWith(profile.selectedVehicleId.toUpperCase()));
+      const contentTop = Math.max(184, sectionHeader.y + sectionHeader.height + 8);
+      assert.equal(card.height, adaptiveCardMetrics(contentTop + 4,
+        scene.menuMetrics().contentBottom, 196).height);
       const display = card.objects.find(object => object.key === `garage_${id}_display`);
       assert.equal(card.objects[0].height, card.height, 'container insertion order paints backing before bars and lock overlays');
       if (!status.owned) assert.ok(card.objects.findIndex(object => object.key === 'garage_lock') >
@@ -2287,7 +2385,7 @@ test('Garage truck concept cards retain preview/equip/unlock gates and three ine
       assert.ok(display.x > 390 / 2);
       assert.ok(Math.abs(Math.max(display.displayWidth, display.displayHeight) - 90) < 1e-9);
       for (const button of [preview, equip]) {
-        assert.ok(button.y + button.height / 2 <= card.y + card.height / 2 - MENU_SPACING.padding);
+        assert.ok(button.y + button.height / 2 <= card.y + card.height / 2 - MENU_SPACING.padding + 1e-9);
         assert.ok((button.x ?? 195) - button.width / 2 >= MENU_SPACING.edge + MENU_SPACING.padding);
         assert.ok((button.x ?? 195) + button.width / 2 <= 390 - MENU_SPACING.edge - MENU_SPACING.padding);
       }
@@ -2312,10 +2410,10 @@ test('Garage truck concept cards retain preview/equip/unlock gates and three ine
         assert.deepEqual(change.profile.shipStates, profile.shipStates);
       }
     }
-    assert.equal(actions.filter(button => button.label === 'PREVIEW').length, 2);
+    assert.equal(actions.filter(button => button.label === 'PREVIEW').length, 3);
     const coming = buttons.filter(button => button.label === 'Coming Soon');
-    assert.equal(coming.length, 3);
-    assert.ok(cards.slice(2).every(card => !card.objects[0].openPreview));
+    assert.equal(coming.length, 1);
+    assert.ok(cards.slice(3).every(card => !card.objects[0].openPreview));
     assert.ok(coming.every(button => button.disabled), 'planned vehicles cannot equip, purchase or unlock');
     assert.equal(JSON.stringify(scene.profile), before);
   }
@@ -2342,7 +2440,7 @@ test('Garage ship details are read-only and preserve equip, unlock and confirmed
     assert.equal(scene.heading.title, 'GARAGE');
     assert.ok(labels.some(label => label.text === status.vehicle.name.toUpperCase().replace(' ', '\n')));
     assert.ok(labels.some(label => label.text === status.vehicle.ability));
-    assert.ok(labels.some(label => label.text === `${stats.capacity} cargo slots  •  ${stats.hull} health`));
+    assert.ok(labels.some(label => label.text === `${stats.capacity} cargo  •  ${stats.hull} Hull  •  ${stats.shieldCapacity} Shield`));
     const primary = scene.footerActions[0];
     assert.equal(primary.options.disabled, status.owned ? status.selected : !status.canPurchase);
     assert.equal(primary.label, status.owned ? status.selected ? 'EQUIPPED' : 'EQUIP'
@@ -2429,7 +2527,7 @@ test('colors live only in the opened truck preview, with default selection and S
     const before = JSON.stringify(profile);
     const {scene, buttons, labels, cards} = shipMenuScene(profile);
     scene.showGarage('', false, 'garage');
-    assert.equal(cards.length, 5, 'Garage contains trucks only, not a second color list');
+    assert.equal(cards.length, 4, 'Garage contains trucks only, not a second color list');
     assert.ok(!labels.some(label => /COLORS|COSMETICS|GOLD STANDARD/.test(label.text)));
     for (const id of ['standard', 'swift']) {
       buttons.length = labels.length = cards.length = 0;
@@ -2737,6 +2835,22 @@ test('menu button title and subtitle blocks are centered together; coin-image la
   assert.equal(price.coins, 50);
 });
 
+test('menu labels and button copy stay inside measured width and height bounds', () => {
+  const {scene, labels} = shipMenuScene(defaultProfile());
+  scene.addLabel = Scene.prototype.addLabel;
+  const note = scene.addLabel('A deliberately long maintenance notice that cannot escape its measured text width.',
+    195, 220, 14, '#ffffff', 92);
+  assert.ok(note.width * note.scale <= 92 + 1e-9);
+
+  scene.addButton = Scene.prototype.addButton;
+  scene.addButton('END RUN\nINCLUDING\nUNBANKED\nBONUSES\nAND CARGO\nVALUE', 400, () => {},
+    {width: 174, height: 48, size: 16});
+  const buttonText = labels.at(-1);
+  assert.ok(buttonText.width * buttonText.scale <= 174 - MENU_SPACING.padding * 2 + 1e-9);
+  assert.ok(buttonText.displayHeight <= 48 - 12 + 1e-9,
+    'long confirmation labels are scaled to the control height using measured text bounds');
+});
+
 test('menu tiles vertically center complete title description and state stacks within their container', () => {
   const {scene, labels} = shipMenuScene(defaultProfile());
   scene.addMenuTile = Scene.prototype.addMenuTile;
@@ -2795,16 +2909,17 @@ test('run menu Endless entry keeps one readable rules screen and returns to the 
   scene.showMenu();
   buttons.find(button => button.label === 'ENDLESS RUN').action();
   assert.equal(scene.phase, 'continuousConfirm');
-  const explanation = labels.find(text => text.includes('An endless run with increasing speed.'));
+  const explanation = labels.find(text => text.includes('Cargo is worth much more.'));
   assert.ok(explanation);
   assert.ok(explanation.includes('\n\n'), 'Endless rules are separated into readable paragraphs');
   assert.ok(!explanation.includes('\\n'), 'literal escape sequences are not shown to players');
-  assert.ok(explanation.includes('+10%') && explanation.includes('+100%'));
-  assert.ok(explanation.includes('You cannot bank cargo during the run.'));
-  assert.ok(explanation.includes('Stop at a Depot: End Run cashes out; Skip restores equipped shields without banking.'));
-  assert.equal(explanation.split('\n\n').length, 4);
-  assert.doesNotMatch(explanation, /Sector|Level|1,000|25%|campaign|px\/s|speed limit/i,
-    'overview contains only the four main details, not starting settings or technical pacing');
+  assert.ok(explanation.includes('You cannot bank and continue.'));
+  assert.ok(explanation.includes('Every Depot you pass adds a cargo bonus.'));
+  assert.ok(explanation.includes('The farther you go, the harder it gets.'));
+  assert.ok(explanation.endsWith('How much will you risk?'));
+  assert.ok(!/\d|px\/s|Industrial|Dustlands|Gridway/.test(explanation),
+    'the entry screen describes the stakes, not technical tuning or the route schedule');
+  assert.equal(explanation.split('\n\n').length, 5);
   assert.ok(buttons.some(button => button.label === 'BACK'));
   let selection;
   scene.startRun = (...args) => { selection = args; };
@@ -2883,7 +2998,22 @@ test('run menu results return Normal Run to level cards and Endless Run to its s
   }
 });
 
-test('route init continuous starts at zero with Sector 2 challenge, Mid-Day art and 1000 m milestone speed cap', () => {
+test('run music selects the preloaded track for Normal and Endless', () => {
+  for (const mode of ['normal', 'continuous']) {
+    const scene = depotScene();
+    scene.profile.levelProgress.level1.completed = true;
+    const normal = {id: 'normal'}, endless = {id: 'endless'};
+    scene.cache = {audio: {get: key => ({
+      cargo_run_music: normal, cargo_endless_music: endless,
+    })[key]}};
+    const calls = [];
+    scene.feedback = {startRunMusic: (...args) => calls.push(args), resetRun() {}};
+    scene.startRun('beginning', 'level1', mode);
+    assert.deepEqual(calls, [[true, mode === 'continuous' ? endless : normal]]);
+  }
+});
+
+test('route init continuous cycles four stages, raises speed each 1000 m and places Depots each 2000 m', () => {
   const scene = depotScene();
   scene.profile.levelProgress.level1.completed = true;
   const profileBefore = JSON.stringify(scene.profile);
@@ -2892,22 +3022,26 @@ test('route init continuous starts at zero with Sector 2 challenge, Mid-Day art 
   assert.equal(scene.startDistance, 0);
   assert.equal(scene.runEconomy.mode, 'continuous');
   assert.equal(scene.runEconomy.fullStart, false);
-  assert.equal(scene.currentSector, IMPLEMENTED_LEVELS.level1[1]);
+  assert.equal(scene.currentSector, sectorAtDistance(0, 'level1', 'continuous'));
   assert.equal(scene.currentSector.challengeProfileId, 'industrial');
   const lighting = lightingForSector(scene.currentSector, 0, 4000, 'continuous');
   assert.equal(lighting.name, 'MID-DAY TRANSIT');
   assert.equal(lighting.headlights, false);
-  assert.equal(scene.nextDepotDistance, 1000);
+  assert.equal(scene.nextDepotDistance, 2000);
   for (let milestone = 0; milestone <= 20; milestone++) {
     const at = milestone * 1000;
-    assert.equal(routeSpeedAtDistance(at, 'level1', 'continuous'), Math.min(680, 350 + milestone * 40));
-    assert.equal(nextDepotAfter(at, DEPOT_RULES, 'level1', 'continuous').distance, at + 1000);
-    assert.equal(sectorAtDistance(at, 'level1', 'continuous'), scene.currentSector);
+    assert.equal(routeSpeedAtDistance(at, 'level1', 'continuous'), Math.min(620, 460 + milestone * 20));
+    assert.equal(nextDepotAfter(at, DEPOT_RULES, 'level1', 'continuous').distance,
+      (Math.floor(at / 2000) + 1) * 2000);
     if (at) assert.equal(routeSpeedAtDistance(at - 0.001, 'level1', 'continuous'),
-      Math.min(680, 350 + (milestone - 1) * 40));
+      Math.min(620, 460 + Math.floor((at - 0.001) / 1000) * 20));
   }
   assert.ok(Math.abs(routeTimeAtDistance(1500, 'level1', 'continuous') -
-    (1000 / (350 * METERS_PER_PIXEL) + 500 / (390 * METERS_PER_PIXEL))) < 1e-8);
+    (1000 / (460 * METERS_PER_PIXEL) + 500 / (480 * METERS_PER_PIXEL))) < 1e-8);
+  assert.equal(lightingForSector(sectorAtDistance(4000, 'level1', 'continuous'), 4000, 0, 'continuous').name,
+    'DUSK TRANSIT');
+  assert.equal(lightingForSector(sectorAtDistance(6000, 'level1', 'continuous'), 6000, 0, 'continuous').name,
+    'DUSK TRANSIT');
   scene.distance = 12000;
   scene.recordMilestones();
   assert.equal(JSON.stringify(scene.profile), profileBefore);
@@ -2925,7 +3059,7 @@ test('continuous cash-out ends the run and failed wallet writes preserve the hol
   const buttons = [];
   scene.addButton = (label, y, action) => buttons.push({label, action});
   scene.renderContinuousDepot();
-  assert.ok(buttons.some(button => button.label === 'END RUN'));
+  assert.ok(buttons.some(button => button.label === 'CASH OUT & END RUN'));
   assert.ok(!buttons.some(button => /BANK.*CONTINUE|REPAIR/i.test(button.label)));
   const wallet = scene.profile.coins;
   const cargo = scene.cargoItems;
@@ -2945,7 +3079,7 @@ test('continuous cash-out ends the run and failed wallet writes preserve the hol
   assert.equal(scene.profile.coins, wallet + 103);
 });
 
-test('continuous crash retention failed wallet writes do not lose cargo or replay the payout', () => {
+test('continuous crash failed wallet writes preserve the run and never pay unbanked cargo', () => {
   const scene = depotScene();
   scene.profile.levelProgress.level1.completed = true;
   scene.startRun('beginning', 'level1', 'continuous');
@@ -2962,11 +3096,11 @@ test('continuous crash retention failed wallet writes do not lose cargo or repla
   } finally { storageAvailable = true; }
   scene.finishRun(false);
   assert.equal(scene.phase, 'result');
-  assert.equal(scene.profile.coins, wallet + 25);
+  assert.equal(scene.profile.coins, wallet);
   assert.equal(scene.runResult.bonusCoins, 0);
   assert.equal(scene.runResult.distanceCoins, 0);
   scene.finishRun(false);
-  assert.equal(scene.profile.coins, wallet + 25);
+  assert.equal(scene.profile.coins, wallet);
 });
 
 test('passing a bay never pauses, banks, recenters or grants the first-bank milestone', () => {
@@ -3138,6 +3272,27 @@ test('seven taps on the build label within five seconds reveal the hidden develo
   assert.equal(scene.developerTapCount, 0);
 });
 
+test('developer God Mode toggles without saving and marks protected runs ineligible for rewards or records', () => {
+  const scene = depotScene();
+  scene.debugManager = new DebugManager('');
+  const before = JSON.stringify(scene.profile);
+  const buttons = [];
+  scene.addButton = (label, y, action, options) => buttons.push({label, y, action, ...options});
+  scene.showDeveloperMenu();
+  buttons.find(button => button.label === 'GOD MODE: OFF').action();
+  assert.equal(scene.godMode, true);
+  assert.equal(JSON.stringify(scene.profile), before);
+  scene.startRun();
+  assert.equal(isDeveloperRun(scene.runEconomy), true);
+  const result = settleRun(scene.profile, scene.runEconomy, [], 99999, false);
+  assert.equal(JSON.stringify(result.profile), before);
+  scene.showDeveloperMenu();
+  buttons.filter(button => button.label === 'GOD MODE: ON').at(-1).action();
+  assert.equal(scene.godMode, false);
+  scene.startRun();
+  assert.equal(isDeveloperRun(scene.runEconomy), false);
+});
+
 test('developer Coin adjustment requires confirmation and leaves the profile unchanged on save failure', () => {
   const scene = depotScene();
   const buttons = [];
@@ -3202,7 +3357,7 @@ test('Sector 2 crossing saves the Sector 3 checkpoint and checkpoint starts rese
       setLineSpacing() { return this; }};
   };
   scene.showLevelSelect();
-  assert.ok(labels.some(label => label.includes('Finish Level 1 to unlock Level 2.')));
+  assert.ok(labels.some(label => label.includes('Complete Level 1 to unlock Level 2.')));
   assert.equal(buttons.find(button => button.label === 'CHECKPOINT\nSECTOR 3').disabled, false);
   buttons.find(button => button.label === 'CHECKPOINT\nSECTOR 3').action();
   assert.equal(scene.distance, GAME_BALANCE.routes.level1.sectorStartsMeters[2]);
@@ -3558,8 +3713,8 @@ test('spawning preserves shared lane coordinates, Alpha/Beta tags and cargo-only
     scene.spawnTrackRow();
     const spawned = scene.objects.at(-1);
     assert.equal(spawned.sprite.texture, texture, `${kind} ${value}c reads by payout size`);
-    assert.equal(spawned.pickupGlow.texture,
-      value > 20 ? 'cargo_pickup_glow_gold' : 'cargo_pickup_glow_blue');
+    assert.equal(spawned.pickupGlow.texture, 'cargo_pickup_glow_green');
+    assert.equal(spawned.pickupSparkle.texture, 'cargo_pickup_sparkle');
     assert.equal(spawned.kind, kind, 'presentation must not change cargo rules');
     assert.equal(spawned.mass, row.pickups[0].mass);
     assert.equal(spawned.value, value);
@@ -3634,6 +3789,30 @@ test('approved container variants and short edge pipes retain one unchanged game
   assert.equal(destroyed.length, hazards.length + lightCount, 'each obstacle and its beacon are released');
 });
 
+test('Level 4 hazards retain warning lights but spawn no surrounding glow', () => {
+  const scene = depotScene();
+  scene.levelId = 'level4';
+  const row = {
+    hazards: [{kind: 'barrier', lane: 0, offsetY: 0, placement: 'alpha'}],
+    intermediates: [], pickups: [], spacingPx: 250, emitted: true,
+    energyOrbs: [{kind: 'energy_orb', initialX: 195, distanceMeters: 100, direction: 1}],
+  };
+  const textures = [];
+  scene.trackStream = {nextRow: () => row};
+  scene.add = {image(x, y, texture) {
+    textures.push(texture);
+    return {x, y, texture, setDepth() { return this; }, setBlendMode() { return this; },
+      setPosition() { return this; }, setAlpha() { return this; }, destroy() {}};
+  }};
+  scene.spawnTrackRow();
+  const barrier = scene.objects.find(item => item.kind === 'barrier');
+  const orb = scene.objects.find(item => item.kind === 'energy_orb');
+  assert.equal(barrier.cautionLights.length, 2);
+  assert.equal(barrier.neonHalo, undefined);
+  assert.equal(orb.orbGlow, null);
+  assert.ok(!textures.some(texture => texture.startsWith('glow_hazard_ring') || texture === 'glow_orb_radial'));
+});
+
 test('approved Barrier, Rockslab and Signal Cabinet keep their spawn geometry, depth and shared cleanup', () => {
   const scene = depotScene();
   const hazards = ['barrier', 'rockSlab', 'signalCabinet']
@@ -3657,7 +3836,7 @@ test('approved Barrier, Rockslab and Signal Cabinet keep their spawn geometry, d
     assert.equal(item.sprite.texture, HAZARDS[item.kind].texture);
     assert.equal(item.sprite.x, LANE_CENTERS[index]);
     assert.equal(item.sprite.y, SPAWN_Y + hazards[index].offsetY);
-    assert.equal(item.sprite.depth, 5);
+    assert.equal(item.sprite.depth, HAZARD_READABILITY.depth);
     assert.equal(item.sprite.scaleX, 1.1);
     assert.equal(item.sprite.scaleY, 1.1);
     assert.equal(item.roadsideBase, null);
@@ -3673,8 +3852,10 @@ test('approved Barrier, Rockslab and Signal Cabinet keep their spawn geometry, d
 });
 
 test('approved Barrier replaces generated concrete divider visuals across sectors without changing spawn data', () => {
-  for (const distance of [0, 1000, 2500, 4000, 6000]) {
+  for (const [levelId, sectors] of Object.entries(IMPLEMENTED_LEVELS)) for (const sector of sectors) {
     const scene = depotScene();
+    scene.levelId = levelId;
+    const distance = sector.startsAt;
     scene.distance = distance;
     scene.roadEnvironment = {lighting: lightingForSector(sectorAtDistance(distance, scene.levelId),
       distance, routeFinishDistance(scene.levelId), scene.runMode, scene.levelId)};
@@ -3697,16 +3878,16 @@ test('approved Barrier replaces generated concrete divider visuals across sector
       assert.equal(item.kind, 'divider');
       assert.equal(item.cautionLights.length, 2);
       assert.ok(item.cautionLights.every(light => light.texture === 'barrier_caution_light'));
-      assert.ok(item.cautionLights.every(light => light.depth === (night ? 16.1 : 6) &&
+      assert.ok(item.cautionLights.every(light => light.depth > item.sprite.depth &&
         light.blendMode === (night ? 'ADD' : 'NORMAL') &&
-        Math.abs(light.scaleX - 1.1 * (night ? 1.3 : 1)) < 1e-9),
+        Math.abs(light.scaleX - 1.1 * (night ? ENVIRONMENT_VISUALS.barrierNightScale : 1)) < 1e-9),
       'scene spawn uses the active dusk/night lighting and leaves daylight/Overdrive unchanged');
-      assert.equal(item.sprite.texture, hazardTexture('divider', sectorAtDistance(distance), lane));
+      assert.equal(item.sprite.texture, hazardTexture('divider', sectorAtDistance(distance, levelId), lane));
       assert.equal(item.sprite.scaleX, 1.1);
       assert.equal(item.sprite.scaleY, 1.1);
       assert.equal(item.sprite.x, LANE_CENTERS[lane]);
       assert.equal(item.sprite.y, SPAWN_Y - 30);
-      assert.equal(item.sprite.depth, 5);
+      assert.equal(item.sprite.depth, HAZARD_READABILITY.depth);
       assert.equal(item.roadsideBase, null);
     }
     assert.equal(JSON.stringify({row, profile: scene.profile, geometry: HAZARDS.divider}), before);
@@ -3715,7 +3896,7 @@ test('approved Barrier replaces generated concrete divider visuals across sector
   }
 });
 
-test('approved Sweeper forklift follows the existing canonical motion and shared cleanup without changing saves', () => {
+test('Street Sweeper follows the existing canonical motion and shared cleanup without changing saves', () => {
   const scene = depotScene();
   const movement = {minOffsetPx: 0, maxOffsetPx: 146, speedPxPerSecond: 76, direction: 1, phase: 11};
   const row = {hazards: [{kind: 'sweeper', lane: 0, offsetY: 0, placement: 'alpha', movement}],
@@ -3735,17 +3916,18 @@ test('approved Sweeper forklift follows the existing canonical motion and shared
   scene.spawnTrackRow();
   assert.equal(scene.objects.length, 1);
   const item = scene.objects[0];
-  assert.equal(item.sprite.texture, 'hazard_forklift');
+  assert.equal(item.sprite.texture, HAZARDS.sweeper.texture);
   assert.equal(item.sprite.scaleX, 1.1);
   assert.equal(item.sprite.scaleY, 1.1);
-  assert.equal(item.sprite.depth, 5);
+  assert.equal(item.sprite.depth, HAZARD_READABILITY.depth);
   assert.equal(item.sprite.x, LANE_CENTERS[0] + movingHazardOffset(movement, 0));
   assert.equal(item.sprite.y, SPAWN_Y);
   assert.equal(item.movement, movement);
   assert.equal(item.roadsideBase, null);
-  assert.equal(item.cautionLights.length, 1);
-  assert.equal(item.cautionLights[0].texture, 'barrier_caution_light');
-  assert.equal(item.cautionLights[0].x, item.sprite.x);
+  const beaconMidX = () => (item.cautionLights[0].x + item.cautionLights[1].x) / 2;
+  assert.equal(item.cautionLights.length, 2, 'the lane-wide Sweeper carries a paired beacon set');
+  assert.ok(item.cautionLights.every(light => light.texture === 'barrier_caution_light'));
+  assert.ok(Math.abs(beaconMidX() - item.sprite.x) < 1e-9);
   scene.ship.y = 10000;
   scene.ship.setAlpha = () => {};
   scene.lines = [];
@@ -3761,12 +3943,13 @@ test('approved Sweeper forklift follows the existing canonical motion and shared
   assert.equal(item.sprite.x, LANE_CENTERS[0] + item.movementOffsetPx);
   assert.ok(item.sprite.x > LANE_CENTERS[0] + 11);
   assert.ok(item.sprite.y > SPAWN_Y);
-  assert.equal(item.cautionLights[0].x, item.sprite.x, 'beacon follows canonical horizontal motion');
-  assert.equal(item.cautionLights[0].y, item.sprite.y - HAZARDS.sweeper.height * 0.18 * item.sprite.scaleY);
+  assert.ok(Math.abs(beaconMidX() - item.sprite.x) < 1e-9, 'beacons follow canonical horizontal motion');
+  assert.ok(item.cautionLights.every(light =>
+    light.y === item.sprite.y - HAZARDS.sweeper.height * 0.18 * item.sprite.scaleY));
   assert.equal(JSON.stringify({row, profile: scene.profile, geometry: HAZARDS.sweeper}), before);
   scene.removeObjects();
   assert.equal(scene.objects.length, 0);
-  assert.deepEqual(destroyed, ['hazard_forklift', 'barrier_caution_light']);
+  assert.deepEqual(destroyed, [HAZARDS.sweeper.texture, 'barrier_caution_light', 'barrier_caution_light']);
 });
 
 test('scene cargo pickup spawning and updates preserve slight low-light dimming and full-hold rejection', () => {
@@ -3818,8 +4001,8 @@ test('scene cargo pickup spawning and updates preserve slight low-light dimming 
     assert.ok(Math.abs(item.pickupGlow.alpha - 0.55 * (lighting.headlights ? 0.9 : 1) * 0.35) < 1e-9);
     assert.equal(JSON.stringify(scene.profile), profile);
     scene.removeObjects();
-    assert.ok(item.sprite.destroyed && item.pickupGlow.destroyed &&
-      sandbox.sprite.destroyed && sandbox.pickupGlow.destroyed);
+    assert.ok(item.sprite.destroyed && item.pickupGlow.destroyed && item.pickupSparkle.destroyed &&
+      sandbox.sprite.destroyed && sandbox.pickupGlow.destroyed && sandbox.pickupSparkle.destroyed);
   }
 });
 
@@ -3879,10 +4062,9 @@ test('Apex Blueprint spawns use the converted coin presentation without changing
   assert.equal(item.sprite.x, LANE_CENTERS[reward.lane]);
   assert.equal(item.sprite.y, SPAWN_Y);
   assert.equal(item.reward, reward);
-  const label = scene.uiCurrency.at(-1);
-  assert.equal(label.value, `+${reward.amount * BP_TO_COINS}`);
-  assert.equal(label.suffix, ' banked');
-  assert.equal(label.overlay, false);
+  assert.equal(item.valueText.text, `+${reward.amount * BP_TO_COINS} banked`,
+    'the converted label comes from the pooled transient text, not a new currency object');
+  assert.equal(item.valueText.x, item.sprite.x);
   assert.equal(JSON.stringify(scene.profile), before);
 });
 
@@ -4105,7 +4287,10 @@ test('audio feedback separates Hull/shield impacts from harmless wall-grind scra
     const scrapes = calls.filter(call => call.method === 'playMetalScrape').length;
     if (contact === 'grind') assert.ok(scrapes > 0);
     else assert.equal(scrapes, 0, contact);
-    if (contact === 'shield') assert.equal(scene.shieldCharges, 0);
+    if (contact === 'shield') {
+      assert.equal(scene.shieldCharges, 0);
+      assert.equal(calls.find(call => call.method === 'impact').args[0].damaging, false);
+    }
     if (contact === 'hull') assert.equal(scene.hull, 2);
   }
 });
@@ -4344,7 +4529,8 @@ test('trailing cargo is cosmetic: a guardrail alongside only the trailers never 
 test('menu buttons consume pointer events before starting or resuming driving', () => {
   const scene = new Scene();
   scene.overlayObjects = [];
-  scene.add = {text: () => ({setOrigin() { return this; }, setDepth() { return this; }})};
+  scene.add = {text: () => ({width: 120, height: 18, displayHeight: 18,
+    setOrigin() { return this; }, setDepth() { return this; }, setScale() { return this; }})};
   let stopped = false;
   let acted = false;
   scene.addButton('START A RUN', 458, () => {
@@ -4361,7 +4547,8 @@ test('menu buttons consume pointer events before starting or resuming driving', 
 test('audio UI click plays once after valid button action, never for drags, pointer cancellation or repeated releases', () => {
   const scene = new Scene();
   scene.overlayObjects = [];
-  scene.add = {text: () => ({setOrigin() { return this; }, setDepth() { return this; }})};
+  scene.add = {text: () => ({width: 120, height: 18, displayHeight: 18,
+    setOrigin() { return this; }, setDepth() { return this; }, setScale() { return this; }})};
   const event = {stopPropagation() {}};
   let actions = 0;
   const calls = attachFeedbackSpy(scene);
@@ -4455,11 +4642,21 @@ test('touch release pauses an active run while mouse release does not', () => {
   assert.equal(pauses, 1, 'touches in menus do not pause a run');
 });
 
+function pauseLabel(text = '', y = 0, size = 24) {
+  return {text, y, height: size * 1.25, displayHeight: size * 1.25, scaleX: 1,
+    setDepth() { return this; }, setOrigin() { return this; },
+    setScale(value) { this.scaleX = value; this.displayHeight = this.height * value; return this; },
+    setText(value) { this.text = value; return this; }};
+}
+
 test('Space pauses, then resumes only after a frozen three-second countdown', () => {
   const scene = depotScene();
   const feedback = [];
   scene.feedback = {
-    suspend: reason => feedback.push(['suspend', reason]),
+    suspend: (reason, options) => {
+      assert.notEqual(options?.music, false, 'manual pause must suspend music too');
+      feedback.push(['suspend', reason]);
+    },
     resume: reason => feedback.push(['resume', reason]),
   };
   scene.hudContainer = {visible: true, setVisible(value) { this.visible = value; }};
@@ -4467,17 +4664,17 @@ test('Space pauses, then resumes only after a frozen three-second countdown', ()
     scene.panelTitle = title;
     scene.pauseDimAlpha = dimAlpha;
     scene.pausePanelHeight = panelHeight;
+    return pauseLabel(title, 422 - panelHeight / 2 + 18);
   };
   scene.addButton = (label, y, action) => { if (label === 'RESUME RUN') scene.resumeAction = action; };
-  scene.addLabel = text => ({text, setDepth() { return this; },
-    setText(value) { this.text = value; return this; }});
+  scene.addLabel = (text, _x, y, size) => pauseLabel(text, y, size);
   const startDistance = scene.distance;
 
   scene.handlePauseKey();
   assert.equal(scene.phase, 'paused');
   assert.equal(scene.panelTitle, 'PAUSED');
   assert.equal(scene.pauseDimAlpha, 0.2);
-  assert.equal(scene.pausePanelHeight, 198);
+  assert.equal(scene.pausePanelHeight, 272);
   assert.equal(scene.hudContainer.visible, true, 'the HUD stays visible beneath the dimmer');
   assert.deepEqual(feedback, [['suspend', 'manualPause']]);
   scene.updateStep(0, 1000);
@@ -4490,6 +4687,9 @@ test('Space pauses, then resumes only after a frozen three-second countdown', ()
   assert.equal(scene.panelTitle, 'GET READY');
   assert.equal(scene.pauseDimAlpha, 0.2);
   assert.equal(scene.pauseCountdownText.text, '3');
+  const digit = scene.pauseCountdownText;
+  assert.ok(digit.y - digit.displayHeight / 2 >= 422 - 85 + 18 + 30, 'the digit sits below the title');
+  assert.ok(digit.y + digit.displayHeight / 2 <= 422 + 85 - MENU_SPACING.padding, 'the digit stays inside the tile');
   for (let frame = 0; frame < 20; frame++) scene.updateStep(0, 50);
   assert.equal(scene.pauseCountdownText.text, '2');
   for (let frame = 0; frame < 20; frame++) scene.updateStep(0, 50);
@@ -4504,6 +4704,111 @@ test('Space pauses, then resumes only after a frozen three-second countdown', ()
   assert.equal(scene.distance, startDistance);
 });
 
+test('pause sound toggle changes the shared mute setting without resuming or overlapping controls', () => {
+  const scene = depotScene();
+  const buttons = [];
+  let resumes = 0, panelHeight;
+  scene.feedback = {suspend() {}, resume() { resumes++; }};
+  scene.showPauseOverlay = (_title, _alpha, height) => { buttons.length = 0; panelHeight = height; return pauseLabel(); };
+  scene.addButton = (label, y, action, options) => buttons.push({label, y, action, ...options});
+  scene.addLabel = text => pauseLabel(text);
+  // Phaser WebAudio schedules the gain change, so its mute getter stays stale immediately after setMute.
+  const muteRequests = [];
+  scene.sound = {mute: false, setMute(value) { muteRequests.push(value); return this; }};
+  let fades = 0;
+  scene.fadeOverlayIn = () => { fades++; };
+  const distance = scene.distance;
+  scene.pauseRun();
+  assert.deepEqual(buttons.map(button => button.label), ['RESUME RUN', 'SOUND: ON', 'END RUN']);
+  buttons[1].action();
+  assert.deepEqual(muteRequests, [true]);
+  assert.equal(buttons[1].label, 'SOUND: OFF', 'the label updates live despite the stale getter');
+  assert.equal(fades, 1, 'toggling rebuilds the menu without replaying the fade');
+  assert.equal(scene.phase, 'paused');
+  assert.equal(scene.distance, distance);
+  assert.equal(resumes, 0);
+  for (let index = 0; index < buttons.length; index++) {
+    const button = buttons[index];
+    assert.ok(button.y - button.height / 2 >= 422 - panelHeight / 2 + MENU_SPACING.padding);
+    assert.ok(button.y + button.height / 2 <= 422 + panelHeight / 2 - MENU_SPACING.padding);
+    if (index) {
+      const previous = buttons[index - 1];
+      assert.ok(button.y - button.height / 2 - (previous.y + previous.height / 2) >= MENU_SPACING.gap);
+    }
+  }
+  buttons[1].action();
+  assert.deepEqual(muteRequests, [true, false]);
+  assert.equal(buttons[1].label, 'SOUND: ON');
+  buttons[0].action();
+  assert.equal(scene.phase, 'resumeCountdown');
+  assert.equal(resumes, 0, 'music remains paused throughout the countdown');
+});
+
+test('pause overlays keep gameplay camera framing on resize instead of restoring a stale menu', () => {
+  const scene = new Scene();
+  let rerenders = 0;
+  scene.phase = 'pauseEndConfirm';
+  scene.screenRenderer = () => { rerenders++; };
+  scene.scale = {width: 320, height: 568};
+  scene.cameras = {main: {setZoom(value) { this.zoom = value; }, setScroll(x, y) {
+    this.scrollX = x;
+    this.scrollY = y;
+  }}};
+  scene.hudContainer = {setScale() { return this; }, setPosition() { return this; }};
+  scene.hudBacking = {setDisplaySize() { return this; }};
+  scene.syncViewportBackdrop = () => {};
+  scene.syncRoadBleed = () => {};
+  scene.handleViewportResize({width: 320, height: 568});
+  assert.equal(scene.cameras.main.zoom, Math.min(320 / 390, 568 / 844));
+  assert.equal(rerenders, 0, 'pause is not a management screen and cannot repaint the prior menu');
+  assert.equal(scene.menuHeight, responsiveViewport(320, 568, 390).worldHeight);
+});
+
+test('mobile re-pause is blocked for exactly two seconds after the resume fade completes', () => {
+  const scene = depotScene();
+  scene.endMenuScroll = () => {};
+  scene.showPauseOverlay = () => pauseLabel();
+  scene.addLabel = () => pauseLabel();
+  let finishFade;
+  scene.fadeOverlayOut = complete => { finishFade = complete; };
+  const touch = {id: 1, wasTouch: true};
+  scene.handlePointerUp(touch);
+  assert.equal(scene.phase, 'paused', 'the first touch release can pause immediately');
+  scene.beginResumeCountdown();
+  scene.time.now = 3000;
+  for (let frame = 0; frame < 60; frame++) scene.updateStep(0, 50);
+  assert.equal(scene.phase, 'resumeTransition');
+  scene.time.now = 3200;
+  finishFade();
+  assert.equal(scene.phase, 'running');
+  scene.handlePointerUp(touch);
+  assert.equal(scene.phase, 'running', 'releasing Resume cannot immediately pause again');
+  scene.time.now = 5199.999;
+  scene.handlePointerUp(touch);
+  assert.equal(scene.phase, 'running', 'the entire two-second interval is protected');
+  scene.time.now = 5200;
+  scene.handlePointerUp(touch);
+  assert.equal(scene.phase, 'paused', 'touch pause works again at the exact boundary');
+  scene.beginResumeCountdown();
+  for (let frame = 0; frame < 60; frame++) scene.updateStep(0, 50);
+  scene.time.now = 8200;
+  finishFade();
+  scene.handlePointerUp(touch);
+  assert.equal(scene.phase, 'running', 'each resume starts a new cooldown');
+  scene.handlePauseKey();
+  assert.equal(scene.phase, 'paused', 'Space is never blocked by the mobile cooldown');
+});
+
+test('a fresh run clears the previous mobile re-pause cooldown', () => {
+  const scene = depotScene();
+  scene.touchPauseBlockedUntil = 2000;
+  scene.startRun('beginning', 'level1', 'normal');
+  scene.endMenuScroll = () => {};
+  scene.showPauseMenu = () => {};
+  scene.handlePointerUp({id: 1, wasTouch: true});
+  assert.equal(scene.phase, 'paused');
+});
+
 test('pause End Run confirmation shows secured and unbanked Normal amounts and waits for confirmation', () => {
   const scene = depotScene();
   scene.profile.coins = 250;
@@ -4514,27 +4819,45 @@ test('pause End Run confirmation shows secured and unbanked Normal amounts and w
   const actions = [];
   const labels = [];
   const currency = [];
+  let confirmationHeight;
+  let footerY;
   scene.add = {rectangle() { return {setStrokeStyle() { return this; }, setDepth() { return this; }}; }};
   scene.feedback = {suspend() {}};
-  scene.showPauseOverlay = title => { scene.overlayTitle = title; };
-  scene.addFooterActions = entries => { actions.splice(0, actions.length, ...entries); };
+  scene.showPauseOverlay = (title, _dim, height) => {
+    scene.overlayTitle = title;
+    confirmationHeight = height;
+  };
+  scene.addFooterActions = (entries, options) => {
+    actions.splice(0, actions.length, ...entries);
+    footerY = options.y;
+  };
   scene.addButton = (label, y, onClick) => actions.push({label, onClick});
   scene.addCard = () => {};
-  scene.addLabel = text => { labels.push(text); return {height: 16, setDepth() { return this; }}; };
+  scene.addLabel = (text, _x, y, size, _color, width) => {
+    const lines = Math.ceil(text.length * size * 0.56 / width);
+    const height = lines * size * 1.2 + Math.max(0, lines - 1) * 7;
+    labels.push({text, y, height, size, width, lines});
+    return {height, displayHeight: height, setDepth() { return this; }};
+  };
   scene.addCurrency = value => { currency.push(value); return {}; };
   let settlementArgs = null;
   scene.finishRun = (...args) => { settlementArgs = args; };
 
   scene.phase = 'running';
   scene.pauseRun();
-  assert.deepEqual(actions.map(action => action.label), ['RESUME RUN', 'END RUN']);
-  actions[1].onClick();
+  assert.deepEqual(actions.map(action => action.label), ['RESUME RUN', 'SOUND: ON', 'END RUN']);
+  actions.find(action => action.label === 'END RUN').onClick();
   assert.equal(scene.phase, 'pauseEndConfirm');
   assert.equal(scene.overlayTitle, 'END RUN?');
   assert.deepEqual(currency, [90, 30]);
   assert.equal(scene.profile.coins, 250, 'the existing wallet remains safe');
-  assert.ok(labels.some(label => label.includes('LOSE 35 COINS')),
+  assert.ok(labels.some(label => label.text.includes('LOSE 35 COINS')),
     'normal confirmation includes cargo and unbanked bonuses at risk');
+  const warning = labels.find(label => label.text.includes('LOSE 35 COINS'));
+  const footerTop = footerY - 27;
+  assert.ok(warning.y + warning.height + 8 <= footerTop,
+    'the complete measured loss warning clears the fixed confirmation buttons');
+  assert.equal(confirmationHeight, 384, 'the confirmation panel contains its measured warning and actions');
   assert.deepEqual(actions.map(action => action.label), ['BACK TO PAUSE', 'END RUN']);
   actions[0].onClick();
   assert.equal(scene.phase, 'paused', 'cancel returns to the pause menu without settling');
@@ -4542,9 +4865,22 @@ test('pause End Run confirmation shows secured and unbanked Normal amounts and w
   scene.showPauseEndRunConfirmation();
   actions[1].onClick();
   assert.deepEqual(settlementArgs, [false, false, true]);
+
+  scene.phase = 'paused';
+  scene.cargoItems = [{kind: 'coinStack', value: Number.MAX_SAFE_INTEGER, mass: 1, slots: 1}];
+  labels.length = 0;
+  scene.showPauseEndRunConfirmation();
+  const formattedLongTotal = String(
+    bankingQuote(scene.cargoItems, scene.runEconomy).payout + scene.runEconomy.noDamageBonusPending);
+  const longWarning = labels.find(label => label.text.startsWith('END NOW: LOSE') &&
+    label.text.includes(formattedLongTotal));
+  assert.ok(longWarning && longWarning.size >= 14 && longWarning.lines > 1,
+    'long loss totals retain readable text size and wrap to measured lines');
+  assert.ok(longWarning.y + longWarning.height + 8 <= footerY - 27,
+    'the wrapped total remains above the pause confirmation controls');
 });
 
-test('pause End Run confirmation reflects Endless wreck retention and bonus loss', () => {
+test('pause End Run confirmation warns that all Endless cargo and bonuses are lost', () => {
   const scene = depotScene();
   scene.runMode = 'continuous';
   scene.runEconomy.mode = 'continuous';
@@ -4562,15 +4898,16 @@ test('pause End Run confirmation reflects Endless wreck retention and bonus loss
   scene.phase = 'paused';
   scene.showPauseEndRunConfirmation();
   assert.deepEqual(currency, [0, 100]);
-  assert.ok(labels.some(label => label.includes('LOSE 100 COINS') && label.includes('WRECK KEEPS 25')));
+  assert.ok(labels.some(label => label.includes('LOSE 125 COINS') &&
+    label.includes('CASH OUT AT A DEPOT TO EARN')));
 });
 
-test('telemetry blocks pointer steering only inside its new 70px screen-pinned band', () => {
+test('telemetry blocks pointer steering only inside its 78px screen-pinned band', () => {
   const scene = depotScene();
   for (const width of [320, 390, 1280]) {
     scene.scale = {width};
     scene.centerShip();
-    const bottom = 70 * Math.min(width / 390, 1.12);
+    const bottom = 78 * Math.min(width / 390, 1.12);
     scene.beginSteering({id: 1, x: 270, y: bottom});
     assert.equal(scene.shipTargetX, 195, 'the bottom HUD edge is protected');
     scene.beginSteering({id: 1, x: 270, y: bottom + 1});
@@ -4673,7 +5010,7 @@ test('Bank & Continue secures cargo, resets weight and risk, and permits a same-
   scene.repairAtDepot();
   assert.equal(scene.profile.coins, 36);
   assert.equal(scene.hull, 2);
-  assert.equal(scene.maxHull, 3);
+  assert.equal(scene.maxHull, GAME_BALANCE.vehicles.standard.baseStats.hull);
   scene.repairAtDepot();
   assert.equal(scene.profile.coins, 36);
   assert.equal(scene.hull, 2);
@@ -4844,6 +5181,84 @@ test('depot Bank & Continue leaves only disabled Banked, Resume Run and Repair H
   assert.equal(scene.profile.coins, 25);
 });
 
+test('a later Depot keeps the run repair unavailable after Continue with a clear disabled reason', () => {
+  const scene = depotScene();
+  scene.profile.coins = 100;
+  scene.profile.seenHints = ['depotEconomy'];
+  scene.distance = 450;
+  scene.hull = 1;
+  const buttons = [];
+  const labels = [];
+  scene.panel = () => {};
+  scene.addButton = (label, y, action, options = {}) => buttons.push({label, action, ...options});
+  scene.addLabel = label => {
+    labels.push(label);
+    return {height: 16, displayHeight: 16, setLineSpacing() { return this; }};
+  };
+  scene.showDepot();
+  scene.repairAtDepot();
+  assert.equal(scene.runEconomy.repairPurchases, 1);
+  scene.bankAtDepot();
+  scene.resumeAfterDepot();
+  assert.equal(scene.phase, 'running');
+  const balance = scene.profile.coins;
+
+  scene.phase = 'depot';
+  scene.distance = 950;
+  scene.nextDepotDistance = 1000;
+  scene.depotVisit = {distance: 1000, repaired: false, banked: false, bankFailed: false, secured: 0};
+  scene.renderDepot();
+  const repairButton = buttons.findLast(button => button.label === 'REPAIR +1 HULL');
+  assert.equal(repairButton.disabled, true);
+  assert.ok(labels.includes('One repair used this run'));
+  repairButton.action();
+  assert.equal(scene.profile.coins, balance);
+  assert.equal(scene.runEconomy.repairPurchases, 1);
+});
+
+test('narrow-viewport Depot keeps measured repair guidance, actions and footer copy inside the visible route', () => {
+  const scene = depotScene();
+  scene.profile.coins = 100;
+  scene.profile.seenHints = ['depotEconomy'];
+  scene.runEconomy.repairPurchases = 1;
+  scene.distance = 450;
+  scene.hull = 1;
+  scene.scale = {width: 320, height: 568};
+  const zoom = Math.min(320 / 390, 568 / 844);
+  const buttons = [];
+  const labels = [];
+  scene.addButton = (text, y, action, options = {}) =>
+    buttons.push({text, y, action, height: options.height ?? 54, width: options.width ?? 326,
+      x: options.x ?? 195, disabled: options.disabled});
+  scene.addLabel = (text, x, y, size, _color, width = 360) => {
+    const availableWidth = Math.max(1, Math.min(width, 2 * Math.min(x - 32, 390 - 32 - x)));
+    const lines = Math.max(1, Math.ceil(text.length * size * 0.6 / availableWidth));
+    const node = {text, x, y, height: lines * size * 1.2, displayHeight: lines * size * 1.2};
+    node.setLineSpacing = gap => {
+      node.height += Math.max(0, lines - 1) * gap;
+      node.displayHeight = node.height;
+      return node;
+    };
+    labels.push(node);
+    return node;
+  };
+  scene.showDepot();
+
+  const repair = buttons.find(button => button.text === 'REPAIR +1 HULL');
+  const bank = buttons.find(button => button.text === 'BANK & CONTINUE');
+  const reason = labels.find(label => label.text === 'One repair used this run');
+  assert.equal(repair.disabled, true);
+  assert.ok(reason.y >= repair.y + repair.height / 2);
+  assert.ok(reason.y + reason.height <= bank.y - bank.height / 2);
+  assert.ok(buttons.every(button => button.y + button.height / 2 <= 844));
+  assert.ok(labels.every(label => label.y + label.height <= 844));
+  assert.ok(labels.at(-1).y * zoom + labels.at(-1).height * zoom <= 568,
+    'the final hint stays inside the 320 x 568 physical viewport');
+  assert.ok(buttons.every(button =>
+    (button.x - 195 - button.width / 2) * zoom + 160 >= 0 &&
+    (button.x - 195 + button.width / 2) * zoom + 160 <= 320));
+});
+
 test('depot manual banking resets capped risk even for an empty hold and replaces Push On with Resume', () => {
   const scene = depotScene();
   scene.profile.seenHints = ['depotEconomy'];
@@ -4927,7 +5342,7 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
   scene.refreshHud();
   assert.equal(scene.hudContainer.depth, 100);
   assert.equal(scene.hudContainer.scrollFactor, 0);
-  assert.equal(scene.hudBacking.height, 70);
+  assert.equal(scene.hudBacking.height, 78);
   assert.equal(scene.hud.hullPips.rects.length, scene.maxHull);
   assert.equal(scene.hud.shield.text, 'SHIELD 2/3');
   assert.equal(scene.hud.shieldPips.hexes.length, 3);
@@ -4943,11 +5358,19 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
   scene.refreshHud();
   assert.ok(scene.hud.shieldPips.hexes.every(hex => hex.color === PALETTE.steelDark));
   assert.equal(scene.hud.shield.text, 'SHIELD 0/3', 'empty shield shows capacity, not a countdown');
-  for (const [key, width] of [['distanceLabel',114], ['distance',116], ['depot',116], ['cargo',91]]) {
+  for (const [key, width] of [['distanceLabel',114], ['distance',116], ['depot',116], ['cargo',91],
+    ['bonus',140], ['closeCallBonus',140]]) {
     const text = scene.hud[key];
     assert.ok(text.width * text.scaleX <= width + 1e-9);
-    assert.ok(text.y + text.height <= 70);
+    assert.ok(text.y + text.height <= 78);
   }
+  assert.equal(scene.hud.bonus.x, scene.hud.distance.x);
+  assert.equal(scene.hud.closeCallBonus.x, scene.hud.distance.x);
+  assert.notEqual(scene.hud.bonus.y, scene.hud.closeCallBonus.y);
+  assert.equal(scene.hud.bonus.size * scene.hud.bonus.scaleX, 10, '25% larger without shrinking it back');
+  assert.equal(scene.hud.closeCallBonus.size * scene.hud.closeCallBonus.scaleX, 10);
+  assert.ok(scene.hud.bonus.y + scene.hud.bonus.height <= scene.hud.closeCallBonus.y);
+  assert.equal(Object.hasOwn(scene.hud, 'handling'), false);
   for (const [width, height] of [[390,844], [320,690], [1280,720]]) {
     scene.scale = {width, height};
     scene.viewportWorldWidth = width;
@@ -4964,12 +5387,42 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
   }
 });
 
-test('active HUD separates value, load, hull and bonus, including immediate bypass updates and cap', () => {
+test('run side areas stay plain and repeated shoulder scenery stays hidden after resize', () => {
+  const scene = depotScene();
+  const draws = [];
+  scene.viewportBackdrop = {
+    clear() { draws.length = 0; return this; },
+    fillStyle(color) { draws.push(['color', color]); return this; },
+    fillRect(...rect) { draws.push(['rect', ...rect]); return this; },
+  };
+  scene.phase = 'running';
+  for (const [width, height] of [[390, 844], [1280, 720]]) {
+    scene.scale = {width, height};
+    scene.syncViewportBackdrop();
+    assert.deepEqual(draws, [['color', 0x080c14], ['rect', 0, 0, width, height]]);
+  }
+  scene.roadSurface = {};
+  scene.roadFlanks = Array.from({length: 4}, () => ({
+    visible: true, setVisible(value) { this.visible = value; return this; },
+  }));
+  scene.subRoad = {setSize(width, height) { this.width = width; this.height = height; }};
+  const zoom = Math.min(1280 / 390, 720 / 844, 1.12) * ENVIRONMENT_VISUALS.burstZoom;
+  scene.roadBleed = {
+    x: Math.max(8, Math.ceil((1280 / zoom - 390) / 2) + 8),
+    y: Math.max(0, Math.ceil((720 / zoom - 844) / 2) + 8),
+  };
+  scene.syncRoadBleed(1280, 720);
+  assert.ok(scene.roadFlanks.every(flank => !flank.visible));
+  assert.equal(scene.subRoad.width, 390, 'sub-road texture cannot spill into side areas');
+});
+
+test('active HUD separates value, load, hull and centered bonus lines, including bypass updates and cap', () => {
   const scene = depotScene();
   const text = () => ({text: '', width: 30, setText(value) { this.text = value; return this; },
     setVisible(value) { this.visible = value; return this; },
     setColor() { return this; }, setScale() { return this; }});
-  scene.hud = Object.fromEntries(['distanceLabel', 'distance', 'cargo', 'load', 'hull', 'bonus', 'shield', 'depot']
+  scene.hud = Object.fromEntries(['distanceLabel', 'distance', 'cargo', 'load', 'hull', 'bonus',
+    'closeCallBonus', 'shield', 'depot']
     .map(key => [key, text()]));
   scene.hud.loadBar = {setScale(value) { this.scaleX = value; return this; }, setFillStyle() { return this; }};
   scene.hud.progressBar = {setScale(value) { this.scaleX = value; return this; }};
@@ -4985,7 +5438,8 @@ test('active HUD separates value, load, hull and bonus, including immediate bypa
   assert.equal(scene.hud.cargo.text, '45');
   assert.equal(scene.hud.load.text, `LOAD 1/${scene.stats.capacity}`);
   assert.equal(scene.hud.hull.text, `HULL 2/${scene.maxHull}`);
-  assert.equal(scene.hud.bonus.text, 'BONUS +0%');
+  assert.equal(scene.hud.bonus.text, 'DEPOT PASS BONUS +0%');
+  assert.equal(scene.hud.closeCallBonus.text, 'CLOSE CALL BONUS +0%');
   assert.equal(scene.hud.depot.visible, false, 'no Depot indicator outside 60m');
   for (const side of ['left', 'right']) for (const remaining of [60.001, 60, 30, 0, -0.001]) {
     scene.nextDepot = {...scene.nextDepot, side};
@@ -5003,9 +5457,12 @@ test('active HUD separates value, load, hull and bonus, including immediate bypa
   for (const percent of [20, 40, 60, 60]) {
     scene.distance = scene.nextDepotDistance + DEPOT_RULES.triggerHalfMeters + 0.1;
     scene.updateDepot();
-    assert.equal(scene.hud.bonus.text, `BONUS +${percent}%`);
+    assert.equal(scene.hud.bonus.text, `DEPOT PASS BONUS +${percent}%`);
     assert.match(notices.at(-1), new RegExp(`Current bonus: \\+${percent}%`));
   }
+  scene.runEconomy.closeCallBonusPercent = 15;
+  scene.refreshHud();
+  assert.equal(scene.hud.closeCallBonus.text, 'CLOSE CALL BONUS +15%');
   assert.match(notices.at(-1), /AT MAXIMUM/);
   assert.equal(scene.cargoValue, 45, 'UI guidance must not secure, lose or change cargo');
 });
@@ -5046,6 +5503,95 @@ test('results cards reconcile actual rewards, cargo losses, wallet and one conte
   assert.ok(scene.uiCurrency.some(row => row.value === reward));
   assert.equal(labels.filter(label => label.startsWith('Tip:')).length, 1);
   assert.ok(labels.some(label => label.includes('Upgrade your steering')), 'heavy-load crash shows the steering tip');
+});
+
+test('long result totals remain intact and scroll clear of fixed actions at a narrow viewport', () => {
+  const scene = depotScene();
+  scene.menuHeight = responsiveViewport(320, 568, 390).worldHeight;
+  scene.levelId = 'level1';
+  scene.runMode = 'normal';
+  scene.checkpointStart = false;
+  const longTotal = Number.MAX_SAFE_INTEGER;
+  scene.profile.coins = longTotal;
+  scene.profile.levelProgress.level1.bestDistance = 123456789;
+  scene.runResult = {
+    net: longTotal, cargoCoins: longTotal,
+    bonusCoins: 123456789012345, noDamageCoins: 987654321, recordCoins: 876543210,
+    completionCoins: 765432109, distanceCoins: 654321098, otherCoins: 543210987,
+    repairCosts: 432109876, secured: longTotal, gross: longTotal,
+    cargoLost: 123456789, bankingEvents: 2, repairPurchases: 1, reason: 'Hull destroyed',
+  };
+  const layout = managementLayout(scene.menuHeight);
+  const content = [];
+  const currencies = [];
+  let viewport;
+  let contentBottom = 0;
+  let scrollMax = 0;
+  let footerY = 0;
+  scene.setScreenRenderer = () => {};
+  scene.setWorldVisible = () => {};
+  scene.syncHaulerVisuals = () => {};
+  scene.panel = () => {};
+  scene.menuMetrics = () => layout;
+  scene.createMenuScroll = (_key, top, bottom) => { viewport = {top, bottom}; };
+  scene.finishMenuScroll = () => {
+    contentBottom = measureMenuContent(content);
+    scrollMax = Math.max(0, contentBottom - viewport.bottom);
+  };
+  scene.addLabel = (text, x, y, size = 17, _color, width = 360) => {
+    const availableWidth = Math.max(1,
+      Math.min(width, 2 * Math.min(x - 32, 390 - 32 - x)));
+    const lines = text.split('\n').reduce((total, line) =>
+      total + Math.max(1, Math.ceil(line.length * size * 0.6 / availableWidth)), 0);
+    const node = {text, x, y, width: availableWidth, height: lines * size * 1.2,
+      displayHeight: lines * size * 1.2, originY: 0};
+    node.setOrigin = (_x, originY = _x) => { node.originY = originY; return node; };
+    node.setLineSpacing = gap => {
+      node.height = lines * size * 1.2 + Math.max(0, lines - 1) * gap;
+      node.displayHeight = node.height;
+      return node;
+    };
+    content.push(node);
+    return node;
+  };
+  scene.addCurrency = (value, x, y, {size = 18, maxWidth = 150} = {}) => {
+    const iconSize = size + 2;
+    const width = iconSize + 6 + String(value).length * size * 0.6;
+    const scale = Math.min(1, maxWidth / width);
+    const node = {value, x, y, width, height: iconSize, displayWidth: width * scale,
+      displayHeight: iconSize * scale, originY: 0.5, maxWidth, scale, size};
+    currencies.push(node);
+    content.push(node);
+    return node;
+  };
+  scene.addStatRow = Scene.prototype.addStatRow;
+  scene.addFooterActions = (_actions, options = {}) => {
+    footerY = options.y ?? layout.footerY;
+  };
+
+  scene.renderRunResult(false, false);
+
+  const fullRunTotal = currencies.find(currency => currency.value === scene.runResult.net);
+  assert.ok(fullRunTotal);
+  assert.ok(fullRunTotal.displayWidth <= 280);
+  assert.equal(String(fullRunTotal.value), '9007199254740991',
+    'currency scales to fit without truncating the total');
+  const longBreakdownAmount = currencies.find(currency =>
+    currency.value === longTotal && currency.size === 18);
+  assert.ok(longBreakdownAmount);
+  assert.equal(longBreakdownAmount.maxWidth, 280);
+  assert.equal(longBreakdownAmount.scale, 1, 'long breakdown totals keep the readable font size');
+  const firstBreakdownLabel = content.find(item => item.text === 'Cargo banked');
+  assert.ok(longBreakdownAmount.y - longBreakdownAmount.displayHeight / 2 >=
+    firstBreakdownLabel.y + firstBreakdownLabel.height,
+  'a wrapped long amount occupies its own measured line below the label');
+  assert.equal(String(longBreakdownAmount.value), '9007199254740991');
+  assert.ok(contentBottom > viewport.bottom, 'the complete result breakdown extends into scrollable content');
+  assert.equal(scrollMax, contentBottom - viewport.bottom);
+  assert.ok(contentBottom - scrollMax <= viewport.bottom + 1e-9,
+    'the last measured result line can scroll above, not under, the fixed footer');
+  assert.ok(footerY - layout.footerHeight / 2 >= layout.contentBottom + 16);
+  assert.ok(footerY + layout.footerHeight / 2 <= scene.menuHeight - 32);
 });
 
 test('negative run net is shown honestly instead of a positive earnings heading', () => {

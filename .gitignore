@@ -11,3 +11,4 @@ ios/
 *.jks
 /probe-output.txt
 /test-output.txt
+/probe-*.mjs

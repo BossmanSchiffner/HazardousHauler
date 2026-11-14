@@ -9,9 +9,10 @@ import {ROAD_LEFT, ROAD_RIGHT} from '../src/game/data/route.js';
 import {balance} from '../src/game/data/balance.js';
 import * as depotEconomy from '../src/game/core/depotEconomy.js';
 import {cargoTotals} from '../src/game/core/cargo.js';
-import {hazardsBeforeDepot, prepareTrackChunk, CHUNK_REGISTRIES, depotResumeFirstDistance} from '../src/game/core/trackGenerator.js';
+import {hazardsBeforeDepot, prepareTrackChunk, CHUNK_REGISTRIES, depotResumeFirstDistance,
+  depotApproachRow} from '../src/game/core/trackGenerator.js';
 import {HAZARD_TRAVEL_PX, SHIP_Y} from '../src/game/data/route.js';
-import {HAZARD_ROW_ENVELOPE_PX, hazardGeometry, hazardScrollScale} from '../src/game/core/hazards.js';
+import {HAZARD_ROW_ENVELOPE_PX, hazardGeometry, hazardScrollScale, obstacleLaneMask} from '../src/game/core/hazards.js';
 import {METERS_PER_PIXEL, routeSpeedAtDistance} from '../src/game/core/economy.js';
 import {advanceSteering, KEYBOARD_BRAKE_SECONDS} from '../src/game/core/steering.js';
 import {WORST_CASE_HANDLING} from '../src/game/core/modules.js';
@@ -24,7 +25,7 @@ import {PALETTE, SPRITE_ART_SCALE} from '../src/game/rendering/industrial.js';
 import Rectangle from 'phaser/src/geom/rectangle/index.js';
 import {releaseRouteVisual} from '../src/game/rendering/routeVisualPool.js';
 
-test('depot schedules follow campaign transitions or each global continuous 1000m milestone', () => {
+test('depot schedules follow campaign transitions or each global continuous 2000m stage', () => {
   for (const levelId of Object.keys(IMPLEMENTED_LEVELS)) {
     let distance = 0;
     const normal = [];
@@ -75,7 +76,7 @@ test('moving windows align with banking and include the final Normal settlement 
   assert.equal(nextMoverWindowAfter(5 * continuousInterval, MOVER_WINDOW_RULES, 'level1', 'continuous').distance,
     6 * continuousInterval);
   assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').distance, 10000);
-  assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').startDistance, 9000);
+  assert.equal(nextMoverWindowAfter(9000, MOVER_WINDOW_RULES, 'level1', 'continuous').startDistance, 8000);
   assert.throws(() => nextMoverWindowAfter(-1), /Invalid Depot schedule/);
 });
 
@@ -173,6 +174,51 @@ test('depot approaches and exits exclude entire Alpha/Beta collision envelopes, 
     }
   }
   assert.ok(checked > 1000);
+});
+
+test('Depot approach chicanes alternate only in the opposite half and preserve safe outer envelopes', () => {
+  for (const [levelId, mode] of [
+    ['level1', 'normal'], ['level2', 'normal'], ['level3', 'normal'], ['level4', 'normal'],
+    ['level1', 'continuous'],
+  ]) {
+    let depot = nextDepotAfter(0, DEPOT_RULES, levelId, mode);
+    for (let bank = 0; bank < 2; bank++) {
+      const source = {spacingPx: 250, intermediates: [],
+        hazards: [{kind: 'barrier', lane: 0, offsetX: 0, offsetY: 0}],
+        safeLanes: [1, 2, 3], hazardLanes: [0], cargoLanes: [1]};
+      const before = structuredClone(source);
+      const chicane = [];
+      const clearMask = depot.side === 'left' ? 0b0011 : 0b1100;
+      const start = depot.distance - DEPOT_RULES.approachMeters -
+        HAZARD_TRAVEL_PX * METERS_PER_PIXEL - 20;
+      for (let at = start; at < depot.distance; at += source.spacingPx * METERS_PER_PIXEL) {
+        const row = depotApproachRow(source, at, levelId, mode);
+        for (const hazard of row.intermediates.filter(hazard => hazard.depotChicane)) {
+          assert.equal(obstacleLaneMask([hazard]) & clearMask, 0);
+          const contact = at + (HAZARD_TRAVEL_PX - hazard.offsetY) * METERS_PER_PIXEL;
+          chicane.push({lane: hazard.lane, contact});
+          assert.ok(contact - HAZARD_ROW_ENVELOPE_PX / 2 * METERS_PER_PIXEL >
+            depot.distance - DEPOT_RULES.approachMeters);
+          assert.ok(contact + HAZARD_ROW_ENVELOPE_PX / 2 * METERS_PER_PIXEL < depot.distance);
+        }
+        if (row.depotApproach) {
+          assert.equal(hazardsBeforeDepot(row, at, depot.distance, 0, levelId, mode), true);
+          const hazard = row.intermediates.find(hazard => hazard.depotChicane);
+          if (hazard) {
+            assert.equal(hazardsBeforeDepot({...row, hazards: [], intermediates: [
+              {...hazard, lane: depot.side === 'left' ? 0 : 3},
+            ]}, at, depot.distance, 0, levelId, mode), false, 'never waive bay-side collision protection');
+            assert.equal(hazardsBeforeDepot(row, at, depot.distance, depot.distance, levelId, mode), false,
+              'Depot chicanes do not bypass protected re-entry');
+          }
+        }
+      }
+      assert.deepEqual(chicane.map(hazard => hazard.lane), depot.side === 'left' ? [2, 3, 2] : [1, 0, 1]);
+      assert.deepEqual(new Set(chicane.map(hazard => hazard.contact)).size, 3, 'no duplicated obstacles at row seams');
+      assert.deepEqual(source, before);
+      depot = nextDepotAfter(depot.distance, DEPOT_RULES, levelId, mode);
+    }
+  }
 });
 
 test('current schema does not infer new level progress from legacy distance; older saves keep earned unlocks', () => {

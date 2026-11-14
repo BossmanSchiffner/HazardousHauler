@@ -8,16 +8,18 @@ import {
   MODULE_CAPTIONS, garageUpgradeBenefit, addHaulerPreview,
   preloadStandardHauler, STANDARD_HAULER_ART, preloadObstacleArt, OBSTACLE_ART,
   preloadSwiftRunner, SWIFT_RUNNER_ART, createHaulerEffects, stopHaulerExhaust, playImpactSparks,
+  preloadArmouredTransport, ARMOURED_TRANSPORT_ART,
   STANDARD_HAULER_TRIMS, recolorStandardHauler, vehicleTexture, vehicleTrimName, addGoldPreviewSparkles,
   COLLECTIBLE_ART, preloadCollectibleArt, syncBlueprintVisuals, syncCargoPickupVisuals,
   cargoPickupTexture, cargoPickupGlowTexture, CARGO_PICKUP_GLOW_OFFSET_Y, recolorLargeCargoPickup,
   SPRITE_ART_SCALE, scaleSpriteArt, addModuleIcon,
-  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights, createNeonHalo, syncNeonHalo,
+  DEPOT_ART, preloadDepotArt, createBarrierLights, syncBarrierLights,
   syncSectorRoad, syncDepotEntrance, createDepotEntrance, hazardTexture, vehicleTint, bakeNeonRoadTexture,
   createDepotFacility, depotFacilityHeight, createSilhouetteShadow, syncSilhouetteShadow, SHADOW_TINT,
   GUARDRAIL_ART, createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon,
   GARAGE_DISPLAY_ART, preloadGarageDisplayArt,
   GARAGE_UPGRADE_ART, preloadGarageUpgradeArt, NEON_ART, NEON_THEME_ASSETS, preloadNeonVisuals,
+  brightenObstaclePixels, bakeCanvasSilhouetteTextures,
 } from '../src/game/rendering/industrial.js';
 import {balance} from '../src/game/data/balance.js';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
@@ -196,7 +198,7 @@ test('route visual pool serves cold long guardrails, hazards, shadows, cargo, De
       nodes.push(body, createSilhouetteShadow(scene, body),
         ...createBarrierLights(scene, body, 'forklift', 0));
       nodes.push(pool.image(232, i * 80, 'cargo_pickup_xl'),
-        pool.image(232, i * 80, 'cargo_pickup_glow_gold'));
+        pool.image(232, i * 80, 'cargo_pickup_glow_green'), pool.image(232, i * 80, 'cargo_pickup_sparkle'));
     }
     for (const side of ['left', 'right']) {
       nodes.push(createDepotFacility(scene, {distance: 500, side}, 100).container);
@@ -278,7 +280,7 @@ test('desktop scaling fills the viewport with RESIZE and no CSS canvas stretchin
   assert.ok(!/(?:^|;)\s*(?:width|height)\s*:\s*100%/.test(canvasRule), 'Phaser controls the aspect-correct display size');
 });
 
-function audioFeedbackFixture({supported = true, state = 'running', vibrate = () => true} = {}) {
+function audioFeedbackFixture({supported = true, state = 'running', vibrate = () => true, mobile = true} = {}) {
   const nodes = [], vibrations = [], warnings = [];
   const param = () => ({
     value: 0, events: [],
@@ -292,7 +294,7 @@ function audioFeedbackFixture({supported = true, state = 'running', vibrate = ()
     const result = {kind, gain: param(), frequency: param(), Q: param(), disconnected: 0, stops: [],
       connect(destination) { this.destination = destination; },
       disconnect() { this.disconnected++; },
-      start(time) { this.startTime = time; },
+      start(time, offset) { this.startTime = time; this.startOffset = offset; },
       stop(time) { this.stops.push(time); },
     };
     nodes.push(result);
@@ -330,7 +332,8 @@ function audioFeedbackFixture({supported = true, state = 'running', vibrate = ()
   const document = dom(), canvas = dom(), events = new EventEmitter(), gameEvents = new EventEmitter();
   canvas.ownerDocument = document;
   const destination = {};
-  const scene = {events, game: {canvas, events: gameEvents}, sound: supported ? {context, destination} : {}};
+  const scene = {events, game: {canvas, events: gameEvents, device: {os: {desktop: !mobile}}},
+    sound: supported ? {context, destination} : {}};
   const feedback = new RunFeedback(scene, {navigator: vibrate === null ? {} : {
     vibrate(pattern) { vibrations.push(pattern); return vibrate(pattern); },
   }, report: (...args) => warnings.push(args)});
@@ -363,7 +366,7 @@ test('audio feedback waits for pointer or keyboard interaction, resumes mobile c
 
 test('Normal-run music waits for interaction and uses the prior SFX level while SFX rise by 50 percent', async () => {
   const f = audioFeedbackFixture({state: 'suspended'});
-  const buffer = {id: 'background-music'};
+  const buffer = {id: 'background-music', duration: 120};
   f.feedback.setMusicBuffer(buffer);
   f.feedback.startRunMusic(true);
   assert.equal(f.nodes.length, 0, 'music cannot allocate or play before the first gesture');
@@ -373,11 +376,12 @@ test('Normal-run music waits for interaction and uses the prior SFX level while 
   assert.equal(f.feedback.musicSource.buffer, buffer);
   assert.equal(f.feedback.musicSource.loop, true);
   assert.deepEqual(f.feedback.musicGain.gain.events[0], ['set', 0.35, f.context.currentTime]);
+  const pausedSource = f.feedback.musicSource;
   f.feedback.suspend('manualPause');
-  assert.deepEqual(f.feedback.musicGain.gain.events.at(-1), ['set', 0, f.context.currentTime]);
+  assert.equal(f.feedback.musicSource, null);
+  assert.equal(pausedSource.stops.length, 1);
   f.feedback.resume('manualPause');
-  assert.deepEqual(f.feedback.musicGain.gain.events.at(-1),
-    ['target', 0.35, f.context.currentTime, 0.03]);
+  assert.deepEqual(f.feedback.musicGain.gain.events[0], ['set', 0.35, f.context.currentTime]);
   const musicEventsBeforeOverlay = f.feedback.musicGain.gain.events.length;
   f.feedback.suspend('tutorialCheckpoint', {music: false});
   assert.equal(f.feedback.musicGain.gain.events.length, musicEventsBeforeOverlay,
@@ -390,7 +394,72 @@ test('Normal-run music waits for interaction and uses the prior SFX level while 
   assert.equal(source.disconnected, 1);
   assert.equal(gain.disconnected, 1);
   f.feedback.startRunMusic(false);
-  assert.equal(f.feedback.musicSource, null, 'non-Normal runs do not retain music');
+  assert.equal(f.feedback.musicSource, null, 'disabled music does not retain a source');
+  f.feedback.destroy();
+});
+
+test('Endless music switches tracks without overlap and shares Normal volume and suspension', async () => {
+  const f = audioFeedbackFixture({state: 'suspended'});
+  const normal = {id: 'normal', duration: 120}, endless = {id: 'endless', duration: 120};
+  f.feedback.startRunMusic(true, endless);
+  assert.equal(f.nodes.length, 0, 'Endless music also waits for interaction');
+  f.document.emit('keydown');
+  await f.feedback.unlocking;
+  for (const buffer of [endless, normal, endless]) {
+    const previous = f.feedback.musicSource;
+    f.feedback.startRunMusic(true, buffer);
+    if (previous.buffer !== buffer) {
+      assert.equal(previous.stops.length, 1);
+      assert.equal(previous.disconnected, 1);
+    } else assert.equal(f.feedback.musicSource, previous, 'same-track requests do not create extra loops');
+    assert.equal(f.feedback.musicSource.buffer, buffer);
+    assert.equal(f.feedback.musicSource.loop, true);
+    assert.equal(f.feedback.musicGain.destination, f.destination, 'shared master mute and volume');
+    assert.deepEqual(f.feedback.musicGain.gain.events[0], ['set', 0.35, f.context.currentTime]);
+    const pausedSource = f.feedback.musicSource;
+    f.feedback.suspend('manualPause');
+    assert.equal(f.feedback.musicSource, null);
+    assert.equal(pausedSource.stops.length, 1);
+    f.feedback.resume('manualPause');
+    assert.deepEqual(f.feedback.musicGain.gain.events[0], ['set', 0.35, f.context.currentTime]);
+  }
+  const source = f.feedback.musicSource;
+  f.feedback.stopRunMusic();
+  assert.equal(source.stops.length, 1);
+  assert.equal(f.feedback.musicSource, null);
+  f.feedback.destroy();
+});
+
+test('paused music retains its playhead through nested suspensions and restarts fresh for a new run', () => {
+  const f = audioFeedbackFixture();
+  f.feedback.unlock();
+  f.feedback.startRunMusic(true, {duration: 10});
+  f.context.currentTime = 14.25;
+  const source = f.feedback.musicSource, gain = f.feedback.musicGain;
+  f.feedback.suspend('manualPause');
+  assert.equal(source.stops.length, 1);
+  assert.equal(source.disconnected, 1);
+  assert.equal(gain.disconnected, 1);
+  f.context.currentTime = 30;
+  f.feedback.suspend('blur');
+  f.feedback.unlock();
+  f.feedback.resume('manualPause');
+  assert.equal(f.feedback.musicSource, null, 'focus loss still blocks playback');
+  f.context.currentTime = 40;
+  f.feedback.resume('blur');
+  assert.equal(f.feedback.musicSource.startOffset, 4.25, 'paused time is not counted');
+  assert.equal(f.feedback.musicSource.startTime, 0);
+  f.context.currentTime = 49;
+  f.feedback.suspend('manualPause');
+  f.context.currentTime = 60;
+  f.feedback.resume('manualPause');
+  assert.equal(f.feedback.musicSource.startOffset, 3.25, 'the saved playhead wraps with the track');
+  f.feedback.suspend('manualPause');
+  f.feedback.stopRunMusic();
+  f.feedback.startRunMusic(true);
+  assert.equal(f.feedback.musicSource, null);
+  f.feedback.resetRun(195);
+  assert.equal(f.feedback.musicSource.startOffset, 0, 'ending while paused cannot silence the next run');
   f.feedback.destroy();
 });
 
@@ -487,7 +556,7 @@ test('each accepted cargo plays the five-note pickup chime through finite manage
   assert.deepEqual(notes.map(note => note.startTime), [10, 10.08, 10.16, 10.24, 10.32]);
   const expectedStops = [10.3, 10.38, 10.46, 10.54, 10.62];
   assert.ok(notes.every((note, index) => Math.abs(note.stops[0] - expectedStops[index]) < 1e-9));
-  assert.deepEqual(f.vibrations, [30]);
+  assert.deepEqual(f.vibrations, []);
   f.feedback.resetRun(195);
   assert.equal(f.feedback.voices.size, 0);
   f.feedback.destroy();
@@ -533,7 +602,7 @@ test('sound feedback synthesizes hard crashes, throttled scrapes and Depot whoos
   assert.equal(whoosh.filter.frequency.events[2][1], 300);
   assert.equal(first.source.startTime, 10.42);
   assert.equal(second.source.startTime, 10.6);
-  assert.deepEqual(f.vibrations, [[30, 20, 30], 200]);
+  assert.deepEqual(f.vibrations, [[30, 20, 30]]);
   for (let index = 0; index < 100; index++) f.feedback.impact();
   assert.equal(f.feedback.voices.size, 12, 'active sound voices are capped under burst load');
   assert.equal(f.context.buffers.length, 1, 'one reusable noise buffer, no per-hit samples');
@@ -547,7 +616,7 @@ test('sound feedback synthesizes hard crashes, throttled scrapes and Depot whoos
   assert.ok(f.nodes.every(node => node.disconnected === 1), 'each node disconnected exactly once');
 });
 
-test('haptic feedback triggers one 15ms tick per lane crossing, skips unsupported browsers and reports blocked APIs', () => {
+test('haptic feedback is mobile damage-only, skips unsupported browsers and reports blocked APIs', () => {
   const f = audioFeedbackFixture({supported: false});
   f.feedback.unlock();
   f.feedback.resetRun(86);
@@ -557,10 +626,21 @@ test('haptic feedback triggers one 15ms tick per lane crossing, skips unsupporte
   f.feedback.steer(159);
   f.feedback.steer(232);
   f.feedback.steer(305);
-  assert.deepEqual(f.vibrations, [15, 15, 15]);
+  f.feedback.cargoPickup();
+  f.feedback.depot();
+  f.feedback.impact({damaging: false});
+  assert.deepEqual(f.vibrations, [], 'steering, pickups, Depots and absorbed hits never vibrate');
+  f.feedback.impact();
+  assert.deepEqual(f.vibrations, [[30, 20, 30]]);
   f.feedback.resetSteering(195);
-  assert.equal(f.vibrations.length, 3, 'Depot centering/new runs are not lane changes');
+  assert.equal(f.vibrations.length, 1, 'centering does not vibrate');
   f.feedback.destroy();
+  const desktop = audioFeedbackFixture({mobile: false});
+  desktop.feedback.unlock();
+  desktop.feedback.impact();
+  desktop.feedback.suspend('pause');
+  assert.deepEqual(desktop.vibrations, [], 'desktop never calls the vibration API');
+  desktop.feedback.destroy();
   const unsupported = audioFeedbackFixture({supported: false, vibrate: null});
   unsupported.feedback.unlock();
   unsupported.feedback.cargoPickup(1);
@@ -706,11 +786,12 @@ test('chassis steering returns from +/-3.5 degrees over exactly 120ms; actual sc
 import {CHALLENGE_PROFILES} from '../src/game/data/challengeProfiles.js';
 import {MODULE_DEFS, formatStat} from '../src/game/core/modules.js';
 import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR_LIGHTING,
-  LEVEL_LIGHTING_PRESETS, LEVEL_SECTOR_LIGHTING, THEMES, OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS, HAZARD_LIGHTS}
+  LEVEL_LIGHTING_PRESETS, LEVEL_SECTOR_LIGHTING, THEMES, OVERDRIVE_LIGHTING, ENVIRONMENT_VISUALS, HAZARD_LIGHTS,
+  HAZARD_READABILITY}
   from '../src/game/data/environments.js';
 import {ambientAtPoint, createRoadEnvironment, destroyRoadEnvironment, lightingForSector,
   setRoadEnvironmentVisible, setRoadLighting, startRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
-import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS} from '../src/game/core/sectors.js';
+import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, CONTINUOUS_SECTORS} from '../src/game/core/sectors.js';
 import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES, depotWorldY, depotEntryAllowed} from '../src/game/core/depots.js';
 import {CHUNK_REGISTRIES, LEVEL2_CHUNK_REGISTRIES, createTrackGenerator} from '../src/game/core/trackGenerator.js';
 import {HAZARDS, guardrailContact, guardrailLayout, hazardGeometry, hazardHits, hazardX, LANE_CENTERS} from '../src/game/core/hazards.js';
@@ -758,7 +839,7 @@ test('modular tiles and retained legacy obstacle bake keys all have explicit fin
   }
 });
 
-function drawingScene({sourceLoaded = true, swiftLoaded = true, depotLoaded = true} = {}) {
+function drawingScene({sourceLoaded = true, swiftLoaded = true, armouredLoaded = true, depotLoaded = true} = {}) {
   const textures = new Map();
   const sources = new Map(OBSTACLE_ART.map((art, index) => {
     const [width, height] = [[278, 428], [290, 405],
@@ -777,6 +858,7 @@ function drawingScene({sourceLoaded = true, swiftLoaded = true, depotLoaded = tr
   }
   if (sourceLoaded) sources.set(STANDARD_HAULER_ART.sourceKey, {width: 2048, height: 2048});
   if (swiftLoaded) sources.set(SWIFT_RUNNER_ART.sourceKey, {width: 2048, height: 2048});
+  if (armouredLoaded) sources.set(ARMOURED_TRANSPORT_ART.sourceKey, {width: 896, height: 1200});
   for (const [index, art] of NEON_ART.entries()) {
     const [width, height] = [[478, 856], [430, 430], [96, 188], [96, 188]][index];
     sources.set(art.sourceKey, {width, height, key: art.sourceKey});
@@ -784,7 +866,7 @@ function drawingScene({sourceLoaded = true, swiftLoaded = true, depotLoaded = tr
   const canvasTexture = (key, width, height, commands = []) => {
     const context = {};
     for (const method of ['drawImage', 'save', 'restore', 'translate', 'rotate',
-      'clearRect', 'beginPath', 'moveTo', 'lineTo', 'closePath', 'fill']) {
+      'clearRect', 'fillRect', 'beginPath', 'moveTo', 'lineTo', 'closePath', 'fill']) {
       context[method] = (...args) => commands.push([method, ...args]);
     }
     context.getImageData = () => ({data: new Uint8ClampedArray(width * height * 4)});
@@ -964,6 +1046,41 @@ test('Swift artwork uses the existing trim IDs and tint colors without tinting i
   }
 });
 
+test('Armoured artwork reuses approved raster bytes and bakes centered run and preview frames once', () => {
+  const svg = readFileSync(new URL('../../art-direction/Armoured_Sprite.svg', import.meta.url), 'utf8');
+  const embedded = svg.match(/data:image\/png;base64,([A-Za-z0-9+/=\s]+)/);
+  assert.deepEqual(readFileSync(new URL(ARMOURED_TRANSPORT_ART.url)), Buffer.from(embedded[1], 'base64'));
+  const mock = drawingScene();
+  const loads = [];
+  mock.scene.load = {image: (...args) => loads.push(args)};
+  preloadArmouredTransport(mock.scene);
+  createIndustrialTextures(mock.scene);
+  for (const preview of [false, true]) {
+    const key = vehicleTexture('armoured', 'white-blue', preview);
+    assert.equal(key, preview ? 'cargo_preview_armoured' : 'cargo_ship_armoured');
+    const texture = mock.textures.get(key);
+    const [method, source, x, y, width, height] = texture.commands[0];
+    assert.equal(method, 'drawImage');
+    assert.equal(texture.commands.length, 1);
+    assert.ok(Math.abs(width / source.width - height / source.height) < 1e-12);
+    const scale = width / source.width;
+    const {bounds} = ARMOURED_TRANSPORT_ART;
+    assert.ok(x + bounds.x * scale >= 0 && x + (bounds.x + bounds.width) * scale <= texture.width);
+    assert.ok(y + bounds.y * scale >= 0 && y + (bounds.y + bounds.height) * scale <= texture.height);
+    assert.ok(Math.abs(x + (bounds.x + bounds.width / 2) * scale - texture.width / 2) < 1e-10);
+  }
+  const original = mock.textures.get('cargo_ship_armoured');
+  preloadArmouredTransport(mock.scene);
+  createIndustrialTextures(mock.scene);
+  assert.equal(loads.length, 0);
+  assert.equal(mock.textures.get('cargo_ship_armoured'), original);
+  const missing = drawingScene({armouredLoaded: false});
+  missing.scene.load = mock.scene.load;
+  preloadArmouredTransport(missing.scene);
+  assert.deepEqual(loads, [[ARMOURED_TRANSPORT_ART.sourceKey, ARMOURED_TRANSPORT_ART.url]]);
+  assert.throws(() => createIndustrialTextures(missing.scene), /Approved Armoured Transport sprite failed to load/);
+});
+
 test('Standard paint replaces amber and grey separately while preserving glass, cyan, outlines and alpha', () => {
   const width = 54, height = 65;
   const pixelAt = (pixels, x, y) => [...pixels.slice((y * width + x) * 4, (y * width + x + 1) * 4)];
@@ -1116,22 +1233,20 @@ test('unsprited obstacles have no baked procedural textures and never reuse carg
   assert.ok(!mock.textures.has('hazard_container_amber') && !mock.textures.has('hazard_container_core'));
 });
 
-test('road cargo pickups map payout to Small, Med, Lg and XL art with blue or gold glows', () => {
+test('road cargo pickups map payout to Small, Med, Lg and XL art with soft green glows', () => {
   assert.deepEqual([5, 10, 20, 25, 30].map(cargoPickupTexture), [
     'cargo_pickup_small', 'cargo_pickup_med', 'cargo_pickup_lg', 'cargo_pickup_xl', 'cargo_pickup_xl']);
   assert.deepEqual([5, 10, 20, 25, 30].map(cargoPickupGlowTexture), [
-    'cargo_pickup_glow_blue', 'cargo_pickup_glow_blue', 'cargo_pickup_glow_blue',
-    'cargo_pickup_glow_gold', 'cargo_pickup_glow_gold']);
+    ...Array(5).fill('cargo_pickup_glow_green')]);
   const mock = drawingScene();
   createIndustrialTextures(mock.scene);
   const fills = key => mock.textures.get(key).commands
     .filter(([method]) => method === 'fillStyle').map(([, color, alpha]) => [color, alpha]);
-  for (const key of ['cargo_pickup_glow_blue', 'cargo_pickup_glow_gold']) {
+  for (const key of ['cargo_pickup_glow_green']) {
     assert.deepEqual(TEXTURE_SIZES[key], [64, 64]);
     assert.ok(fills(key).length > 3 && fills(key).every(([, alpha]) => alpha <= 0.15), 'soft layered glow');
   }
-  assert.ok(fills('cargo_pickup_glow_gold').every(([color]) => color === PALETTE.gold));
-  assert.ok(fills('cargo_pickup_glow_blue').every(([color]) => color !== PALETTE.gold));
+  assert.ok(fills('cargo_pickup_glow_green').every(([color]) => color === 0x53ff96));
   const sprite = {...visualNode(), x: 73, y: 310};
   const glow = visualNode();
   syncBlueprintVisuals(sprite, glow, 900, CARGO_PICKUP_GLOW_OFFSET_Y);
@@ -1185,7 +1300,7 @@ test('Barrier, Rockslab and Signal Cabinet fit their existing solid bodies with 
 test('all imported obstacles bake only the approved artwork on transparent canvases, without grey boxes', () => {
   const mock = drawingScene();
   createIndustrialTextures(mock.scene);
-  const allowed = new Set(['save', 'translate', 'rotate', 'drawImage', 'restore']);
+  const allowed = new Set(['save', 'translate', 'rotate', 'drawImage', 'restore', 'putImageData']);
   for (const key of new Set(OBSTACLE_ART.flatMap(art => art.textures))) {
     const texture = mock.textures.get(key);
     assert.ok(texture.commands.length > 0, key);
@@ -1196,6 +1311,52 @@ test('all imported obstacles bake only the approved artwork on transparent canva
     assert.ok(draws.every(([, source]) => expectedSources.includes(source.key)), key);
     assert.ok(expectedSources.every(source => draws.some(([, image]) => image.key === source)), key);
   }
+});
+
+test('obstacle readability baking gently brightens midtones, increases contrast and preserves alpha', () => {
+  const pixels = new Uint8ClampedArray([64, 64, 64, 255, 192, 192, 192, 128, 12, 34, 56, 0]);
+  brightenObstaclePixels(pixels);
+  assert.ok(pixels[0] > 64);
+  assert.ok(pixels[4] > 192);
+  assert.ok(pixels[4] - pixels[0] > 192 - 64);
+  assert.deepEqual([pixels[3], pixels[7], pixels[11]], [255, 128, 0]);
+  assert.deepEqual(Array.from(pixels.slice(8)), [12, 34, 56, 0]);
+});
+
+test('Canvas silhouettes are pre-baked once so unsupported sprite tint cannot draw ghost copies', () => {
+  const mock = drawingScene();
+  mock.scene.sys = {game: {renderer: {currentContext: {}}}};
+  createIndustrialTextures(mock.scene);
+  for (const key of ['cargo_ship', 'cargo_trailer', 'cargo_hazard', 'chicane_entry']) {
+    const shadowKey = mock.scene.silhouetteTextureKeys.get(key);
+    assert.ok(shadowKey);
+    const texture = mock.textures.get(shadowKey);
+    assert.equal(texture.commands.find(([method]) => method === 'drawImage')[1].key, key);
+    assert.equal(texture.context.fillStyle, '#050a12');
+    assert.equal(texture.context.globalCompositeOperation, 'source-over');
+  }
+  const count = mock.textures.size;
+  bakeCanvasSilhouetteTextures(mock.scene);
+  assert.equal(mock.textures.size, count, 'warming twice does not duplicate textures');
+  mock.scene.phase = 'running';
+  assert.throws(() => bakeCanvasSilhouetteTextures(mock.scene), /baked before gameplay/);
+});
+
+test('Canvas pooled shadows retain their baked silhouette instead of restoring colored source art while scrolling', () => {
+  const {scene, created} = effectsScene();
+  scene.silhouetteTextureKeys = new Map([['cargo_hazard', 'cargo_hazard_silhouette']]);
+  const sprite = {x: 86, y: 200, texture: {key: 'cargo_hazard'}, frame: {name: '__BASE'},
+    scaleX: 1.1, scaleY: 1.1, depth: HAZARD_READABILITY.depth, alpha: 1};
+  const shadow = createSilhouetteShadow(scene, sprite);
+  const count = created.length;
+  for (const y of [200, 400, 600]) {
+    sprite.y = y;
+    syncSilhouetteShadow(shadow, sprite);
+    assert.equal(shadow.texture.key, 'cargo_hazard_silhouette');
+    assert.equal(shadow.y, y + balance.SHADOW_OFFSET_Y);
+  }
+  assert.equal(created.length, count);
+  assert.equal(shadow.textureSets, undefined);
 });
 
 test('Barrier replaces concrete dividers in every sector while retaining each existing texture key and footprint', () => {
@@ -1596,7 +1757,7 @@ test('Barrier and Sweeper caution lights share amber double flashes and follow a
   }
 });
 
-test('every other obstacle carries one slow amber beacon and Neon halos pulse without allocating', () => {
+test('every other obstacle carries one slow amber beacon without allocating during updates', () => {
   const images = [];
   const node = (x, y, key) => {
     const image = {...visualNode(), x, y, key, setDepth(depth) { this.depth = depth; return this; },
@@ -1618,25 +1779,38 @@ test('every other obstacle carries one slow amber beacon and Neon halos pulse wi
     assert.ok(lights[0].alpha > HAZARD_LIGHTS.beaconIdleAlpha && lights[0].alpha < 1);
     assert.ok(lights[0].depth > 16 && lights[0].blendMode === 'ADD');
   }
-  const count = images.length;
-  const sprite = {x: 100, y: 300, originX: 0.25, originY: 0.5, displayWidth: 80, displayHeight: 60};
-  const halo = createNeonHalo(scene, sprite, 1, 0, true);
-  assert.equal(halo.key, HAZARD_LIGHTS.neonHalo.key);
-  assert.equal(halo.tint, HAZARD_LIGHTS.neonHalo.tints[1]);
-  assert.equal(halo.blendMode, 'ADD');
-  assert.equal(halo.x, 120, 'centred on the visual art, not the anchor');
-  assert.equal(halo.displayWidth, 80 + HAZARD_LIGHTS.neonHalo.padPx);
-  assert.equal(halo.depth, HAZARD_LIGHTS.neonHalo.nightDepth);
-  const alphas = new Set();
-  for (let time = 0; time <= 4000; time += 100) {
-    syncNeonHalo(halo, sprite, time, true);
-    alphas.add(halo.alpha);
-    assert.ok(halo.alpha >= HAZARD_LIGHTS.neonHalo.alphaMin - 1e-9 && halo.alpha <= HAZARD_LIGHTS.neonHalo.alphaMax + 1e-9);
+  assert.equal(images.length, 5, 'warning-light updates reuse their original images');
+});
+
+test('Neon obstacle halo textures are not baked', () => {
+  const mock = drawingScene();
+  bakeNeonRoadTexture(mock.scene);
+  assert.ok([...mock.textures.keys()].every(key => !key.startsWith('glow_hazard_ring')));
+});
+
+test('cargo sparkle follows rotating pickup corners, twinkles and dims on rejection without allocation', () => {
+  const sprite = {...visualNode(), x: 120, y: 300, displayWidth: 32, displayHeight: 32,
+    setDepth(depth) { this.depth = depth; return this; }, setTint(tint) { this.tint = tint; return this; }};
+  const glow = {...visualNode(),
+    setDepth(depth) { this.depth = depth; return this; }};
+  const sparkle = {...visualNode(), setDepth(depth) { this.depth = depth; return this; }};
+  for (const night of [false, true]) for (const accepted of [true, false]) {
+    syncCargoPickupVisuals(sprite, glow, 1910, night, accepted, sparkle);
+    assert.equal(sprite.alpha, accepted ? 1 : 0.35);
+    assert.ok(sparkle.alpha > 0.6 * (accepted ? 1 : 0.35));
+    assert.ok(sparkle.alpha <= 0.65 * (accepted ? 1 : 0.35));
+    assert.ok(sparkle.depth > sprite.depth);
+    assert.ok(Math.abs(Math.hypot(sparkle.x - sprite.x, sparkle.y - sprite.y) -
+      Math.hypot(32 * 0.32, 32 * 0.28)) < 1e-9);
+    sprite.x += 40;
+    sprite.y += 70;
+    syncCargoPickupVisuals(sprite, glow, 0, night, accepted, sparkle);
+    assert.ok(sparkle.alpha < 0.05, 'brief glint, not continuous flashing');
+    assert.equal(glow.x, sprite.x);
+    assert.equal(glow.y, sprite.y + CARGO_PICKUP_GLOW_OFFSET_Y * SPRITE_ART_SCALE);
+    sprite.x = 120;
+    sprite.y = 300;
   }
-  assert.ok(alphas.size > 5, 'halo pulses');
-  syncNeonHalo(halo, sprite, 0, false);
-  assert.equal(halo.depth, HAZARD_LIGHTS.neonHalo.dayDepth);
-  assert.equal(images.length, count + 1, 'halo sync never allocates');
 });
 
 test('Dusk and Night cargo pickups and embedded shadows dim only slightly and preserve rejection cues', () => {
@@ -1929,14 +2103,15 @@ test('roadside obstacles preserve projection size and procedural housing only wh
 });
 
 test('garage display sprites preserve exact approved embedded RGBA artwork and preload once', () => {
-  const names = {standard: 'StandardHauler_Display_Sprite.svg', swift: 'SwiftRunner_Display_Sprite.svg'};
+  const names = {standard: 'StandardHauler_Display_Sprite.svg', swift: 'SwiftRunner_Display_Sprite.svg',
+    armoured: 'Armoured_Display_Sprite.svg'};
   const loads = [];
   const textures = new Set();
   const scene = {textures: {exists: key => textures.has(key)},
     load: {image: (key, url) => { loads.push([key, url]); textures.add(key); }}};
   preloadGarageDisplayArt(scene);
   preloadGarageDisplayArt(scene);
-  assert.equal(loads.length, 2);
+  assert.equal(loads.length, 3);
   for (const art of GARAGE_DISPLAY_ART) {
     const svg = readFileSync(new URL(`../../art-direction/${names[art.id]}`, import.meta.url), 'utf8');
     const embedded = svg.match(/data:image\/png;base64,([A-Za-z0-9+/=\s]+)/);
@@ -1972,7 +2147,7 @@ test('guardrails assemble entry, tiling mids and exit at exact collision geometr
     const layout = guardrailLayout(hazard);
     const side = lane === 0 ? 1 : -1;
     assert.equal(structure.type, 'container');
-    assert.deepEqual([structure.x, structure.y, structure.depth], [x, 400, 5]);
+    assert.deepEqual([structure.x, structure.y, structure.depth], [x, 400, HAZARD_READABILITY.depth]);
     assert.deepEqual([structure.width, structure.height], [layout.width, layout.length]);
     const parts = structure.guardrailParts;
     assert.deepEqual(parts.map(part => part.key), ['chicane_exit',
@@ -2008,12 +2183,12 @@ test('guardrails assemble entry, tiling mids and exit at exact collision geometr
       assert.equal(beacon.alpha, alpha);
       assert.deepEqual([beacon.x, beacon.y], [structure.x + entry.x, structure.y + entry.y]);
       assert.equal(beacon.blendMode, 'ADD');
-      assert.equal(beacon.depth, 16.1);
+      assert.ok(beacon.depth > structure.depth);
     }
     structure.y += 50;
     syncGuardrailBeacon(structure, 900, false);
     assert.equal(beacon.y, structure.y + entry.y, 'entry beacon remains world-pinned while scrolling');
-    assert.equal(beacon.depth, 6);
+    assert.ok(beacon.depth > structure.depth);
   }
 });
 
@@ -2049,6 +2224,24 @@ test('guardrail grind sparks are pooled, follow the contact point and stop with 
   assert.equal(emitter.killed, 1);
   syncGuardrailSparks(undefined, scrape);
   assert.equal(created.length, count, 'spark emitter is reused, never allocated per contact');
+});
+
+test('non-Neon roads bake branching cracks and worn patches while Neon stays unweathered', () => {
+  const mock = drawingScene();
+  createIndustrialTextures(mock.scene);
+  const worn = ['industrial_road', 'dustlands_road', 'reactor_road', 'overdrive_road', 'level2_road'];
+  for (const key of [...worn, 'neon_road', 'road_neon_base']) {
+    const commands = mock.textures.get(key).commands;
+    const cracks = commands.filter(([method, width, , alpha]) =>
+      method === 'lineStyle' && width === 2 && alpha === 0.38);
+    assert.equal(cracks.length, worn.includes(key) ? 14 : 0, key);
+    if (!worn.includes(key)) continue;
+    const patches = commands.filter(([method, points]) =>
+      method === 'fillPoints' && points.length === 4 && points[3].y - points[0].y === 32);
+    assert.equal(patches.length, 5, key);
+    assert.ok(patches.every(([, points]) => points.every(({x, y}) =>
+      x > 50 && x < 340 && y > 0 && y < TEXTURE_SIZES[key][1])), key);
+  }
 });
 
 test('five road themes stay distinct without pickup/hazard colors; new roadside art stays inside the tile', () => {
@@ -2384,7 +2577,7 @@ function effectsScene() {
   return {scene, created, textures, graphics};
 }
 
-function roadEnvironmentFixture() {
+function roadEnvironmentFixture(renderer = {}) {
   const fixture = effectsScene();
   const {scene, created} = fixture;
   const image = scene.add.image;
@@ -2393,7 +2586,7 @@ function roadEnvironmentFixture() {
     setOrigin(x, y) { this.originX = x; this.originY = y; return this; },
     destroy() { this.destroyed = true; },
   });
-  scene.sys = {settings: {key: 'environment-test'}};
+  scene.sys = {game: {renderer}, settings: {key: 'environment-test'}};
   const texture = {key: 'ambient_environment-test'};
   scene.textures.createCanvas = (key, width, height) => {
     Object.assign(texture, {key, width, height,
@@ -2437,6 +2630,26 @@ function roadEnvironmentFixture() {
   return {...fixture, view, ship, texture, tweens, count: created.length};
 }
 
+test('Canvas ambient lighting repairs an early source-over blend cache without covering the road', () => {
+  const renderer = {
+    currentContext: {globalCompositeOperation: 'source-over'},
+    blendModes: {MULTIPLY: 'source-over'},
+  };
+  const {view} = roadEnvironmentFixture(renderer);
+  assert.equal(renderer.blendModes[view.ambient.blendMode], 'multiply');
+  assert.equal(renderer.currentContext.globalCompositeOperation, 'source-over');
+});
+
+test('Canvas ambient lighting rejects unsupported multiply instead of drawing an opaque mask', () => {
+  const context = {
+    get globalCompositeOperation() { return 'source-over'; },
+    set globalCompositeOperation(_operation) {},
+  };
+  assert.throws(() => roadEnvironmentFixture({
+    currentContext: context, blendModes: {MULTIPLY: 'source-over'},
+  }), /requires Canvas multiply blending/);
+});
+
 test('Neon road and sign art preloads from the approved Art Direction rasters, once per key', () => {
   const loaded = [];
   const scene = {textures: {exists: () => false}, load: {image: (key, url) => loaded.push([key, url])}};
@@ -2451,20 +2664,55 @@ test('Neon road and sign art preloads from the approved Art Direction rasters, o
   preloadNeonVisuals(baked);
 });
 
+test('Neon road ambient floor preserves dark shoulders and leaves headlight cones unchanged', () => {
+  const {scene, view, ship} = roadEnvironmentFixture();
+  scene.levelId = 'level4';
+  scene.runMode = 'normal';
+  setRoadEnvironmentVisible(view, true, scene);
+  setRoadLighting(view, LEVEL_SECTOR_LIGHTING.level4[2], true);
+  updateRoadEnvironment(view, scene, ship, 1600, 0, 0);
+  const sample = worldX => {
+    const x = Math.floor((worldX + 32) * view.texture.width / (view.width + 64));
+    const y = Math.floor(100 * view.texture.height / (view.height + 64));
+    const offset = (y * view.texture.width + x) * 4;
+    return Array.from(view.pixels.data.slice(offset, offset + 3));
+  };
+  assert.deepEqual(sample(195), [150, 146, 180], 'road stays readable outside every light pool');
+  assert.deepEqual(sample(0), [86, 72, 126], 'background retains the original purple darkness');
+  assert.ok(sample(ROAD_LEFT + 1)[1] >= 146, 'edge never falls below the road floor');
+  assert.ok(view.beams.every(beam => beam.displayWidth === 84 && beam.displayHeight === 220 &&
+    beam.alpha === 0.35), 'existing cone dimensions and intensity stay unchanged');
+  scene.levelId = 'level3';
+  updateRoadEnvironment(view, scene, ship, 1600, 0, 0);
+  assert.deepEqual(sample(195), [86, 72, 126], 'other levels do not inherit the road brightening');
+  destroyRoadEnvironment(view, scene);
+  scene.routeVisualPool.destroy();
+});
+
 test('layered road textures are solid, with additive Dustlands dust and multiply Industrial grunge, never cutouts', () => {
   const mock = drawingScene();
   createIndustrialTextures(mock.scene);
   const neonRoad = mock.textures.get('road_neon_base');
   assert.deepEqual([neonRoad.width, neonRoad.height], TEXTURE_SIZES.road_neon_base);
   assert.equal(neonRoad.width, 390);
-  const [roadDraw, ...seamDraws] = neonRoad.commands.filter(([method]) => method === 'drawImage');
+  const [roadDraw, ...otherDraws] = neonRoad.commands.filter(([method]) => method === 'drawImage');
+  const seamDraws = otherDraws.filter(([, image]) => image.key === 'neon_source_road_neon_base');
   assert.equal(roadDraw[1].key, 'neon_source_road_neon_base');
   // Curb-to-curb art span lands on the gameplay road edges.
-  const [, , roadX, , drawnWidth] = roadDraw;
+  const [, , sourceX, sourceY, sourceWidth, sourceHeight, roadX, , drawnWidth] = roadDraw;
+  assert.equal(sourceX, 0);
+  assert.ok(sourceY >= 50, 'exclude the partial fan/obstacle props at the top of the supplied art');
+  assert.equal(sourceY + sourceHeight, 856);
+  assert.equal(sourceWidth, 478);
   assert.ok(Math.abs(roadX + drawnWidth * 100 / 572 - ROAD_LEFT) < 0.01);
   assert.ok(Math.abs(roadX + drawnWidth * 464 / 572 - ROAD_RIGHT) < 0.01);
-  assert.ok(drawnWidth * 1024 / 572 >= neonRoad.height + seamDraws.length, 'seam band comes from real art rows');
+  assert.ok(sourceHeight * drawnWidth / sourceWidth >= neonRoad.height + seamDraws.length,
+    'seam band comes from the prop-free art rows');
+  assert.ok(seamDraws.every(([, , , y]) => y >= sourceY),
+    'seam blending never reintroduces cropped props');
   assert.equal(seamDraws.length, 72, 'vertical wrap is crossfaded into a seamless tile');
+  assert.equal(otherDraws.length, seamDraws.length,
+    'the complete road artwork, including its center pipes and grid, is preserved');
   const hex = mock.textures.get('overlay_neon_hex');
   assert.deepEqual([hex.width, hex.height], TEXTURE_SIZES.overlay_neon_hex);
   assert.ok(hex.commands.some(([method, image]) => method === 'drawImage' && image.key === 'neon_source_overlay_neon_hex'));
@@ -2496,7 +2744,8 @@ test('layered road textures are solid, with additive Dustlands dust and multiply
     }), id);
     assert.ok(!road.commands.some(([method]) => ['clearRect', 'fill'].includes(method)), 'no alpha carving');
     assert.equal(preset.blendMode, {dustlands: 'ADD', neon: 'NORMAL'}[id] ?? 'MULTIPLY');
-    assert.ok(preset.overlayAlpha > 0 && preset.overlayAlpha < (id === 'neon' ? 0.9 : 0.2));
+    if (id === 'neon') assert.equal(preset.overlayAlpha, 0, 'Neon hex overlay is disabled during runs');
+    else assert.ok(preset.overlayAlpha > 0 && preset.overlayAlpha < 0.2);
   }
   assert.notEqual(signatures.get('industrial'), signatures.get('dustlands'));
   assert.ok(!mock.textures.has('road_decal_oil'));
@@ -2516,7 +2765,7 @@ test('layered road textures are solid, with additive Dustlands dust and multiply
   assert.equal(THEMES.neon.hazardGlowIntensity, 1.4);
 });
 
-test('sector lighting follows each live level boundary and continuous uses Mid-Day independently', () => {
+test('sector lighting follows level boundaries and the Continuous stage day-night cycle', () => {
   assert.deepEqual(LEVEL_LIGHTING_PRESETS.level4, ['dusk', 'dusk', 'night', 'night']);
   for (const [levelId, sectors] of Object.entries(IMPLEMENTED_LEVELS)) {
     const finish = sectors.at(-1).endsAt;
@@ -2525,10 +2774,15 @@ test('sector lighting follows each live level boundary and continuous uses Mid-D
       assert.equal(LEVEL_SECTOR_LIGHTING[levelId][index], expected);
       assert.equal(lightingForSector(sector, sector.startsAt, finish, 'normal', levelId), expected);
       assert.equal(lightingForSector(sector, sector.endsAt - 0.01, finish, 'normal', levelId), expected);
-      assert.equal(lightingForSector(sector, sector.startsAt, finish, 'continuous', levelId), SECTOR_LIGHTING[1]);
       if (!['level3', 'level4'].includes(levelId)) assert.notEqual(expected, SECTOR_LIGHTING[3]);
     }
     assert.equal(lightingForSector(sectors.at(-1), finish, finish, 'normal', levelId), OVERDRIVE_LIGHTING, levelId);
+  }
+  const continuousLighting = [SECTOR_LIGHTING[1], SECTOR_LIGHTING[1], SECTOR_LIGHTING[2],
+    LEVEL_SECTOR_LIGHTING.level4[1]];
+  for (const [index, sector] of CONTINUOUS_SECTORS.entries()) {
+    assert.equal(lightingForSector(sector, sector.startsAt, Infinity, 'continuous', 'level1'),
+      continuousLighting[index], `Continuous stage ${index + 1}`);
   }
   assert.deepEqual(SECTOR_LIGHTING.map(light => light.tint), [0xe8d0b0, 0xffffff, 0x8c6b9e, 0x6a7590]);
   assert.deepEqual(SECTOR_LIGHTING.map(light => light.headlights), [false, false, true, true]);
@@ -2688,6 +2942,21 @@ test('road skid decals exist only inside indicated-side longitudinal Depot braki
     destroyRoadEnvironment(view, scene);
     scene.routeVisualPool.destroy();
   }
+});
+
+test('Neon road readability follows the Endless sector theme without changing the light cones', () => {
+    const {scene, view, ship} = roadEnvironmentFixture();
+    scene.levelId = 'level1';
+    scene.runMode = 'continuous';
+    scene.currentSector = {themeId: 'neon'};
+    setRoadLighting(view, SECTOR_LIGHTING[2], true);
+    setRoadEnvironmentVisible(view, true, scene);
+    updateRoadEnvironment(view, scene, ship, 6000, 0, 0, {distance: Infinity});
+    assert.equal(view.lastNeonReadability, true);
+    assert.ok(view.beams.every(beam => beam.width === 84 && beam.height === 220),
+      'Neon road treatment leaves the existing headlight cones unchanged');
+    destroyRoadEnvironment(view, scene);
+    scene.routeVisualPool.destroy();
 });
 
 test('sector transition lasts 1.8 seconds with smooth ambient and camera easing and bounded streaks', () => {
@@ -3051,8 +3320,8 @@ test('HUD backing and Depot decoration stay below text and leave a clear warning
   const node = (...args) => ({args, setDepth(depth) { this.depth = depth; return this; }});
   const scene = {add: {rectangle: node, image: node}};
   const backing = addHudBacking(scene, 390);
-  assert.deepEqual(backing.args, [195, 35, 390, 70, 0x0c111a, 0.88]);
-  assert.ok(35 + 70 / 2 < 120, 'HUD backing must end above the Depot notice');
+  assert.deepEqual(backing.args, [195, 39, 390, 78, 0x0c111a, 0.88]);
+  assert.ok(39 + 78 / 2 < 120, 'HUD backing must end above the Depot notice');
   const depot = addDepotDetails(scene, 195, 237);
   assert.deepEqual(depot.args, [195, 237, 'industrial_depot']);
   assert.equal(depot.depth, 32);

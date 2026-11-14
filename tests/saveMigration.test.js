@@ -5,6 +5,7 @@ import {CARGO_CAPACITY_ID, MODULE_DEFS, loadoutStats, moduleStatus, equipModule,
 import {SLOT_MAX} from '../src/game/core/economy.js';
 import {createRunEconomy, settleRun} from '../src/game/core/depotEconomy.js';
 import {purchaseVehicle, selectVehicle, vehicleStatus} from '../src/game/core/vehicles.js';
+import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 
 const SAVE_KEY = 'cargo-run-prototype-profile-v1';
 const BACKUP_KEY = `${SAVE_KEY}-unreadable-backup`;
@@ -33,6 +34,19 @@ function mockStorage(context, raw = null) {
   });
   return fixture;
 }
+
+test('Endless distance survives saving without inheriting legacy campaign distance', context => {
+  const fixture = mockStorage(context, JSON.stringify({
+    ...defaultProfile(), schemaVersion: 12, bestDistance: 90000, coins: 1234,
+  }));
+  const migrated = loadProfile();
+  assert.equal(migrated.endlessBestDistance, 0);
+  assert.equal(migrated.coins, 1234, 'adding the record must not reset existing saves');
+  assert.equal(saveProfile({...migrated, endlessBestDistance: 6789}), true);
+  assert.equal(loadProfile().endlessBestDistance, 6789);
+  assert.equal(JSON.parse(fixture.values.get(SAVE_KEY)).schemaVersion, SCHEMA_VERSION);
+  assert.equal(normalizeProfile({...migrated, endlessBestDistance: -1}).endlessBestDistance, 0);
+});
 
 test('corrupt save recovery warns visibly and preserves original bytes before any replacement', context => {
   const fixture = mockStorage(context);
@@ -355,7 +369,7 @@ test('v10 capacity migration keeps ranks, wallet, full loadouts and grandfathere
         ownedColorIds: ['default'], equippedColorId: 'default'},
     }};
   const profile = normalizeProfile(old);
-  assert.equal(profile.schemaVersion, 12);
+  assert.equal(profile.schemaVersion, SCHEMA_VERSION);
   assert.equal(profile.coins, 912);
   assert.equal(profile.cargoCapacityRank, 6);
   assert.equal(profile.reinforcedCargoRank, 3);
@@ -407,7 +421,8 @@ test('sector evidence migrates only from the correct Level normal-run records, n
   const initial = defaultProfile();
   const source = {...initial, schemaVersion: 10, bestDistance: 99999, milestones: ['sector3', 'sector4'],
     levelProgress: {
-      level1: {...initial.levelProgress.level1, bestDistance: 2999, overdriveBestDistance: 99999},
+      level1: {...initial.levelProgress.level1,
+        bestDistance: GAME_BALANCE.routes.level1.sectorEndsMeters[2] - 1, overdriveBestDistance: 99999},
       level2: {...initial.levelProgress.level2, unlocked: true, sector3CheckpointUnlocked: true},
     }};
   const profile = normalizeProfile(source);
@@ -417,17 +432,23 @@ test('sector evidence migrates only from the correct Level normal-run records, n
   assert.equal(moduleStatus(profile, 'util_insurance').unlocked, false, 'unlocking Level 2 is not entering it');
   const exact = normalizeProfile({...source, levelProgress: {
     ...source.levelProgress,
-    level1: {...source.levelProgress.level1, bestDistance: 4000},
-    level2: {...source.levelProgress.level2, checkpointBestDistance: 1500},
+    level1: {...source.levelProgress.level1, bestDistance: GAME_BALANCE.routes.level1.finishDistanceMeters},
+    level2: {...source.levelProgress.level2, checkpointBestDistance:
+      GAME_BALANCE.routes.level2.sectorEndsMeters[2] - GAME_BALANCE.routes.level2.checkpointDistanceMeters},
   }});
   assert.equal(moduleStatus(exact, 'cargo_light').unlocked, true);
   assert.equal(moduleStatus(exact, 'def_shield').unlocked, true);
   assert.deepEqual(exact.levelProgress.level2.completedSectors, [3],
-    'a checkpoint record adds its 1,500 m start but does not invent earlier completions');
+    'a checkpoint record adds its authored start but does not invent earlier completions');
   const completion = normalizeProfile({...source, levelProgress: {
     ...source.levelProgress, level1: {...source.levelProgress.level1, completed: true},
   }});
-  assert.equal(moduleStatus(completion, 'def_plating').unlocked, true);
+  assert.equal(moduleStatus(completion, 'def_plating').unlocked, false,
+    'Plating now requires completing Level 2, Sector 4, not Level 1');
+  const plated = normalizeProfile({...completion, levelProgress: {
+    ...completion.levelProgress, level2: {...completion.levelProgress.level2, completed: true},
+  }});
+  assert.equal(moduleStatus(plated, 'def_plating').unlocked, true);
   assert.equal(moduleStatus(completion, 'util_insurance').unlocked, false);
 });
 

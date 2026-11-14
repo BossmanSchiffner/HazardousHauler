@@ -12,6 +12,17 @@ import {balance} from '../src/game/data/balance.js';
 const coin = value => ({kind: 'coin', mass: 1, slots: 1, value});
 const freight = value => ({kind: 'freight', mass: 2, slots: 1, value});
 
+test('Endless cargo is always worth 25 before 6000m and 30 thereafter, including repeat cycles', () => {
+  for (const distance of [0, 1999, 2000, 4000, 5999.999, 6000, 7999, 8000, 16000, 50000]) {
+    for (const roll of [0, 0.1, 0.5, 0.999999]) {
+      const pickup = cargoPickupForRoll(distance, roll, 'level1', 'continuous');
+      assert.equal(pickup.value, distance >= 6000 ? 30 : 25);
+      assert.equal(pickup.slots, 1);
+      assert.ok(['coinStack', 'freight'].includes(pickup.kind));
+    }
+  }
+});
+
 test('cargo chain: four cosmetic trailers snake with distinct rotations, fixed hitch spacing and bounded history at 30/60/120 Hz', () => {
   for (const hz of [30, 60, 120]) {
     const cab = {x: 195, y: 684, rotation: 0};

@@ -12,7 +12,7 @@ import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 
 test('catalog meets the documented full-scope counts', () => {
   assert.equal(MODULES.length, 24);
-  assert.equal(VEHICLES.length, 5);
+  assert.equal(VEHICLES.length, 4);
   assert.equal(SECTORS.length, 4);
   assert.equal(new Set(MODULES.map(x => x.id)).size, MODULES.length);
 });
@@ -72,10 +72,10 @@ test('slot purchase requires sequential eligibility, milestone and coins', () =>
   assert.equal(canUnlockSlot(profile, 3), true);
   assert.equal(canUnlockSlot(profile, 4), false);
 });
-test('Apex requires all other purchasable vehicles and Sector 4', () => {
-  const p = {ownedVehicleIds: ['standard', 'swift', 'armoured', 'prospector'], milestones: []};
+test('Apex requires Swift, Armoured and Level 4 Sector 4', () => {
+  const p = {ownedVehicleIds: ['standard', 'swift', 'armoured'], milestones: ['level1,sector4']};
   assert.equal(canUnlockApex(p), false);
-  p.milestones.push('level1,sector4');
+  p.milestones.push('level4,sector4');
   assert.equal(canUnlockApex(p), true);
   p.ownedVehicleIds.splice(2, 1);
   assert.equal(canUnlockApex(p), false);

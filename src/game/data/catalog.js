@@ -30,11 +30,12 @@ export const MODULES = [
   id, name, family, sector, maxLevel: GAME_BALANCE.upgrades.maxRank,
 }));
 
+export const IMPLEMENTED_VEHICLE_IDS = Object.freeze(['standard', 'swift', 'armoured']);
+
 export const VEHICLES = [
   ['standard', 'Standard Hauler', 'Balanced'],
   ['swift', 'Swift Runner', 'Faster steering, lower cargo capacity'],
-  ['armoured', 'Armoured Transport', 'More protection, less handling'],
-  ['prospector', 'Prospector', 'More rare finds; Coins boost after Apex'],
+  ['armoured', 'Armoured Transport', '4 Hull, 1 Shield, 16 base cargo; 20% slower steering'],
   ['apex', 'Apex Transport', '+25% beneficial effects of all equipped modules', true],
 ].map(([id, name, ability, final]) => ({
   id, name, ability, bpCost: GAME_BALANCE.vehicles[id].blueprintCost, ...(final ? {final} : {}),

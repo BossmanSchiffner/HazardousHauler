@@ -76,6 +76,18 @@ test('a new profile starts with no free module, the base cargo capacity, and can
   assert.ok(Math.abs(loadoutStats(bought.profile).handling - PRECISION.values[0]) < 1e-9);
 });
 
+test('Standard starts at two Hull, plating increases it, and other chassis keep their own base Hull', () => {
+  const profile = defaultProfile();
+  assert.equal(loadoutStats(profile, 'standard').hull, 2);
+  for (const id of ['swift', 'apex']) {
+    assert.equal(loadoutStats(profile, id).hull, 3, id);
+  }
+  assert.equal(loadoutStats(profile, 'armoured').hull, 4);
+  profile.ownedModules.def_plating = 1;
+  profile.shipStates.standard.equippedModuleIds = ['def_plating'];
+  assert.equal(loadoutStats(profile, 'standard').hull, 3);
+});
+
 test('milestones come from distance, persist, and raise the level cap', () => {
   const [, l1Sector2, l1Sector3, l1Sector4] = L1.sectorStartsMeters;
   const {baseLevelCap, maxRank} = GAME_BALANCE.upgrades;
@@ -439,8 +451,8 @@ test('owned equipment remains equipable after the new gate, including higher gra
 
 test('supported route loadout descriptions explicitly equip purchased capacity to preserve their existing stats', () => {
   const profiles = supportedTrackProfiles('level1');
-  for (const chassis of ['standard', 'swift']) {
-    const offset = chassis === 'swift' ? SWIFT.cargoCapacityOffset : 0;
+  for (const chassis of ['standard', 'swift', 'armoured']) {
+    const offset = GAME_BALANCE.vehicles[chassis].cargoCapacityOffset ?? 0;
     assert.equal(profiles.find(profile => profile.id === `${chassis}-c1-s2-full`).capacity, CARGO.capacityByRank[1] + offset);
     assert.equal(profiles.find(profile => profile.id === `${chassis}-c8-s5-full`).capacity, MAX_CAPACITY + offset);
   }

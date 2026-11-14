@@ -73,7 +73,7 @@ test('Blueprints are independent of cargo capacity, persist once through reload/
   assert.equal(awardBlueprint(reloaded, reward, {road: true}).profile, reloaded);
   const crashed = {...reloaded, coins: 25, totalRuns: 1};
   assert.equal(normalizeProfile(crashed).blueprints, 1);
-  const apex = {...profile, ownedVehicleIds: ['standard', 'swift', 'armoured', 'prospector', 'apex']};
+  const apex = {...profile, ownedVehicleIds: ['standard', 'swift', 'armoured', 'apex']};
   const converted = awardBlueprint(apex, reward, {road: true});
   assert.equal(converted.profile.blueprints, 0);
   assert.equal(converted.profile.coins, reward.amount * BLUEPRINT_TO_COINS);

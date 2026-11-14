@@ -75,12 +75,12 @@ const define = (id, summary) => {
 /** Implemented modules. `benefit` scales per level; `drawback` is fixed and never boosted. */
 export const MODULE_DEFS = Object.freeze([
   define('hand_precision', 'Sharper steering response, loaded or empty.'),
-  define('cargo_light', 'Cargo weighs on your steering much less.'),
-  define('def_plating', 'Extra hull: survive more barrier hits.'),
-  define('coll_magnet', 'Attracts coins from a distance around your ship.'),
-  define('util_impact_pulse', 'A damaging hit clears visible obstacles and extends your immunity.'),
-  define('def_shield', 'Absorbs hits before hull damage. Normal Depot stops refill charges; Endless refills when you Skip after stopping. No passive or bypass recharge.'),
-  define('util_insurance', 'Reduces hit-value loss. Jettisoned cargo is not insured.'),
+  define('cargo_light', 'Cargo affects on your steering much less.'),
+  define('def_plating', '+1 hull: survive more barrier hits.'),
+  define('coll_magnet', 'Attracts cargo from a distance.'),
+  define('util_impact_pulse', 'A collision clears all obstacles and grants temporary immunity.'),
+  define('def_shield', 'Absorbs hits before hull damage. Stop at a Depot during a run to Recharge 1 charge'),
+  define('util_insurance', 'Reduces cargo loss upon collision'),
 ]);
 
 export const STARTER_MODULE_IDS = Object.freeze(MODULE_DEFS.filter(m => m.starter).map(m => m.id));
@@ -116,7 +116,7 @@ export function formatStat(stat, value) {
 
 /** Effective stats of the equipped loadout. Apex boosts benefits only, never drawbacks or base stats. */
 export function loadoutStats(profile, chassisId = 'standard') {
-  const stats = {...BASE_STATS};
+  const stats = {...BASE_STATS, ...GAME_BALANCE.vehicles[chassisId]?.baseStats};
   const cargoRanks = GAME_BALANCE.cargoProgression.capacityByRank;
   const cargoRank = Math.min(cargoRanks.length - 1, Math.max(0, profile.cargoCapacityRank ?? 0));
   const equipped = shipState(profile, chassisId)?.equippedModuleIds ?? [];
@@ -129,7 +129,7 @@ export function loadoutStats(profile, chassisId = 'standard') {
     const level = profile.ownedModules[id] ?? 0;
     if (!def || level < 1) continue;
     const value = def.benefit.values[Math.min(level, def.benefit.values.length) - 1];
-    if (def.benefit.stat === 'shieldCapacity') stats.shieldCapacity = value;
+    if (def.benefit.stat === 'shieldCapacity') stats.shieldCapacity += value;
     else stats[def.benefit.stat] += applyVehicleModuleBenefit(value, chassisId);
     if (def.drawback) stats[def.drawback.stat] += def.drawback.value;
   }

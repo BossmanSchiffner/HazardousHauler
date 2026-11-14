@@ -156,7 +156,7 @@ test('nearmiss cargo bonus adds five points capped at 50%, banks atomically and 
   assert.equal(wreck.profile.coins, plainWreck.profile.coins, 'Normal wreck pays no close-call bonus');
 });
 
-test('nearmiss Endless cash-out adds a separate capped hold bonus but wreck retention remains exactly 25%', () => {
+test('nearmiss Endless cash-out adds a capped hold bonus while a wreck forfeits the hold', () => {
   const items = [{kind: 'coinStack', mass: 1, slots: 1, value: 100}];
   const profile = defaultProfile();
   profile.levelProgress.level1.completed = true;
@@ -171,7 +171,8 @@ test('nearmiss Endless cash-out adds a separate capped hold bonus but wreck rete
   const cashed = settleRun(profile, run, items, 12000, true);
   assert.equal(cashed.profile.coins, 250);
   const wreck = settleRun(profile, run, items, 12000, false);
-  assert.equal(wreck.profile.coins, 25);
+  assert.equal(wreck.profile.coins, 0);
+  assert.equal(wreck.cargoLost, 100);
   assert.equal(wreck.quote.bonus, 0);
   assert.equal(settleRun(cashed.profile, run, items, 12000, true).duplicate, true);
 });

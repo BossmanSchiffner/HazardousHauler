@@ -33,7 +33,7 @@ export function resultTip(context, result, runNumber) {
     tips.push('Skipping a Depot builds your bonus, but puts your Cargo at greater risk!');
   }
   if (context.damagedDepot && result.repairPurchases === 0) {
-    tips.push(`A repair at a Depot restores ${DEPOT_ECONOMY.repairHullRestored} Hull and can keep a strong run going.`);
+    tips.push(`A repair at a Depot restores ${DEPOT_ECONOMY.repairHullRestored} Hull and can keep a strong run going. Use it wisely! You can only repair once per Run!`);
   }
   if (!crashed) tips.push('Try reaching one Depot farther next run to build a larger bonus!');
   if (!tips.length) tips.push('Cargo weight affects your ability to steer! Steer early and leave room to change lanes.');

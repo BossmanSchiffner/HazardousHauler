@@ -3,7 +3,7 @@ import {guardrailLayout, HAZARDS, LANE_CENTERS} from '../core/hazards.js';
 import {advanceCargoTrail, createCargoTrail} from '../core/cargo.js';
 import {formatStat} from '../core/modules.js';
 import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS,
-  ENVIRONMENT_VISUALS, HAZARD_LIGHTS, NEON_READABILITY, headlightFalloff, streetlightFalloff} from '../data/environments.js';
+  ENVIRONMENT_VISUALS, HAZARD_LIGHTS, HAZARD_READABILITY, NEON_READABILITY, headlightFalloff, streetlightFalloff} from '../data/environments.js';
 import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../core/depots.js';
 import {ROAD_LEFT, ROAD_RIGHT} from '../data/route.js';
 import {balance} from '../data/balance.js';
@@ -107,9 +107,11 @@ export const NEON_ART = Object.freeze([
   {key: NEON_THEME_ASSETS.SIGN_KANJI, url: new URL('../assets/sprites/neon-sign-kanji.webp', import.meta.url).href},
 ].map(art => Object.freeze({...art, sourceKey: `neon_source_${art.key}`})));
 // Curb-to-curb span of the road art as fractions of its width; it maps onto ROAD_LEFT..ROAD_RIGHT.
-const NEON_ROAD_ART = Object.freeze({aspect: 1024 / 572, roadLeft: 100 / 572, roadRight: 464 / 572, seamPx: 72});
+const NEON_ROAD_ART = Object.freeze({aspect: 1024 / 572, roadLeft: 100 / 572, roadRight: 464 / 572,
+  topCropFraction: 64 / 1024, seamPx: 72});
 const NEON_ROAD_DRAWN_WIDTH = (ROAD_RIGHT - ROAD_LEFT) / (NEON_ROAD_ART.roadRight - NEON_ROAD_ART.roadLeft);
-const NEON_ROAD_TEXTURE_HEIGHT = Math.floor(NEON_ROAD_DRAWN_WIDTH * NEON_ROAD_ART.aspect) - NEON_ROAD_ART.seamPx;
+const NEON_ROAD_TEXTURE_HEIGHT = Math.floor(NEON_ROAD_DRAWN_WIDTH * NEON_ROAD_ART.aspect *
+  (1 - NEON_ROAD_ART.topCropFraction)) - NEON_ROAD_ART.seamPx;
 // Hex cells sit at 70% of the original 430 px art tile; tiles repeat across so the grate still spans the road.
 const NEON_HEX_TILE_PX = Math.round(430 * 0.7);
 
@@ -130,6 +132,7 @@ function neonSource(scene, key) {
 export const TEXTURE_SIZES = Object.freeze({
   cargo_ship: Object.freeze([54, 65]),
   cargo_ship_swift: Object.freeze([54, 65]),
+  cargo_ship_armoured: Object.freeze([54, 65]),
   cargo_coin: Object.freeze([42, 42]),
   cargo_coinStack: Object.freeze([42, 42]),
   cargo_freight: Object.freeze([42, 42]),
@@ -139,8 +142,8 @@ export const TEXTURE_SIZES = Object.freeze({
   cargo_pickup_med: Object.freeze([42, 42]),
   cargo_pickup_lg: Object.freeze([42, 42]),
   cargo_pickup_xl: Object.freeze([42, 42]),
-  cargo_pickup_glow_blue: Object.freeze([64, 64]),
-  cargo_pickup_glow_gold: Object.freeze([64, 64]),
+  cargo_pickup_glow_green: Object.freeze([64, 64]),
+  cargo_pickup_sparkle: Object.freeze([12, 12]),
   cargo_trailer: Object.freeze([32, 36]),
   industrial_hazard_base: Object.freeze([43, 116]),
   ...Object.fromEntries(Object.values(HAZARDS)
@@ -183,6 +186,7 @@ export const TEXTURE_SIZES = Object.freeze({
   garage_lock: Object.freeze([32, 36]),
   cargo_preview: Object.freeze([162, 195]),
   cargo_preview_swift: Object.freeze([162, 195]),
+  cargo_preview_armoured: Object.freeze([162, 195]),
   ...Object.fromEntries(Object.keys(STANDARD_HAULER_TRIMS).flatMap(id => [
     [`cargo_ship_${id}`, Object.freeze([54, 65])],
     [`cargo_preview_${id}`, Object.freeze([162, 195])],
@@ -212,11 +216,22 @@ export const SWIFT_RUNNER_ART = Object.freeze({
 });
 const SWIFT_RUNNER_FRAMES = Object.freeze(['cargo_ship_swift', 'cargo_preview_swift']);
 
+export const ARMOURED_TRANSPORT_ART = Object.freeze({
+  name: 'Armoured Transport',
+  sourceKey: 'armoured_transport_source',
+  url: new URL('../assets/sprites/armoured-transport.png', import.meta.url).href,
+  bounds: Object.freeze({x: 190, y: 73, width: 516, height: 1065}),
+  exhaustStack: Object.freeze({x: 645, y: 640}),
+});
+const ARMOURED_TRANSPORT_FRAMES = Object.freeze(['cargo_ship_armoured', 'cargo_preview_armoured']);
+
 export const GARAGE_DISPLAY_ART = Object.freeze([
   Object.freeze({id: 'standard', key: 'garage_standard_display',
     url: new URL('../assets/sprites/standard-hauler-display.png', import.meta.url).href}),
   Object.freeze({id: 'swift', key: 'garage_swift_display',
     url: new URL('../assets/sprites/swift-runner-display.png', import.meta.url).href}),
+  Object.freeze({id: 'armoured', key: 'garage_armoured_display',
+    url: new URL('../assets/sprites/armoured-transport-display.png', import.meta.url).href}),
 ]);
 
 export function preloadGarageDisplayArt(scene) {
@@ -280,9 +295,8 @@ export function cargoPickupTexture(value) {
   return 'cargo_pickup_xl';
 }
 
-export function cargoPickupGlowTexture(value) {
-  return cargoPickupTexture(value) === 'cargo_pickup_xl'
-    ? 'cargo_pickup_glow_gold' : 'cargo_pickup_glow_blue';
+export function cargoPickupGlowTexture() {
+  return 'cargo_pickup_glow_green';
 }
 
 export const CARGO_PICKUP_GLOW_OFFSET_Y = 8;
@@ -362,6 +376,13 @@ export function preloadSwiftRunner(scene) {
   if (SWIFT_RUNNER_FRAMES.some(key => !scene.textures.exists(key)) &&
       !scene.textures.exists(SWIFT_RUNNER_ART.sourceKey)) {
     scene.load.image(SWIFT_RUNNER_ART.sourceKey, SWIFT_RUNNER_ART.url);
+  }
+}
+
+export function preloadArmouredTransport(scene) {
+  if (ARMOURED_TRANSPORT_FRAMES.some(key => !scene.textures.exists(key)) &&
+      !scene.textures.exists(ARMOURED_TRANSPORT_ART.sourceKey)) {
+    scene.load.image(ARMOURED_TRANSPORT_ART.sourceKey, ARMOURED_TRANSPORT_ART.url);
   }
 }
 
@@ -538,7 +559,20 @@ function drawObstacleArt(scene, key) {
         kind === 'pipeAssembly' ? Math.PI / 2 : 0);
     }
   }
+  const pixels = context.getImageData(0, 0, texture.width, texture.height);
+  brightenObstaclePixels(pixels.data);
+  context.putImageData(pixels, 0, 0);
   texture.refresh();
+}
+
+export function brightenObstaclePixels(pixels) {
+  const {brightness, contrast} = HAZARD_READABILITY;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (!pixels[index + 3]) continue;
+    for (let channel = 0; channel < 3; channel++) {
+      pixels[index + channel] = ((pixels[index + channel] - 128) * contrast + 128) * brightness;
+    }
+  }
 }
 
 export const MODULE_CAPTIONS = Object.freeze({
@@ -831,6 +865,36 @@ function drawIndustrialServiceGap(g, x, top, bottom) {
 
 function drawRoadWear(g, height, dust = false) {
   const dark = dust ? PALETTE.seam : PALETTE.edge;
+  for (let index = 0; index < 14; index++) {
+    const x = 64 + (index * 83 % 236);
+    const y = 28 + (index * 173 % (height - 150));
+    const direction = index % 2 ? -1 : 1;
+    const points = [
+      [x, y], [x + direction * 11, y + 15],
+      [x + direction * 7, y + 32], [x + direction * 19, y + 48],
+      [x + direction * 14, y + 67],
+    ];
+    for (const [width, alpha, offset] of [[2, 0.38, 0], [1, 0.13, 1]]) {
+      g.lineStyle(width, offset ? PALETTE.steelLight : dark, alpha);
+      for (let point = 1; point < points.length; point++) {
+        g.lineBetween(points[point - 1][0] + offset, points[point - 1][1],
+          points[point][0] + offset, points[point][1]);
+      }
+    }
+    g.lineStyle(1, dark, 0.32)
+      .lineBetween(x + direction * 7, y + 32, x - direction * 9, y + 40)
+      .lineBetween(x - direction * 9, y + 40, x - direction * 13, y + 52);
+    if (index % 3 === 0) {
+      g.fillStyle(dark, 0.12).fillPoints([
+        {x: x - 12, y: y + 72}, {x: x + 17, y: y + 69},
+        {x: x + 24, y: y + 98}, {x: x - 8, y: y + 104},
+      ], true);
+      for (let scuff = 0; scuff < 5; scuff++) {
+        g.lineStyle(1, dust ? PALETTE.rockLight : PALETTE.steelLight, 0.09)
+          .lineBetween(x - 7 + scuff * 5, y + 77, x - 4 + scuff * 5, y + 95);
+      }
+    }
+  }
   for (let y = 60; y < height - 90; y += 234) {
     const x = 68 + (y * 17 % 224);
     g.lineStyle(1, dark, 0.2)
@@ -1004,12 +1068,15 @@ function bakeNeonBaseRoad(scene) {
   const drawnWidth = NEON_ROAD_DRAWN_WIDTH;
   const scale = drawnWidth / source.width;
   const x = (ROAD_LEFT + ROAD_RIGHT) / 2 - (NEON_ROAD_ART.roadLeft + NEON_ROAD_ART.roadRight) / 2 * drawnWidth;
-  context.drawImage(source, x, 0, drawnWidth, drawnWidth * NEON_ROAD_ART.aspect);
+  // The supplied art's top strip contains partial props, not drivable road.
+  const sourceTop = source.height * NEON_ROAD_ART.topCropFraction;
+  context.drawImage(source, 0, sourceTop, source.width, source.height - sourceTop,
+    x, 0, drawnWidth, (source.height - sourceTop) * scale);
   // Rows past the tile height fade over the top band, so row height-1 flows straight into row 0.
   const {seamPx} = NEON_ROAD_ART;
   for (let row = 0; row < seamPx; row++) {
     context.globalAlpha = 1 - (row + 0.5) / seamPx;
-    context.drawImage(source, 0, (height + row) / scale, source.width, 1 / scale, x, row, drawnWidth, 1);
+    context.drawImage(source, 0, sourceTop + (height + row) / scale, source.width, 1 / scale, x, row, drawnWidth, 1);
   }
   context.globalAlpha = 1;
   context.fillStyle = '#62d8ef';
@@ -1250,6 +1317,7 @@ function drawAdvancedRoad(g, sector) {
       g.fillStyle(PALETTE.warning).fillRect(48, y + 30, 2, 14).fillRect(340, y + 90, 2, 14);
     }
   }
+  if (!neon) drawRoadWear(g, height);
   drawRoadsideInfill(g);
 }
 
@@ -1289,6 +1357,7 @@ export function createIndustrialTextures(scene) {
     throw new Error('Approved standard barrier sprite failed to load; no certified obstacle fallback available');
   }
   createVehicleTextures(scene, SWIFT_RUNNER_ART, SWIFT_RUNNER_FRAMES);
+  createVehicleTextures(scene, ARMOURED_TRANSPORT_ART, ARMOURED_TRANSPORT_FRAMES);
   createVehicleTextures(scene, STANDARD_HAULER_ART, standardHaulerFrames());
   createStandaloneTextures(scene);
   createLightTextures(scene);
@@ -1326,8 +1395,12 @@ export function createIndustrialTextures(scene) {
         graphics.fillStyle(PALETTE.cyan, 0.035).fillCircle(32, 32, radius);
       }
     },
-    cargo_pickup_glow_blue: graphics => drawPickupGlow(graphics, 0x2f8dff),
-    cargo_pickup_glow_gold: graphics => drawPickupGlow(graphics, PALETTE.gold),
+    cargo_pickup_glow_green: graphics => drawPickupGlow(graphics, 0x53ff96),
+    cargo_pickup_sparkle: graphics => {
+      graphics.fillStyle(0x53ff96, 0.18).fillCircle(6, 6, 5);
+      graphics.fillStyle(0xcaffdf, 0.9).fillRect(5.5, 1, 1, 10).fillRect(1, 5.5, 10, 1);
+      graphics.fillStyle(0xffffff).fillCircle(6, 6, 1);
+    },
     industrial_hazard_base: drawHazardBase,
     ...Object.fromEntries(Object.keys(SECTOR_MATERIALS).flatMap(id => [
       [`base_${id}`, graphics => drawHazardBase(graphics, id)],
@@ -1401,8 +1474,32 @@ export function createIndustrialTextures(scene) {
     g.clear();
   }
   g.destroy();
+  bakeCanvasSilhouetteTextures(scene);
   for (const art of OBSTACLE_ART) {
     if (scene.textures.exists(art.sourceKey)) scene.textures.remove(art.sourceKey);
+  }
+}
+
+export function bakeCanvasSilhouetteTextures(scene) {
+  if (!scene.sys?.game?.renderer?.currentContext) return;
+  assertTextureBakingAllowed(scene);
+  const keys = new Set(['cargo_ship', 'cargo_ship_swift', 'cargo_ship_armoured', 'cargo_trailer',
+    ...standardHaulerFrames(), ...OBSTACLE_ART.flatMap(art => art.textures),
+    ...GUARDRAIL_ART.map(art => art.key)]);
+  const lookup = scene.silhouetteTextureKeys ??= new Map();
+  for (const key of keys) {
+    if (lookup.has(key) || !scene.textures.exists(key)) continue;
+    const source = scene.textures.get(key).getSourceImage();
+    const shadowKey = `${key}_silhouette`;
+    const texture = scene.textures.createCanvas(shadowKey, source.width, source.height);
+    const context = texture.getContext();
+    context.drawImage(source, 0, 0);
+    context.globalCompositeOperation = 'source-in';
+    context.fillStyle = colorText(SHADOW_TINT);
+    context.fillRect(0, 0, source.width, source.height);
+    context.globalCompositeOperation = 'source-over';
+    texture.refresh();
+    lookup.set(key, shadowKey);
   }
 }
 
@@ -1588,7 +1685,7 @@ export function syncBarrierLights(lights, sprite, kind, time, night = false) {
     }
     scaleSpriteArt(light, night ? ENVIRONMENT_VISUALS.barrierNightScale : 1);
     // Night strobes sit just above the ambient mask so their warning flashes aren't darkened.
-    light.setDepth(night ? 16.1 : 6).setBlendMode(night ? 'ADD' : 'NORMAL')
+    light.setDepth(HAZARD_READABILITY.depth + 0.1).setBlendMode(night ? 'ADD' : 'NORMAL')
       .setPosition(sprite.x + (paired ? index ? 1 : -1 : 0) * (width / 2 - 5) * sprite.scaleX,
         sprite.y - height * 0.18 * sprite.scaleY)
       .setAlpha(alpha);
@@ -1596,7 +1693,7 @@ export function syncBarrierLights(lights, sprite, kind, time, night = false) {
 }
 
 export function addHudBacking(scene, width) {
-  return scene.add.rectangle(width / 2, 35, width, 70, 0x0c111a, 0.88);
+  return scene.add.rectangle(width / 2, 39, width, 78, 0x0c111a, 0.88);
 }
 
 /**
@@ -1615,11 +1712,16 @@ export function createGuardrailStructure(scene, hazard, x, y) {
   const image = (key, tx, ty, height) => routeImage(scene, tx, ty, obstacleTexture(scene, key))
     .setDisplaySize(width, height).setFlipX(key === 'chicane_entry' ? side > 0 : side < 0);
   // Every shadow sits beneath every tile so a cap's shadow never darkens its neighbour.
-  const shadows = tiles.map(tile => image(tile.key, tileX + balance.SHADOW_OFFSET_X,
-    tile.top + tile.height / 2 + balance.SHADOW_OFFSET_Y, tile.height)
-    .setTint(SHADOW_TINT).setAlpha(balance.SHADOW_ALPHA));
+  const shadows = tiles.map(tile => {
+    const texture = obstacleTexture(scene, tile.key);
+    return routeImage(scene, tileX + balance.SHADOW_OFFSET_X,
+      tile.top + tile.height / 2 + balance.SHADOW_OFFSET_Y,
+      scene.silhouetteTextureKeys?.get(texture) ?? texture)
+      .setDisplaySize(width, tile.height).setFlipX(tile.key === 'chicane_entry' ? side > 0 : side < 0)
+      .setTint(SHADOW_TINT).setAlpha(balance.SHADOW_ALPHA);
+  });
   const parts = tiles.map(tile => image(tile.key, tileX, tile.top + tile.height / 2, tile.height));
-  const container = routeContainer(scene, x, y, [...shadows, ...parts]).setDepth(5);
+  const container = routeContainer(scene, x, y, [...shadows, ...parts]).setDepth(HAZARD_READABILITY.depth);
   container.setSize(width, length);
   container.guardrailParts = parts;
   container.guardrailBeacon = scaleSpriteArt(routeImage(scene, 0, 0, 'barrier_caution_light'));
@@ -1633,7 +1735,7 @@ export function syncGuardrailBeacon(structure, time, night = false) {
   const alpha = 0.3 + 0.7 * (phase <= 1 ? phase : 2 - phase);
   scaleSpriteArt(structure.guardrailBeacon, night ? ENVIRONMENT_VISUALS.barrierNightScale : 1)
     .setPosition(structure.x + entry.x, structure.y + entry.y)
-    .setAlpha(alpha).setBlendMode('ADD').setDepth(night ? 16.1 : 6);
+    .setAlpha(alpha).setBlendMode('ADD').setDepth(HAZARD_READABILITY.depth + 0.1);
 }
 
 export const SHADOW_TINT = 0x050a12;
@@ -1645,15 +1747,19 @@ const TRAILER_CONTACT_SHADOW = Object.freeze({offsetX: 0,
 const PARTICLE_DOT_KEY = 'particle-dot';
 
 export function createSilhouetteShadow(scene, source) {
-  return routeImage(scene, source.x ?? 0, source.y ?? 0, source.texture?.key, source.frame?.name)
+  const key = source.texture?.key;
+  const shadow = routeImage(scene, source.x ?? 0, source.y ?? 0,
+    scene.silhouetteTextureKeys?.get(key) ?? key, source.frame?.name)
     .setTint(SHADOW_TINT).setVisible(false);
+  shadow.silhouetteTextureKeys = scene.silhouetteTextureKeys;
+  return shadow;
 }
 
 /** Pins a silhouette shadow to its caster; the offset stays screen-down because the light is overhead. */
 export function syncSilhouetteShadow(shadow, source, visible = source.visible !== false, scale = 1, {
   offsetX = balance.SHADOW_OFFSET_X, offsetY = balance.SHADOW_OFFSET_Y, alpha = balance.SHADOW_ALPHA,
 } = {}) {
-  const key = source.texture?.key;
+  const key = shadow.silhouetteTextureKeys?.get(source.texture?.key) ?? source.texture?.key;
   const frame = source.frame?.name;
   if (key && (shadow.texture?.key !== key || shadow.frame?.name !== frame)) shadow.setTexture(key, frame);
   return shadow.setPosition(source.x + offsetX, source.y + offsetY)
@@ -1777,20 +1883,25 @@ export function syncBlueprintVisuals(sprite, glow, time, glowOffsetY = 0) {
   glow.setPosition(sprite.x, sprite.y + glowOffsetY).setAlpha(0.55 + Math.sin(time / 650) * 0.1);
 }
 
-export function syncCargoPickupVisuals(sprite, glow, time, night = false, accepted = true) {
+export function syncCargoPickupVisuals(sprite, glow, time, night = false, accepted = true, sparkle = null) {
   syncBlueprintVisuals(sprite, glow, time, CARGO_PICKUP_GLOW_OFFSET_Y * SPRITE_ART_SCALE);
-  if (glow.neonCargo) {
-    sprite.setDepth(16.2).setTint(0xffffff).setAlpha(accepted ? 1 : 0.35);
-    glow.setPosition(sprite.x, sprite.y).setRotation(sprite.rotation)
-      .setDisplaySize(sprite.displayWidth, sprite.displayHeight)
-      .setDepth(16.25).setAlpha((0.55 + Math.sin(time / 650) * 0.05) * (accepted ? 1 : 0.35));
-    return;
-  }
   // The supplied pickup raster includes its drop shadow; avoid the heavy road mask for both.
   sprite.setDepth(night ? 16.2 : 5).setTint(night ? ENVIRONMENT_VISUALS.cargoNightTint : 0xffffff)
     .setAlpha(accepted ? 1 : 0.35);
   glow.setDepth(night ? 16.15 : 4.5)
     .setAlpha(glow.alpha * (night ? ENVIRONMENT_VISUALS.cargoNightGlowScale : 1) * (accepted ? 1 : 0.35));
+  if (sparkle) {
+    const phase = ((time + sprite.x * 7) % 2200) / 2200;
+    const flash = Math.max(0, Math.sin(phase * Math.PI * 2)) ** 8;
+    const corner = phase < 0.5 ? -1 : 1;
+    const x = corner * sprite.displayWidth * 0.32;
+    const y = -sprite.displayHeight * 0.28;
+    const cos = Math.cos(sprite.rotation), sin = Math.sin(sprite.rotation);
+    sparkle.setPosition(sprite.x + x * cos - y * sin, sprite.y + x * sin + y * cos)
+      .setRotation(sprite.rotation + phase * Math.PI / 2)
+      .setDepth(night ? 16.3 : 5.1)
+      .setAlpha(flash * 0.65 * (accepted ? 1 : 0.35));
+  }
 }
 
 /** Chassis-local offset rotated with suspension roll. */
@@ -1832,7 +1943,8 @@ export function syncHaulerEffects(effects, ship, indicators, load, capacity, pha
       .setVisible(visible && i < count);
   });
   const swift = ship.texture?.key === 'cargo_ship_swift';
-  const art = swift ? SWIFT_RUNNER_ART : STANDARD_HAULER_ART;
+  const art = swift ? SWIFT_RUNNER_ART : ship.texture?.key === 'cargo_ship_armoured'
+    ? ARMOURED_TRANSPORT_ART : STANDARD_HAULER_ART;
   const placement = vehicleArtPlacement(art);
   if (effects.exhaust) {
     const x = placement.x + art.exhaustStack.x * placement.scale - 27;
@@ -1902,7 +2014,7 @@ export function vehicleTint(vehicleId = 'standard', colorId = 'default') {
 
 export function vehicleTexture(vehicleId = 'standard', colorId = 'default', preview = false) {
   const key = preview ? 'cargo_preview' : 'cargo_ship';
-  return vehicleId === 'swift' ? `${key}_swift`
+  return vehicleId === 'swift' || vehicleId === 'armoured' ? `${key}_${vehicleId}`
     : Object.hasOwn(STANDARD_HAULER_TRIMS, colorId) ? `${key}_${colorId}` : key;
 }
 

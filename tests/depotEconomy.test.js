@@ -88,7 +88,7 @@ test('repair costs follow configured sector and run scaling, not permanent upgra
   assert.equal(DEPOT_ECONOMY.repairRunStep, REPAIR.priorRunRepairStepCoins);
 });
 
-test('repairs restore exactly one current hull, charge once per visit, and preserve permanent stats', () => {
+test('repairs restore one current hull and are limited to one purchase per normal run', () => {
   const profile = {...defaultProfile(), coins: 100};
   const before = JSON.stringify(profile);
   const run = createRunEconomy();
@@ -103,11 +103,17 @@ test('repairs restore exactly one current hull, charge once per visit, and prese
   assert.equal(JSON.stringify(profile), before);
   assert.equal(visit.repaired, false);
   assert.ok(!purchaseRepair(repair.profile, repair.run, repair.visit, repair.hull, 3, SECTOR1_VISIT).ok);
+  const laterVisit = {distance: L1.sectorStartsMeters[2], repaired: false};
+  const exhausted = purchaseRepair(repair.profile, repair.run, laterVisit, 1, 3, laterVisit.distance);
+  assert.equal(exhausted.ok, false, 'a new Depot does not restore the run repair allowance');
+  assert.match(exhausted.reason, /one repair used this run/i);
+  assert.equal(repairOffer(repair.profile, repair.run, laterVisit, 1, 3, laterVisit.distance).enabled, false);
   assert.ok(!repairOffer(profile, run, visit, 3, 3, SECTOR1_VISIT).enabled);
   assert.ok(!repairOffer({...profile, coins: repairBase(1) - 1}, run, visit, 1, 3, SECTOR1_VISIT).enabled);
-  const exact = purchaseRepair({...profile, coins: repairBase(1)}, run, visit, 2, 3, SECTOR1_VISIT);
+  const exact = purchaseRepair({...profile, coins: repairBase(1)}, createRunEconomy(), visit, 2, 3, SECTOR1_VISIT);
   assert.equal(exact.profile.coins, 0);
   assert.equal(exact.hull, 3);
+  assert.equal(createRunEconomy().repairPurchases, 0, 'a fresh run has a fresh repair allowance');
 });
 
 test('bank-repair-finish and bank-repair-crash settle only outstanding rewards', () => {
@@ -135,10 +141,11 @@ test('bank-repair-finish and bank-repair-crash settle only outstanding rewards',
 test('crashes never multiply cargo, distance or unrelated awards; net may be negative', () => {
   const run = {...createRunEconomy(), consecutiveSkips: 100, otherCoins: 35, repairCosts: 90};
   const result = settleRun({...defaultProfile(), coins: 200}, run, [coin(1000)], LEVEL_FINISH_DISTANCE, false);
-  assert.equal(result.profile.coins, 200 + REWARDS.crash.maxCoins);
+  const expectedCrashCoins = crashCoins(LEVEL_FINISH_DISTANCE);
+  assert.equal(result.profile.coins, 200 + expectedCrashCoins);
   assert.equal(result.summary.bonusCoins, 0);
-  assert.equal(result.summary.gross, run.otherCoins + REWARDS.crash.maxCoins);
-  assert.equal(result.summary.net, run.otherCoins + REWARDS.crash.maxCoins - run.repairCosts);
+  assert.equal(result.summary.gross, run.otherCoins + expectedCrashCoins);
+  assert.equal(result.summary.net, run.otherCoins + expectedCrashCoins - run.repairCosts);
   assert.ok(result.summary.net < 0, 'net may be negative');
   assert.equal(runEconomySummary(run, SECTOR1_VISIT, 'running').net, run.otherCoins - run.repairCosts);
 });
@@ -147,7 +154,7 @@ test('wallet transactions reload on existing schema without replayable run/cargo
   const old = {...defaultProfile(), coins: 90, bestDistance: 1047, totalRuns: 1};
   const bank = bankCargo(old, createRunEconomy(), [coin(55)]);
   const reload = normalizeProfile(JSON.parse(JSON.stringify(bank.profile)));
-  assert.equal(SCHEMA_VERSION, 12);
+  assert.equal(reload.schemaVersion, SCHEMA_VERSION);
   assert.equal(reload.coins, old.coins + 55);
   assert.equal(reload.bestDistance, old.bestDistance);
   assert.equal(reload.totalRuns, 1, 'mid-run banking is not a completed run');
@@ -162,10 +169,10 @@ test('multiple banking events and a later finish reconcile gross, net and initia
   const repair = purchaseRepair(first.profile, first.run, {repaired: false}, 1, 3, SECTOR1_VISIT);
   const next = bankCargo(repair.profile, skipDepot(repair.run), [coin(100)]);
   const secondRepair = purchaseRepair(next.profile, next.run, {repaired: false}, 1, 3, L1.sectorStartsMeters[2]);
-  assert.equal(secondRepair.cost, repairBase(3) + REPAIR.priorRunRepairStepCoins);
-  const final = settleRun(secondRepair.profile, secondRepair.run, [coin(20)], LEVEL_FINISH_DISTANCE, true);
+  assert.equal(secondRepair.ok, false, 'banking and continuing preserves the one-repair run allowance');
+  const final = settleRun(next.profile, next.run, [coin(20)], LEVEL_FINISH_DISTANCE, true);
   const bonusCoins = skipBonus(55, 1) + skipBonus(100, 1);
-  const repairCosts = repairBase(1) + secondRepair.cost;
+  const repairCosts = repairBase(1);
   assert.equal(final.run.bankingEvents, 3);
   assert.equal(final.run.cargoCoins, 55 + 100 + 20);
   assert.equal(final.run.bonusCoins, bonusCoins);
@@ -279,6 +286,7 @@ test('continuous Depot banking cashes out current hold once without campaign rew
     {cargo: 55, percent, bonus, payout: 55 + bonus, closeCallPercent: 0, closeCallBonus: 0});
   const exit = settleRun(profile, run, [coin(55)], 9000, true);
   assert.equal(exit.profile.coins, profile.coins + 55 + bonus);
+  assert.equal(exit.profile.endlessBestDistance, 9000);
   assert.equal(exit.run.cargoCoins, 55);
   assert.equal(exit.run.bonusCoins, bonus);
   assert.equal(exit.run.recordCoins, 0);
@@ -292,7 +300,7 @@ test('continuous Depot banking cashes out current hold once without campaign rew
   assert.equal(settleRun(exit.profile, run, [coin(55)], 9000, true).duplicate, true);
 });
 
-test('continuous crash retention pays 25 percent of the current hold into the wallet without any bonus', () => {
+test('continuous crashes forfeit all held cargo and pay no bonus', () => {
   const base = defaultProfile();
   const profile = {...base, coins: 321, levelProgress: {
     ...base.levelProgress,
@@ -301,21 +309,37 @@ test('continuous crash retention pays 25 percent of the current hold into the wa
   const run = passContinuousDepot(createRunEconomy({
     runId: 'continuous-crash', levelId: 'level1', mode: 'continuous',
   }));
-  const retained = Math.floor(100 * CONTINUOUS.wreckRetention);
   const crash = settleRun(profile, run, [coin(100)], 8400, false);
-  assert.equal(crash.profile.coins, profile.coins + retained);
-  assert.equal(crash.summary.gross, retained);
-  assert.equal(crash.summary.cargoCoins, retained);
+  assert.equal(crash.profile.coins, profile.coins);
+  assert.equal(crash.profile.endlessBestDistance, 8400);
+  assert.equal(crash.summary.gross, 0);
+  assert.equal(crash.summary.cargoCoins, 0);
   assert.equal(crash.summary.bonusCoins, 0);
   assert.equal(crash.summary.distanceCoins, 0);
-  assert.equal(crash.cargoLost, 100 - retained);
+  assert.equal(crash.cargoLost, 100);
   assert.deepEqual(crash.profile.levelProgress, profile.levelProgress);
   assert.equal(settleRun(crash.profile, run, [coin(100)], 8400, false).duplicate, true);
   const rounded = settleRun(profile, {...run, runId: 'rounded-retention',
     cargoCoins: 1000, otherCoins: 500}, [coin(103)], 8400, false);
-  assert.equal(rounded.profile.coins, profile.coins + Math.floor(103 * CONTINUOUS.wreckRetention),
-    'only remaining hold counts, not lifetime collection or other rewards');
-  assert.equal(rounded.summary.gross, Math.floor(103 * CONTINUOUS.wreckRetention));
+  assert.equal(rounded.profile.coins, profile.coins, 'crashes never cash out the remaining hold');
+  assert.equal(rounded.summary.gross, 0);
+});
+
+test('Endless records keep the farthest crash or cash-out and ignore Normal and developer runs', () => {
+  const base = defaultProfile();
+  const profile = {...base, bestDistance: 90000, endlessBestDistance: 1500,
+    levelProgress: {...base.levelProgress, level1: {...base.levelProgress.level1, completed: true}}};
+  const run = createRunEconomy({runId: 'endless-record', mode: 'continuous'});
+  const shorter = settleRun(profile, run, [], 1400, false);
+  assert.equal(shorter.profile.endlessBestDistance, 1500);
+  const longer = settleRun(profile, run, [], 2500.9, true);
+  assert.equal(longer.profile.endlessBestDistance, 2500);
+  const campaign = settleRun(longer.profile, createRunEconomy({runId: 'normal-record', fullStart: true}),
+    [], 3000, false);
+  assert.equal(campaign.profile.endlessBestDistance, 2500);
+  assert.equal(campaign.profile.bestDistance, 90000, 'legacy campaign aggregate is no longer recorded');
+  const developer = settleRun(profile, {...run, developerRun: true}, [], 99999, false);
+  assert.equal(developer.profile.endlessBestDistance, 1500);
 });
 
 test('continuous passed-depot bonus is additive and capped at 100 percent, not compounded', () => {

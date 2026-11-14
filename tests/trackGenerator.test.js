@@ -22,11 +22,14 @@ import {
   WORST_CASE_LANE_CLEAR_SECONDS,
   BEST_CASE_LANE_CLEAR_SECONDS,
   ROW_REACTION_SECONDS,
+  TRACK_VALIDATION_REFERENCE,
 } from '../src/game/core/trackGenerator.js';
 import {laneClearTimeSeconds} from '../src/game/core/steering.js';
 import {WORST_CASE_HANDLING} from '../src/game/core/modules.js';
 import {MAX_HAZARD_HIT_X, hazardDefinition, hazardGeometry, hazardSweptArtOverlaps, straightRouteWidth, sideHazardQuota,
-  HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailLayout, guardrailMinimumLength} from '../src/game/core/hazards.js';
+  HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailLayout, guardrailMinimumLength,
+  physicalPressureMetrics, hazardRouteGeometry, hazardRouteOffsetY,
+  obstacleLaneMask} from '../src/game/core/hazards.js';
 import {HAZARD_TRAVEL_PX} from '../src/game/data/route.js';
 import {DEPOT_RULES, MOVER_WINDOW_RULES, nextDepotAfter, nextMoverWindowAfter} from '../src/game/core/depots.js';
 import {traceRoute, sampleRoute, layoutMetrics} from '../scripts/route-audit.mjs';
@@ -87,7 +90,7 @@ test('sprite-only replacement preserves authored row and obstacle density with n
 test('seed 153: Continuous entry at 8000 m includes committed launch delay and all physical sample-rate proofs', () => {
   const distance = 8000;
   const speed = routeSpeedAtDistance(distance, 'level1', 'continuous');
-  assert.equal(speed, 670);
+  assert.equal(speed, 620);
   const profile = {load: 5.5, capacity: 11, handling: 0, reactionSeconds: 0.8,
     initialState: {x: (LANE_CENTERS[1] + LANE_CENTERS[2]) / 2, velocity: 0}};
   const approach = {hazards: [], intermediates: [], safeLanes: [1, 2],
@@ -110,11 +113,121 @@ test('seed 153: Continuous entry at 8000 m includes committed launch delay and a
     assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6));
   }
   const capped = sampleRoute(153, 9600, false, 'level1', 'continuous', 9000);
-  assert.equal(routeSpeedAtDistance(9000, 'level1', 'continuous'), 680);
+  assert.equal(routeSpeedAtDistance(9000, 'level1', 'continuous'), 620);
   assert.deepEqual(sampleRoute(153, 9600, false, 'level1', 'continuous', 9000), capped);
   for (const row of capped) {
     assert.deepEqual(row.certificates.map(proof => proof.hz), GAME_BALANCE.routes.track.routeValidation.sampleHz);
     assert.ok(row.certificates.every(proof => proof.completed && proof.clearance >= 6));
+  }
+});
+
+test('Endless stages scope Forklifts, Sweepers, and Neon Energy Orbs to their 2000 m sectors', () => {
+  const stream = createTrackStream(153, 'level1', 'continuous');
+  const rows = [];
+  let distance = 9;
+  while (distance < 8000) {
+    const row = stream.nextRow(distance);
+    rows.push(row);
+    distance = row.plannedDistance + row.spacingPx * METERS_PER_PIXEL;
+  }
+  const movers = rows.flatMap(row => [...row.hazards, ...(row.intermediates ?? [])]
+    .filter(hazard => hazard.kind === 'forklift' && hazard.movement)
+    .map(() => row.plannedDistance));
+  assert.ok(movers.every(at => at >= 2000 && at < 6000), 'Forklifts appear only in Dustlands stages');
+  assert.ok(movers.some(at => at >= 2000 && at < 4000), 'Mid-Day Dustlands uses Forklifts');
+  assert.ok(movers.some(at => at >= 4000 && at < 6000), 'Dusk Dustlands also uses Forklifts');
+  const sweepers = rows.filter(row => row.plannedDistance >= 4000 && row.plannedDistance < 6000)
+    .flatMap(row => (row.sweepers ?? []).map(sweeper => sweeper.lane));
+  assert.ok(sweepers.length >= 2, `Dusk Dustlands needs at least two Sweepers, got ${sweepers.length}`);
+  assert.notEqual(sweepers[0] < 2, sweepers[1] < 2, 'successive Sweepers alternate road halves');
+  assert.ok(rows.some(row => row.plannedDistance >= 6000 && row.plannedDistance < 8000 &&
+    row.energyOrbs?.length), 'Neon Gridway uses the Level 4 Energy Orb');
+});
+
+test('Depot approaches emit opposite-half chicanes and Endless roadside bodies stay on curbs across repeat cycles', () => {
+  const routes = [
+    ...['level1', 'level2', 'level3', 'level4'].map(levelId =>
+      ({levelId, mode: 'normal', seed: 153, end: campaignEnd(levelId)})),
+    ...[1, 153].map(seed => ({levelId: 'level1', mode: 'continuous', seed, end: 16000})),
+  ];
+  for (const {levelId, mode, seed, end} of routes) {
+    const rows = sampleRoute(seed, end, false, levelId, mode);
+    const chicanes = new Map();
+    let lateRoadside = 0;
+    for (const row of rows) {
+      for (const hazard of [...row.hazards, ...row.intermediates]) {
+        if (hazard.sideObstacle || hazardDefinition(hazard.kind).roadside) {
+          assert.ok([0, 3].includes(hazard.lane), `${mode}/${seed}/${row.plannedDistance}: ${hazard.kind} lane ${hazard.lane}`);
+          assert.equal(hazard.offsetX ?? 0, 0, 'curb structures are never shifted into the road');
+          if (row.emitted && row.plannedDistance >= 4000 && !hazard.continuation) lateRoadside++;
+        }
+        if (!hazard.depotChicane) continue;
+        assert.equal(row.emitted, true, 'the chicane must reach the scene, not just be planned');
+        const depot = nextDepotAfter(row.plannedDistance, DEPOT_RULES, levelId, mode);
+        assert.ok(depot.side === 'left' ? hazard.lane >= 2 : hazard.lane <= 1);
+        if (!chicanes.has(depot.distance)) chicanes.set(depot.distance, []);
+        chicanes.get(depot.distance).push(hazard.lane);
+      }
+    }
+    for (let depot = nextDepotAfter(0, DEPOT_RULES, levelId, mode);
+      depot.distance <= end; depot = nextDepotAfter(depot.distance, DEPOT_RULES, levelId, mode)) {
+      assert.deepEqual(chicanes.get(depot.distance), depot.side === 'left' ? [2, 3, 2] : [1, 0, 1],
+        `${levelId}/${mode}/${seed}/${depot.distance}: complete staggered approach, no missing or duplicate pieces`);
+      const bayMask = depot.side === 'left' ? 0b0011 : 0b1100;
+      for (const row of rows.filter(row => row.emitted)) {
+        for (const hazard of [...row.hazards, ...row.intermediates, ...(row.sweepers ?? [])]) {
+          if (hazard.continuation) continue;
+          const center = row.plannedDistance + (HAZARD_TRAVEL_PX - hazardRouteOffsetY(hazard)) * METERS_PER_PIXEL;
+          const extent = hazardRouteGeometry(hazard).hitY * METERS_PER_PIXEL;
+          if (center + extent <= depot.distance - DEPOT_RULES.approachMeters ||
+              center - extent >= depot.distance) continue;
+          assert.equal(obstacleLaneMask([hazard]) & bayMask, 0,
+            `${mode}/${seed}/${depot.distance}: no static, long body or mover may enter the bay-side approach`);
+        }
+      }
+    }
+    if (mode === 'continuous') {
+      assert.ok(lateRoadside > 0, 'exercise actual post-4000 m roadside bodies');
+      const masks = new Map();
+      for (const event of physicalPressureMetrics(rows, {levelId, mode}).events) {
+        const mask = event.threatenedLanes.reduce((mask, threatened, lane) =>
+          mask | (threatened ? 1 << lane : 0), 0);
+        masks.set(event.rowIndex, (masks.get(event.rowIndex) ?? 0) | mask);
+      }
+      let previousHalf = 0;
+      for (const [index, mask] of masks) {
+        const row = rows[index];
+        if (row.depotApproach || row.moverReservedMask ||
+            row.hazards.some(hazard => hazard.movement || hazard.moverCompanion)) {
+          previousHalf = 0;
+          continue;
+        }
+        const half = [0b0011, 0b1100].includes(mask) ? mask : 0;
+        assert.ok(!half || half !== previousHalf,
+          `${seed}/${row.plannedDistance}: repeated static pressure must not leave the same half empty`);
+        previousHalf = half;
+      }
+    }
+  }
+});
+
+test('Endless emits dense Alpha rows and certified Betas throughout all four stages', () => {
+  for (const seed of [1, 153]) {
+    const rows = sampleRoute(seed, 8000, false, 'level1', 'continuous', 16.56);
+    for (let start = 0; start < 8000; start += 2000) {
+      const emitted = rows.filter(row => row.emitted &&
+        row.plannedDistance >= start && row.plannedDistance < start + 2000);
+      const alphas = emitted.reduce((sum, row) =>
+        sum + row.hazards.filter(hazard => !hazard.continuation).length, 0);
+      const betas = emitted.reduce((sum, row) => sum + row.intermediates.length, 0);
+      assert.ok(emitted.length >= 30, `${seed}/${start}: at least 30 populated rows per stage`);
+      assert.ok(alphas >= emitted.length * 1.5, `${seed}/${start}: multi-obstacle Alpha coverage`);
+      assert.ok(betas >= emitted.length, `${seed}/${start}: at least one Beta per row on average`);
+      assert.ok(emitted.every(row => row.certificates.every(proof => proof.completed && proof.clearance >= 6)));
+      for (const row of emitted) for (const pickup of row.pickups) {
+        assert.equal(pickup.value, row.plannedDistance >= 6000 ? 30 : 25);
+      }
+    }
   }
 });
 
@@ -133,7 +246,24 @@ test('certification carries actual x/velocity and excludes individually sub-thre
   assert.deepEqual([certified.exits[0].x, certified.exits[0].velocity], [direct.state.x, direct.state.velocity]);
 });
 
-test('all integrated seeded Normal/Continuous routes keep a geometrically open >=6 px corridor at 30/60/120 Hz', () => {
+test('upgraded Swift certification accepts a tight dodge that stock half-load steering cannot complete', () => {
+  const previous = {hazards: [{kind: 'barrier', lane: 0, offsetX: 0, offsetY: 0}],
+    intermediates: [], safeLanes: [1], spacingPx: 750};
+  const next = {hazards: [{kind: 'barrier', lane: 1, offsetX: 0, offsetY: 0}],
+    intermediates: [], safeLanes: [2], spacingPx: 750};
+  const stock = {load: 5.5, capacity: 11, handling: 0, loadRelief: 0, vehicleMultiplier: 1,
+    reactionSeconds: TRACK_VALIDATION_REFERENCE.reactionSeconds};
+  for (const hz of GAME_BALANCE.routes.track.routeValidation.sampleHz) {
+    const upgraded = driveTrackTransition(previous, next, 1, 2, 620, {...TRACK_VALIDATION_REFERENCE, hz});
+    assert.ok(upgraded.completed && upgraded.clearance >=
+      GAME_BALANCE.routes.track.routeValidation.minimumClearancePx,
+    `${hz} Hz: upgraded Swift must clear the dodge (${upgraded.clearance})`);
+    assert.equal(driveTrackTransition(previous, next, 1, 2, 620, {...stock, hz}).completed, false,
+      `${hz} Hz: the stock truck must not remain a generation gate`);
+  }
+});
+
+test('all integrated seeded Normal/Continuous routes certify the upgraded Swift at 30/60/120 Hz', () => {
   for (const [levelId, mode] of [['level1', 'normal'], ['level2', 'normal'], ['level1', 'continuous']]) {
     for (const seed of [153, 1, 1234, 98765]) {
       const start = mode === 'normal' ? 9 : 5000;
@@ -169,7 +299,8 @@ test('all integrated seeded Normal/Continuous routes keep a geometrically open >
         const proof = validateTrackSequence([approach, ...physical], i =>
           routeSpeedAtDistance(rows[i - 1].plannedDistance +
             (HAZARD_TRAVEL_PX + HAZARD_ROW_ENVELOPE_PX / 2) * METERS_PER_PIXEL, levelId, mode),
-        {geometric: true, minimumClearancePx: 6, levelId, mode, hz, initialStates: [{lane: 1, x: 195, velocity: 0}]});
+        {...TRACK_VALIDATION_REFERENCE, minimumClearancePx: 6, levelId, mode, hz,
+          initialStates: [{lane: 1, x: 195, velocity: 0}]});
         assert.ok(proof.completed && proof.clearance >= 6,
           `${seed}/${levelId}/${mode}/${hz}Hz: ${proof.clearance}`);
         assert.equal(proof.approximateMovingSafety, undefined);
@@ -205,13 +336,13 @@ test('dev-only trace reproduces production rows without changing gameplay RNG in
   }
 });
 
-test('row spacing leaves the best possible truck time to leave a blocked lane, plus reaction padding', () => {
+test('row spacing leaves the upgraded Swift time to leave a blocked lane, plus reaction padding', () => {
   const worstCase = laneClearTimeSeconds({
     load: 10, capacity: 10, handling: WORST_CASE_HANDLING,
     laneSpacing: LANE_SPACING_PX, clearDistance: MAX_HAZARD_HIT_X,
   });
   assert.ok(Math.abs(worstCase - WORST_CASE_LANE_CLEAR_SECONDS) < 1e-9);
-  // Owner rule: rows are sized for the best build (max Precision, empty hold, best chassis), not stock.
+  // Rows use the same max-Precision, empty Swift as the live validator, not a stock or future chassis.
   assert.ok(BEST_CASE_LANE_CLEAR_SECONDS > 0 && BEST_CASE_LANE_CLEAR_SECONDS < worstCase);
   assert.equal(ROW_REACTION_SECONDS, GAME_BALANCE.routes.track.rowReactionSeconds);
   for (let distance = 0; distance <= ROUTE_END_DISTANCE_M + 900; distance += 25) {

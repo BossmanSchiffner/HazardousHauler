@@ -1,14 +1,13 @@
 import {GAME_BALANCE} from '../data/gameBalance.js';
-import {VEHICLES} from '../data/catalog.js';
+import {IMPLEMENTED_VEHICLE_IDS, VEHICLES} from '../data/catalog.js';
 
-const supportedIds = ['standard', 'swift'];
 const fail = reason => ({ok: false, reason});
 
 export function vehicleStatus(profile, vehicleId) {
   const vehicle = VEHICLES.find(candidate => candidate.id === vehicleId);
-  if (!vehicle || !supportedIds.includes(vehicleId)) throw new Error(`Unsupported vehicle ${vehicleId}`);
+  if (!vehicle || !IMPLEMENTED_VEHICLE_IDS.includes(vehicleId)) throw new Error(`Unsupported vehicle ${vehicleId}`);
   const owned = profile.ownedVehicleIds.includes(vehicleId);
-  const levelUnlocked = vehicleId === 'standard' || profile.levelProgress?.level2?.unlocked === true;
+  const levelUnlocked = vehicleId !== 'swift' || profile.levelProgress?.level2?.unlocked === true;
   return {
     vehicle, owned, selected: profile.selectedVehicleId === vehicleId,
     levelUnlocked, cost: vehicle.bpCost,
@@ -46,7 +45,7 @@ export function selectVehicle(profile, vehicleId) {
 }
 
 export function buyVehicleTrim(profile, vehicleId, trimId) {
-  if (!supportedIds.includes(vehicleId) || !GAME_BALANCE.presentation.trimChoices.includes(trimId)) {
+  if (!IMPLEMENTED_VEHICLE_IDS.includes(vehicleId) || !GAME_BALANCE.presentation.trimChoices.includes(trimId)) {
     throw new Error('Invalid vehicle trim purchase');
   }
   const state = profile.shipStates[vehicleId];

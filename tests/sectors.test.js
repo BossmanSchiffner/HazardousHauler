@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, difficultyStepAtDistance, sectorAtDistance} from '../src/game/core/sectors.js';
+import {CONTINUOUS_SECTORS, IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, difficultyStepAtDistance, sectorAtDistance} from '../src/game/core/sectors.js';
 import {MAX_TRACK_SPEED, METERS_PER_PIXEL, routeSpeedAtDistance, routeTimeAtDistance} from '../src/game/core/economy.js';
 import {
   CHUNK_REGISTRIES, LEVEL2_CHUNK_REGISTRIES, createTrackGenerator, createTrackStream, prepareTrackChunk,
@@ -69,10 +69,9 @@ test('Level 1 has four data-driven sector boundaries and difficulty steps up at 
   for (const [distance, step] of [[0, 0], [499.999, 0], [500, 1], [1000, 2], [1500, 3], [1999, 3], [2000, 3]]) {
     assert.equal(difficultyStepAtDistance(distance), step, `${distance} m`);
   }
-  assert.equal(difficultyStepAtDistance(0, 'level1', 'continuous'), 1);
-  assert.equal(difficultyStepAtDistance(
-    4 * GAME_BALANCE.routes.continuous.depotIntervalMeters, 'level1', 'continuous'), 1,
-    'Continuous stays at the Sector 2 baseline independently of milestone speeds');
+  assert.deepEqual([0, 2000, 4000, 6000, 8000].map(distance =>
+    difficultyStepAtDistance(distance, 'level1', 'continuous')), [0, 1, 2, 3, 0],
+  'Endless difficulty follows the repeating sector cycle');
   for (let i = 1; i < IMPLEMENTED_SECTORS.length; i++) {
     const sector = IMPLEMENTED_SECTORS[i];
     assert.equal(sectorAtDistance(sector.startsAt - 0.001).id, IMPLEMENTED_SECTORS[i - 1].id);
@@ -116,7 +115,7 @@ test('Level 2 has independent four-sector progress and opens at its configured L
 });
 
 test('speed ladder interpolates approved sector starts and clamps every runtime velocity', () => {
-  assert.equal(MAX_TRACK_SPEED, 720);
+  assert.equal(MAX_TRACK_SPEED, 700);
   for (const [levelId, speeds] of [
     ['level1', [320, 350, 380, 410]], ['level2', [350, 380, 410, 440]],
     ['level3', [380, 410, 440, 470]], ['level4', [410, 440, 470, 500]],
@@ -292,14 +291,29 @@ test('Level 1 stays static and Level 2 introduces only lateral Forklifts from Se
   assert.ok(patrolLanes.has(3), 'Forklifts patrol across three lanes wherever the opening allows');
 });
 
-test('continuous speed milestones use a global Industrial Sector 2 baseline instead of per-level Overdrive stages', () => {
+test('Continuous Run cycles four configured sectors independently from speed and Depot milestones', () => {
   const continuousInterval = GAME_BALANCE.routes.continuous.depotIntervalMeters;
-  for (const distance of [0, ...[1, 5, 7, 8, 9, 11].map(milestone => milestone * continuousInterval)]) {
+  const stages = [
+    ['industrial', 'industrial', 0],
+    ['dustlands', 'dustlands', 1],
+    ['dustlands', 'dustlands_dusk', 2],
+    ['neon', 'level4_neon_s1', 3],
+  ];
+  assert.deepEqual(CONTINUOUS_SECTORS.map(sector =>
+    [sector.themeId, sector.challengeProfileId, sector.difficultyStep]), stages);
+  for (const [index, [themeId, challengeProfileId]] of stages.entries()) {
+    const distance = index * continuousInterval;
+    const sector = sectorAtDistance(distance, 'level1', 'continuous');
+    assert.equal(sector.themeId, themeId);
+    assert.equal(sector.challengeProfileId, challengeProfileId);
+    assert.equal(sectorAtDistance(distance + continuousInterval * 8, 'level1', 'continuous'), sector,
+      'the four-stage environment cycle repeats without allocating new sector descriptors');
+  }
+  for (const distance of [0, 1000, 2000, 7000, 8000, 12000]) {
     assert.equal(routeSpeedAtDistance(distance, 'level1', 'continuous'),
-      Math.min(MAX_TRACK_SPEED, 350 + Math.floor(distance / 1000) * 40));
-    assert.equal(sectorAtDistance(distance, 'level1', 'continuous'), IMPLEMENTED_LEVELS.level1[1]);
+      Math.min(620, 460 + Math.floor(distance / 1000) * 20));
     assert.equal(nextMoverWindowAfter(distance, MOVER_WINDOW_RULES, 'level1', 'continuous').distance,
-      (Math.floor(distance / 1000) + 1) * 1000);
+      (Math.floor(distance / continuousInterval) + 1) * continuousInterval);
   }
   assert.throws(() => routeSpeedAtDistance(8000, 'level2', 'continuous'), /global/);
 });

@@ -412,10 +412,11 @@ export function projectPhysicalEvents(rows, {levelId = 'level1', mode = 'normal'
     const sourceDistance = row.plannedDistance ?? row.spawnDistance;
     if (!Number.isFinite(sourceDistance)) throw new Error('Physical event needs a world anchor');
     const encounter = row.encounterId ?? row.chunkId ?? `row:${sourceDistance}`;
-    const ids = new Map([...row.hazards, ...(row.intermediates ?? [])].map((hazard, index) =>
+    const hazards = [...row.hazards, ...(row.intermediates ?? []), ...(row.sweepers ?? [])];
+    const ids = new Map(hazards.map((hazard, index) =>
       [hazard, hazard.sideObstacleId ?? `${sourceDistance}:${index}`]));
     if (row.emitted !== false) {
-      for (const [hazardIndex, hazard] of [...row.hazards, ...(row.intermediates ?? [])].entries()) {
+      for (const [hazardIndex, hazard] of hazards.entries()) {
         if (hazard.continuation) continue;
         const id = hazard.sideObstacleId ?? `${sourceDistance}:${hazardIndex}`;
         physical.set(id, {id, hazard, sourceDistance, encounter, lifetime: row.lifetime,
@@ -429,6 +430,8 @@ export function projectPhysicalEvents(rows, {levelId = 'level1', mode = 'normal'
       events.push({distance, from: distance - halfWindowPx * METERS_PER_PIXEL,
         to: distance + halfWindowPx * METERS_PER_PIXEL,
         placement, encounter, rowIndex: index, sourceDistance,
+        ...(row.protectedLaneMask && primary.some(hazard => hazard.depotChicane)
+          ? {protectedLaneMask: row.protectedLaneMask} : {}),
         ...(row.moverReservedMask ? {reservedLaneMask: row.moverReservedMask} : {}),
         ownerIds: owners.map(hazard => ids.get(hazard))});
     };
@@ -551,7 +554,7 @@ export function advancePressureHistory(history, events, {mode = 'normal'} = {}) 
     else groups.push([event]);
   }
   for (const group of groups) for (let lane = 0; lane < streaks.length; lane++) {
-    if (group.some(event => (event.reservedBypassMask ?? 0) & (1 << lane))) {
+    if (group.some(event => event.protectedLaneMask & (1 << lane))) {
       streaks[lane] = 0;
       continue;
     }

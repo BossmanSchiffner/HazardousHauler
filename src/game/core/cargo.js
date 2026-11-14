@@ -70,13 +70,17 @@ export function cargoPickupForRoll(distance, roll, levelId = 'level1', mode = 'n
     tierRoll -= weight;
     return tierRoll < 0;
   }) ?? table.at(-1);
+  const continuous = GAME_BALANCE.routes.continuous;
+  const value = mode === 'continuous'
+    ? distance >= continuous.lateCargoDistanceMeters ? continuous.lateCargoValue : continuous.cargoValue
+    : tier.value;
   const heavy = step > 0 && roll < FREIGHT_CHANCE;
-  const stack = tier.value > SINGLE_COIN_PAYOUT || roll < COIN_STACK_CHANCE;
+  const stack = value > SINGLE_COIN_PAYOUT || roll < COIN_STACK_CHANCE;
   return {
     kind: heavy ? 'freight' : stack ? 'coinStack' : 'coin',
     mass: heavy ? GAME_BALANCE.cargo.freightMass : GAME_BALANCE.cargo.singleCoinMass,
     slots: GAME_BALANCE.cargo.pickupSlots,
-    value: tier.value,
+    value,
   };
 }
 

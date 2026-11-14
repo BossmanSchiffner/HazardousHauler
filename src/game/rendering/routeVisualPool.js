@@ -24,7 +24,7 @@ const residentRows = Math.ceil(Math.max(
 ) / minimumSpacing) + 1;
 // Beta slots budget a vent's sprite, shadow, two air puffs, beacon and Neon halo.
 const imagesPerRow = routes.track.lanes.length * Math.max(6, maximumParts * 2 + 1) +
-  routes.track.betaSlots.length * 6 + routes.track.lanes.length * 2 + 2;
+  routes.track.betaSlots.length * 6 + routes.track.lanes.length * 3 + 2;
 
 /** Conservative descriptor bounds, independent of route seed, quotas and visual theme. */
 export const ROUTE_VISUAL_CAPACITY = Object.freeze({

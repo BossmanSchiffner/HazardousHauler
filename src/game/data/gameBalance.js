@@ -69,8 +69,9 @@ const balance = {
     metersPerPixel: 0.06,
     finishClearanceMeters: 10,
     continuous: {baselineLevelId: 'level1',
-      depotIntervalMeters: 2000, startSpeedPxPerSecond: 580, milestoneSpeedStep: 20,
-      speedStepIntervalMeters: 1000},
+      depotIntervalMeters: 2000, startSpeedPxPerSecond: 460, maximumSpeedPxPerSecond: 620,
+      milestoneSpeedStep: 20, speedStepIntervalMeters: 1000,
+      cargoValue: 25, lateCargoValue: 30, lateCargoDistanceMeters: 6000},
     level1: {
       challengeProfileId: 'industrial',
       sectorEndsMeters: ROUTE_TOPOLOGY.level1.sectorEnds,
@@ -86,20 +87,7 @@ const balance = {
       sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
       openingLesson: {durationMeters: 300, challengeChance: 0.65},
     },
-    level4: {
-      challengeProfileId: 'neon',
-      sectorEndsMeters: ROUTE_TOPOLOGY.level4.sectorEnds,
-      depotDistancesMeters: ROUTE_TOPOLOGY.level4.depotDistances,
-      checkpointDistanceMeters: ROUTE_TOPOLOGY.level4.checkpointDistance,
-      sectorThemeIds: ['neon', 'neon', 'neon', 'neon'],
-      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level4[0], endPxPerSecond: CAMPAIGN_SPEEDS.level4.at(-1),
-        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level4},
-      densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
-      densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
-      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
-      sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
-      openingLesson: {durationMeters: 300, challengeChance: 0.65},
-    },
+
     level2: {
       challengeProfileId: 'dustlands',
       sectorEndsMeters: ROUTE_TOPOLOGY.level2.sectorEnds,
@@ -130,6 +118,21 @@ const balance = {
       sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
       openingLesson: {durationMeters: 300, challengeChance: 0.65},
     },
+    level4: {
+      challengeProfileId: 'neon',
+      sectorEndsMeters: ROUTE_TOPOLOGY.level4.sectorEnds,
+      depotDistancesMeters: ROUTE_TOPOLOGY.level4.depotDistances,
+      checkpointDistanceMeters: ROUTE_TOPOLOGY.level4.checkpointDistance,
+      sectorThemeIds: ['neon', 'neon', 'neon', 'neon'],
+      speed: {startPxPerSecond: CAMPAIGN_SPEEDS.level4[0], endPxPerSecond: CAMPAIGN_SPEEDS.level4.at(-1),
+        sectorStartsPxPerSecond: CAMPAIGN_SPEEDS.level4},
+      densityTargets: [1, 1.15, 1.30, 1.45, 1.55],
+      densityStretch: {intervalMeters: 600, increment: 0.02, maxIntervals: 3, intermediateDensityScale: 1.08},
+      challengeChance: [0.78, 0.83, 0.88, 0.93, 1],
+      sustainedChance: [0, 0.3, 0.55, 0.75, 0.85],
+      openingLesson: {durationMeters: 300, challengeChance: 0.65},
+    },
+    
     movingHazards: {
       eligibleLevelIds: ['level2'],
       eligibleModes: ['normal'],
@@ -176,17 +179,18 @@ const balance = {
     track: {
       lanes: [0, 1, 2, 3],
       laneCentersPx: [86, 159, 232, 305],
-      minRowSpacingPx: 160,
+      minRowSpacingPx: 140,
       rowGapMargin: {start: 1.3, end: 1.1},
-      // Owner rule: rows are spaced for the best possible truck (max steering, lightest chassis load)
+      // Rows use an empty Swift Runner with maximum Precision Steering,
       // plus this reaction padding. Stock trucks are expected to fail, upgrade and retry.
       rowReactionSeconds: 0.5,
       maxLaneChangesPerRow: 1,
       betaSlots: [1 / 3, 1 / 2, 2 / 3],
-      continuousBetaSlots: [0.55, 0.75],
+      continuousBetaSlots: [1 / 3, 1 / 2, 2 / 3],
       // Owner rule: a lane that opens stays open 2..3 consecutive rows before it is threatened again.
       minimumClearEvents: {normal: 2, continuous: 2},
       maximumClearEvents: {normal: 3, continuous: 3},
+      maximumClearHalfRows: 1,
       // Owner rule: no stretch longer than this planned distance may leave a middle lane (1 or 2) open on
       // every row; some row must leave only an outer lane (0 or 3) open, so the truck cannot shuttle 1<->2.
       edgeLaneDemandMeters: {normal: 160, continuous: 160},
@@ -208,7 +212,8 @@ const balance = {
         steeringDemand: {dashPx: 37, sectorDashShare: [0.30, 0.45, 0.60, 0.75]},
       },
       routeValidation: {
-        baseline: {vehicleId: 'standard', loadFraction: 0.5},
+        baseline: {id: 'swift-max-steering-empty', vehicleId: 'swift', loadFraction: 0,
+          moduleIds: ['hand_precision']},
         // 'geometric': certify only that an open corridor exists (>= minimumClearancePx); no steering model.
         certification: 'connected',
         edgeMarginPx: 30, simulationHz: 120,
@@ -226,8 +231,9 @@ const balance = {
     },
     depot: {
       loopMeters: 450,
-      // Owner rule: clean road for the last 50 m before a Depot; obstacles resume within 25 m after it.
+      // The Depot-side half stays clear for 50 m; the opposite half gets a staggered chicane.
       approachMeters: 50,
+      approachChicaneCount: 3,
       exitMeters: 18,
       noticeMeters: 60,
       announcementMeters: 75,
@@ -290,32 +296,32 @@ const balance = {
     modules: {
       hand_precision: {
         starter: false, unlock: null, price: 150, upgradeBase: 200,
-        stat: 'handling', values: [0.10, 0.32, 0.52, 0.70, 0.90], drawback: null,
+        stat: 'handling', values: [0.10, 0.20, 0.30, 0.40, 0.50], drawback: null,
       },
       cargo_light: {
         starter: false, unlock: {levelId: 'level1', sector: 3, event: 'complete'}, price: 300, upgradeBase: 200,
-        stat: 'loadRelief', values: [0.2, 0.3, 0.4, 0.5, 0.6],
+        stat: 'loadRelief', values: [0.1, 0.2, 0.3, 0.4, 0.5],
         drawback: {stat: 'capacity', value: -2},
       },
       def_plating: {
-        starter: false, unlock: {levelId: 'level1', sector: 4, event: 'complete'}, price: 400, upgradeBase: 200,
-        stat: 'hull', values: [1, 1, 1, 1, 1],
+        starter: false, unlock: {levelId: 'level2', sector: 4, event: 'complete'}, price: 400, upgradeBase: 300,
+        stat: 'hull', values: [1, 1, 1],
         drawback: {stat: 'handling', value: -0.06},
       },
       coll_magnet: {
-        starter: false, unlock: {levelId: 'level1', sector: 1, event: 'reach'}, price: 300, upgradeBase: 200,
-        stat: 'magnet', values: [10, 15, 20, 30, 40], drawback: null,
+        starter: false, unlock: {levelId: 'level3', sector: 1, event: 'reach'}, price: 300, upgradeBase: 200,
+        stat: 'magnet', values: [10, 20, 30, 40, 50], drawback: null,
       },
       util_impact_pulse: {
-        starter: false, unlock: {levelId: 'level4', sector: 3, event: 'reach'}, price: 500, upgradeBase: 250,
+        starter: false, unlock: {levelId: 'level4', sector: 3, event: 'reach'}, price: 1000, upgradeBase: 300,
         stat: 'impactPulseSeconds', values: [0.2, 0.35, 0.5, 0.65, 0.8], drawback: null,
       },
       def_shield: {
-        starter: false, unlock: {levelId: 'level2', sector: 3, event: 'complete'}, price: 500, upgradeBase: 250,
+        starter: false, unlock: {levelId: 'level2', sector: 3, event: 'complete'}, price: 750, upgradeBase: 250,
         stat: 'shieldCapacity', values: [1, 2, 3], drawback: null,
       },
       util_insurance: {
-        starter: false, unlock: {levelId: 'level2', sector: 1, event: 'reach'}, price: 300, upgradeBase: 250,
+        starter: false, unlock: {levelId: 'level2', sector: 1, event: 'reach'}, price: 500, upgradeBase: 250,
         stat: 'insurance', values: [0.3, 0.45, 0.6, 0.75, 0.9], drawback: null,
       },
     },
@@ -323,10 +329,11 @@ const balance = {
   vehicles: {
     standard: {
       baseEquipmentSlots: 2,
-      baseStats: {capacity: 8, handling: 0, loadRelief: 0, hull: 3, magnet: 0, impactPulseSeconds: 0, shieldCapacity: 0, insurance: 0},
+      baseStats: {capacity: 8, handling: 0, loadRelief: 0, hull: 2, magnet: 0, impactPulseSeconds: 0, shieldCapacity: 0, insurance: 0},
       blueprintCost: 0,
     },
     swift: {
+      baseStats: {hull: 3},
       blueprintCost: 6,
       baseEquipmentSlots: 3,
       steeringMultiplier: 1.30,
@@ -337,10 +344,15 @@ const balance = {
         6: {milestone: 'level2,sector4', costCoins: 1000},
       },
     },
-    armoured: {blueprintCost: 12},
-    prospector: {blueprintCost: 12},
-    apex: {blueprintCost: 20, moduleBenefitMultiplier: 1.25},
-    apexUnlock: {milestone: 'level1,sector4', prerequisites: ['swift', 'armoured', 'prospector']},
+    armoured: {
+      blueprintCost: 12,
+      baseEquipmentSlots: 2,
+      baseStats: {hull: 4, shieldCapacity: 1},
+      cargoCapacityOffset: 5,
+      steeringMultiplier: 0.8,
+    },
+    apex: {blueprintCost: 20, moduleBenefitMultiplier: 1.25, baseStats: {hull: 3}},
+    apexUnlock: {milestone: 'level4,sector4', prerequisites: ['swift', 'armoured']},
   },
   progression: {
     levelIds: ['level1', 'level2', 'level3', 'level4'],
@@ -407,18 +419,18 @@ const balance = {
   },
   physics: {
     steering: {
-      maxLateralSpeedPxPerSecond: 390,
-      maxLateralAccelerationPxPerSecondSquared: 1600,
+      maxLateralSpeedPxPerSecond: 351,
+      maxLateralAccelerationPxPerSecondSquared: 1440,
       brakingDistanceFactor: 2,
       fullLoadPenalty: 0.44,
       minimumResponse: 0.52,
       laneChangeSimulationHz: 480,
       laneChangeMaximumSeconds: 5,
     },
-    magnet: {pullSpeedPxPerSecond: 420, reachAboveShipPx: 240, reachBelowShipPx: 40    },
+    magnet: {pullSpeedPxPerSecond: 120, reachAboveShipPx: 140, reachBelowShipPx: 40    },
     collision: {
       cargoHalfHeightPx: 40,
-      closeCall: {minimumGapPx: 15, maximumGapPx: 25, bonusStepPercent: 5, maximumBonusPercent: 50},
+      closeCall: {minimumGapPx: 5, maximumGapPx: 20, bonusStepPercent: 5, maximumBonusPercent: 50},
       hitInvulnerabilitySeconds: 1.15,
       shieldInvulnerabilitySeconds: 0.6,
       crashResultDelayMs: 750,

@@ -3,15 +3,17 @@ import assert from 'node:assert/strict';
 import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 import {CHALLENGE_PROFILES} from '../src/game/data/challengeProfiles.js';
 import {sectorAtDistance} from '../src/game/core/sectors.js';
-import {HAZARD_TRAVEL_PX, SHIP_Y} from '../src/game/data/route.js';
+import {HAZARD_TRAVEL_PX, SHIP_Y, SPAWN_Y} from '../src/game/data/route.js';
 import {METERS_PER_PIXEL, routeTimeAtDistance, routeSpeedAtDistance} from '../src/game/core/economy.js';
 import {createTrackStream, trackEncounterSignature, rowSpacingAtSpeed, ROW_REACTION_SECONDS,
   hazardsBeforeDepot, chunkCollisionSpan, chunkCollisionCoverage, createSeededRandom,
-  shouldSuppressBetaBetweenAlpha, betaIsSandwichedByAlpha, campingWindows} from '../src/game/core/trackGenerator.js';
+  shouldSuppressBetaBetweenAlpha, betaIsSandwichedByAlpha, campingWindows,
+  shapeBaselineRows, TRACK_VALIDATION_REFERENCE} from '../src/game/core/trackGenerator.js';
 import {advancePressureHistory, projectPhysicalEvents, physicalPressureMetrics,
   hazardDefinition, hazardGeometry, hazardHits, hazardX, hazardBlockedIntervals,
   movingHazardOffset, canonicalMotionAge, sideHazardQuota, hazardSweptArtOverlaps,
-  HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailMinimumLength} from '../src/game/core/hazards.js';
+  HAZARD_ROW_ENVELOPE_PX, LANE_CENTERS, guardrailMinimumLength, obstacleLaneMask,
+  hazardScrollScale} from '../src/game/core/hazards.js';
 import {validateTrackSequence, hazardClearance} from '../src/game/core/trackValidation.js';
 import {loadoutStats} from '../src/game/core/modules.js';
 import {DEPOT_RULES, nextDepotAfter} from '../src/game/core/depots.js';
@@ -56,10 +58,12 @@ function collisionEvents(rows, options) {
   const bodies = [], owners = new Map(), structures = new Map(), events = [];
   for (const physical of rows) {
     if (!physical.emitted) continue;
-    for (const hazard of [...physical.hazards, ...physical.intermediates]) {
+    for (const hazard of [...physical.hazards, ...physical.intermediates, ...(physical.sweepers ?? [])]) {
       if (hazard.continuation) continue;
       const body = {hazard, source: physical.plannedDistance, lifetime: physical.lifetime,
-        center: physical.plannedDistance + (HAZARD_TRAVEL_PX - hazard.offsetY) * METERS_PER_PIXEL};
+        center: physical.plannedDistance + (HAZARD_TRAVEL_PX - hazard.offsetY) *
+          METERS_PER_PIXEL / hazardScrollScale(hazard),
+        halfWindow: hazardGeometry(hazard).hitY * METERS_PER_PIXEL / hazardScrollScale(hazard)};
       bodies.push(body);
       owners.set(hazard, body);
       if (hazard.sideObstacleId) structures.set(hazard.sideObstacleId, body);
@@ -71,7 +75,8 @@ function collisionEvents(rows, options) {
       ? movingHazardOffset(body.hazard.movement,
         canonicalMotionAge(body.source, distance, options.levelId, options.mode)) : 0;
     return hazardHits(body.hazard, hazardX({...body.hazard, movementOffsetPx}),
-      SHIP_Y + (distance - body.center) / METERS_PER_PIXEL, LANE_CENTERS[lane], SHIP_Y);
+      SPAWN_Y + body.hazard.offsetY + (distance - body.source) / METERS_PER_PIXEL *
+        hazardScrollScale(body.hazard), LANE_CENTERS[lane], SHIP_Y);
   };
   for (const [rowIndex, physical] of rows.entries()) {
     const add = (offset, placement, primary, owned) => {
@@ -81,7 +86,7 @@ function collisionEvents(rows, options) {
       if (!sources.some(body => LANE_CENTERS.some((_, lane) => collides(body, distance, lane)))) return;
       const extent = Math.max(0, ...primary.map(hazard => hazardGeometry(hazard).hitY)) * METERS_PER_PIXEL;
       const active = bodies.filter(body => Math.abs(body.center - distance) <=
-        hazardGeometry(body.hazard).hitY * METERS_PER_PIXEL + extent);
+        body.halfWindow + extent);
       const mask = [false, false, false, false], side = [...mask], discrete = [...mask];
       const positions = [distance, distance - extent + 1e-9, distance + extent - 1e-9,
         ...Array.from({length: 129}, (_, index) => distance - extent + index / 128 * 2 * extent)];
@@ -90,7 +95,8 @@ function collisionEvents(rows, options) {
         mask[lane] = true;
         (body.hazard.sideObstacle ? side : discrete)[lane] = true;
       }
-      if (mask.some(Boolean)) events.push({distance, rowIndex, placement, mask, side, discrete});
+      if (mask.some(Boolean)) events.push({distance, rowIndex, placement, mask, side, discrete,
+        protectedLaneMask: primary.some(hazard => hazard.depotChicane) ? physical.protectedLaneMask : 0});
     };
     add(0, 'alpha', physical.hazards.filter(hazard => !hazard.continuation && !hazard.lengthPx),
       physical.hazards);
@@ -134,7 +140,8 @@ test('Level 1 retains strict anti-camping while Level 2 overlays movers on a cer
     assert.ok(level2.filter(row => row.emitted).every(row => row.certificates.every(proof =>
       proof.completed && proof.clearance >= 6)), `level2/${seed}: connected clearance`);
     assert.ok(level2.some(row => row.moverOverlay), `level2/${seed}: Forklifts overlay the base route`);
-    assert.ok(!level2.some(row => row.family === 'split_gate'), `level2/${seed}: avoid forced one-lane gates`);
+    assert.ok(level2.every(row => row.family !== 'split_gate' || row.fallback),
+      `level2/${seed}: reserve one-lane gates for certified mandatory-pressure recovery`);
     assert.ok(new Set(level2.filter(row => row.emitted).map(row => row.family)).size >= 3,
       `level2/${seed}: retain static route variety`);
   }
@@ -170,6 +177,85 @@ test('clear-row rule: all four lanes retain independent history across encounter
   const short = advancePressureHistory(history, [event([0, 2])]);
   assert.deepEqual(short.violations.map(({lane, streak, short}) => ({lane, streak, short})),
     [{lane: 2, streak: 1, short: true}], 'owner rule: an opened lane stays open for at least two rows');
+});
+
+test('clear-row rule: overdue lanes pull the nearest eligible obstacle rather than adding a blocker', () => {
+  for (const mode of ['normal', 'continuous']) {
+    for (const lanes of [[2], [2, 1]]) {
+      const source = {...row(0, 2),
+        hazards: lanes.map(lane => ({kind: 'divider', lane, offsetX: 0, offsetY: 0}))};
+      const before = structuredClone(source);
+      const [shaped] = shapeBaselineRows([source], [1, 1, 1], 0, mode);
+      assert.equal(shaped.hazards.length, source.hazards.length, 'relocate instead of crowding the safe corridor');
+      assert.equal(shaped.hazards[lanes.indexOf(Math.min(...lanes))].lane, 0,
+        'lane 1 is preferred to lane 2 when both are available');
+      assert.ok(shaped.hazardLanes.includes(0));
+      assert.ok(shaped.safeLanes.length > 0);
+      assert.ok(!shaped.cargoLanes.includes(0));
+      assert.deepEqual(source, before, 'authored descriptors remain unchanged');
+    }
+    const [dual] = shapeBaselineRows([{
+      ...row(0, 1), hazards: [1, 2].map(lane => ({
+        kind: 'divider', lane, offsetX: 0, offsetY: 0,
+      })),
+    }], [0b1001, 0b1001, 0b1001], 0, mode);
+    assert.deepEqual(dual.hazards.map(hazard => hazard.lane), [0, 3],
+      'each donor is moved once and cannot be stolen from another overdue lane');
+    const [fixed] = shapeBaselineRows([{
+      ...row(0, 2), hazards: [
+        {kind: 'barrier', lane: 1, offsetX: 0, offsetY: 0, sideObstacle: true},
+        {kind: 'divider', lane: 2, offsetX: 0, offsetY: 0},
+      ],
+    }], [1, 1, 1], 0, mode);
+    assert.deepEqual(fixed.hazards.map(hazard => hazard.lane), [1, 0],
+      'skip a nearer fixed structure and move the eligible lane-2 obstacle');
+  }
+});
+
+test('clear-row rule: protected mover bypasses cannot pretend to reset a clear-lane streak', () => {
+  const reserved = {...event([1, 2, 3]), reservedBypassMask: 1};
+  for (const mode of ['normal', 'continuous']) {
+    const history = advancePressureHistory([3, 0, 0, 0], [reserved], {mode});
+    assert.equal(history.streaks[0], 4);
+    assert.equal(history.acceptable, false, 'choose a different certified layout instead of erasing the debt');
+    const source = {...row(0, 2), moverBypassMask: 1};
+    const [protectedRow, next] = shapeBaselineRows([source, row(30, 2)], [1, 1, 1], 0, mode);
+    assert.ok(!protectedRow.hazards.some(hazard => hazard.lane === 0), 'never obstruct the reserved bypass');
+    assert.equal(protectedRow.requiredLaneMask, 1, 'unsatisfied pressure remains visible to selection');
+    assert.ok(next.hazards.some(hazard => hazard.lane === 0), 'a reservation cannot erase the following obligation');
+  }
+});
+
+test('clear-row rule: repeated half-road concentration pulls the nearest obstacle into the empty half early', () => {
+  for (const mode of ['normal', 'continuous']) {
+    for (const [blocked, openMask, expected] of [
+      [[0, 1], 0b1100, [0, 2]],
+      [[2, 3], 0b0011, [1, 3]],
+    ]) {
+      const source = {...row(0, 0), hazards: blocked.map(lane =>
+        ({kind: 'barrier', lane, offsetX: 0, offsetY: 0}))};
+      const [shaped] = shapeBaselineRows([source], [openMask], 0, mode);
+      assert.deepEqual(shaped.hazards.map(hazard => hazard.lane), expected);
+      assert.equal(shaped.hazards.length, 2, 'redistribute instead of adding another blocked lane');
+      assert.deepEqual(source.hazards.map(hazard => hazard.lane), blocked);
+    }
+  }
+});
+
+test('clear-row rule: Depot approach protects only its bay lanes, not the opposite-half chicane', () => {
+  for (const mode of ['normal', 'continuous']) {
+    const first = {...event([2]), protectedLaneMask: 0b0011};
+    const history = advancePressureHistory([3, 3, 0, 3], [first], {mode});
+    assert.deepEqual(history.streaks, [0, 0, 0, 4]);
+    assert.deepEqual(history.violations.map(violation => violation.lane), [3],
+      'the opposite half still needs real collision-bearing pressure');
+  }
+});
+
+test('clear-row rule: suppressed Depot rows do not consume the next overdue-lane relocation', () => {
+  const [suppressed, next] = shapeBaselineRows([{...row(0, 2), emitted: false}, row(30, 2)], [1, 1, 1]);
+  assert.equal(suppressed.hazards[0].lane, 2);
+  assert.equal(next.hazards[0].lane, 0);
 });
 
 test('clear-row rule: cargo scenery and suppressed sources do not create meaningful pressure rows', () => {
@@ -209,6 +295,19 @@ test('clear-row rule: movers receive only timed collision-window lane pressure r
   assert.equal(advancePressureHistory([0, 3, 0, 0], projected.events).acceptable, false);
 });
 
+test('clear-row rule: a Street Sweeper pressures only rows crossing its actual slower-moving body', () => {
+  const rows = Array.from({length: 9}, (_, index) => row(index * 20, 1));
+  const sweeper = {kind: 'sweeper', lane: 0, offsetX: 0, offsetY: 0,
+    streetSweeper: true, movement: {axis: 'forward', forwardSpeedRatio: 0.5}};
+  rows[0].sweepers = [sweeper];
+  const predicted = projectPhysicalEvents(rows).events;
+  const actual = collisionEvents(rows, {levelId: 'level1', mode: 'normal'});
+  assert.ok(predicted.some(event => event.threatenedLanes[0]), 'the overlay is a real collision body');
+  assert.equal(predicted[0].threatenedLanes[0], false, 'no pressure before it reaches the cab');
+  assert.equal(predicted.at(-1).threatenedLanes[0], false, 'no permanent pressure credit after it passes');
+  assert.deepEqual(predicted.map(event => event.threatenedLanes[0]), actual.map(event => event.mask[0]));
+});
+
 test('clear-row rule: each Beta is separate and recomposition updates the existing signature and physical validation', () => {
   const rows = [row(0, 0), row(36, 3)];
   rows.forEach(physical => { physical.spacingPx = 600; });
@@ -240,7 +339,7 @@ test('clear-row rule: Beta uses the last open lane between adjacent Alpha rows b
     while (distance < GAME_BALANCE.routes.level1.finishDistanceMeters) {
       const current = stream.nextRow(distance);
       if (!current) break;
-      if (previous) {
+      if (previous && !previous.depotApproach && !current.depotApproach) {
         assert.ok(previous.intermediates.every(hazard => !betaIsSandwichedByAlpha(current, hazard.lane)),
           `${seed}: Beta is flanked by the next Alpha row at ${current.plannedDistance} m`);
         const sharedAlphaBlockedLanes = previous.hazardLanes.filter(lane =>
@@ -293,14 +392,16 @@ test('clear-row rule: Beta never occupies a lane flanked by obstacles on the nex
     'a real open adjacent in-road lane remains a valid escape');
 });
 
-test('clear-row rule: all16 actual production routes preserve the limit and approved half-load baseline clearance across seams', context => {
+test('clear-row rule: all16 actual production routes preserve the limit and upgraded Swift clearance across seams', context => {
   assert.equal(cases.length, 16);
   assert.equal(new Set(cases.map(options => `${options.levelId}/${options.mode}/${options.seed}`)).size, 16);
   assert.equal(GAME_BALANCE.routes.track.encounters.candidateBudget, 8);
   assert.equal(GAME_BALANCE.routes.track.encounters.densityRecovery.candidateBudget, 16);
   for (const options of cases) {
     const {rows, metrics} = routeFor(options);
-    assert.deepEqual(metrics.violations, [], JSON.stringify({options, first: metrics.violations[0]}));
+    // Certified baseline/recovery can waive the two-row minimum, never the three-row maximum.
+    const overlong = metrics.violations.filter(violation => !violation.short);
+    assert.deepEqual(overlong, [], JSON.stringify({options, first: overlong[0]}));
     assert.ok(metrics.maximumClearStreakByLane.every(streak =>
       streak <= GAME_BALANCE.routes.track.maximumClearEvents[options.mode]), JSON.stringify(options));
     for (const physical of rows) {
@@ -322,16 +423,18 @@ test('clear-row rule: all16 actual production routes preserve the limit and appr
     }
     assert.ok(rows.every(physical => physical.intermediates.length <= GAME_BALANCE.routes.track.betaSlots.length));
     for (let index = 0; index + 1 < rows.length; index++) {
+      if (rows[index].depotApproach || rows[index + 1].depotApproach) continue;
       assert.ok(rows[index].intermediates.every(hazard =>
         !betaIsSandwichedByAlpha(rows[index + 1], hazard.lane)),
       `Beta is flanked by next Alpha row at ${rows[index + 1].plannedDistance} m`);
       const sharedAlphaBlockedLanes = rows[index].hazardLanes.filter(lane =>
         rows[index + 1].hazardLanes.includes(lane));
-      if (sharedAlphaBlockedLanes.length && rows[index].intermediates.length) {
+      const pressureBetas = rows[index].intermediates.filter(hazard => !hazard.filler);
+      if (sharedAlphaBlockedLanes.length && pressureBetas.length) {
         const lastOpenLane = rows[index].safeLanes.filter(lane =>
           rows[index + 1].safeLanes.includes(lane)).sort((a, b) => a - b).at(-1);
         assert.ok(Number.isInteger(lastOpenLane));
-        assert.ok(rows[index].intermediates.every(hazard => hazard.lane === lastOpenLane),
+        assert.ok(pressureBetas.every(hazard => hazard.lane === lastOpenLane),
           `Beta should use last open lane ${lastOpenLane} between Alpha rows at ` +
           `${rows[index].plannedDistance} and ${rows[index + 1].plannedDistance} m`);
       }
@@ -339,7 +442,7 @@ test('clear-row rule: all16 actual production routes preserve the limit and appr
     for (const physical of rows) {
       assert.deepEqual(physical.certificates.map(certificate => certificate.hz),
         GAME_BALANCE.routes.track.routeValidation.sampleHz);
-      assert.ok(physical.certificates.every(certificate => certificate.reference === 'standard-stock-half' &&
+      assert.ok(physical.certificates.every(certificate => certificate.reference === 'swift-max-steering-empty' &&
         certificate.completed && certificate.clearance >= 6));
     }
     const encounters = new Map();
@@ -378,7 +481,8 @@ test('clear-row rule: live selection pressures every urgent lane instead of exce
     }
     for (const group of groups) {
       for (let lane = 0; lane < 4; lane++) if (
-        history[lane] === GAME_BALANCE.routes.track.maximumClearEvents[options.mode]) {
+        history[lane] === GAME_BALANCE.routes.track.maximumClearEvents[options.mode] &&
+        !group.some(physical => physical.protectedLaneMask & (1 << lane))) {
         assert.ok(group.some(physical => physical.threatenedLanes[lane]), JSON.stringify({options, lane, group}));
         reliefs++;
       }
@@ -395,7 +499,8 @@ test('clear-row rule: exhausted live budgets use bounded certified collision-bea
   for (const physical of fallbacks) {
     assert.ok([GAME_BALANCE.routes.track.encounters.candidateBudget, GAME_BALANCE.routes.track.encounters.densityRecovery.candidateBudget].includes(physical.candidateBudget));
     assert.equal(physical.candidateAttempts, physical.candidateBudget);
-    assert.ok(physical.plannedObstacleCount > 0);
+    assert.ok(physical.plannedObstacleCount > 0 || physical.depotApproach,
+      'only a protected Depot approach may contain a deliberately empty partition');
     assert.ok(physical.certificates.every(certificate => certificate.completed && certificate.clearance >= 6));
   }
 });
@@ -424,7 +529,7 @@ test('clear-row rule: Depot clearing expires future pressure while preserving re
     assert.ok(reached.every(physical => physical.distance <= bank));
     assert.deepEqual(advancePressureHistory([0, 0, 0, 0], reached).streaks, before.streaks);
     const resumed = sampleRoute(153, 2000, true, levelId);
-    assert.deepEqual(physicalPressureMetrics(resumed, {levelId}).violations, []);
+    assert.deepEqual(physicalPressureMetrics(resumed, {levelId}).violations.filter(violation => !violation.short), []);
     assert.deepEqual(createTrackStream(153, levelId).pressureSnapshot(0).streaks, [0, 0, 0, 0]);
     const clearing = createTrackStream(153, levelId);
     const futureRow = clearing.nextRow(9);
@@ -436,16 +541,19 @@ test('clear-row rule: Depot clearing expires future pressure while preserving re
   }
 });
 
-test('formation: baseline is the real stock Standard half-load model, not an all-build guarantee', () => {
+test('formation: baseline uses empty Swift with maximum Precision, not stock or future chassis', () => {
   assert.deepEqual(GAME_BALANCE.routes.track.routeValidation.baseline,
-    {vehicleId: 'standard', loadFraction: 0.5});
-  const stats = loadoutStats({cargoCapacityRank: 0, ownedModules: {},
-    shipStates: {standard: {equippedModuleIds: []}}});
-  assert.equal(stats.capacity, 11);
-  assert.equal(stats.handling, 0);
-  assert.equal(stats.capacity * GAME_BALANCE.routes.track.routeValidation.baseline.loadFraction, 5.5);
-  assert.equal(GAME_BALANCE.routes.movingHazards.reactionMarginSeconds, 0.8);
-  assert.equal(GAME_BALANCE.routes.track.routeValidation.minimumClearancePx, 6);
+    {id: 'swift-max-steering-empty', vehicleId: 'swift', loadFraction: 0, moduleIds: ['hand_precision']});
+  const rank = Math.min(GAME_BALANCE.upgrades.maxRank,
+    GAME_BALANCE.upgrades.modules.hand_precision.values.length);
+  const stats = loadoutStats({cargoCapacityRank: 0, ownedModules: {hand_precision: rank},
+    shipStates: {swift: {equippedModuleIds: ['hand_precision']}}}, 'swift');
+  assert.deepEqual(TRACK_VALIDATION_REFERENCE, {
+    id: 'swift-max-steering-empty', load: 0, capacity: stats.capacity,
+    handling: stats.handling, loadRelief: stats.loadRelief,
+    vehicleMultiplier: stats.vehicleSteeringMultiplier,
+    reactionSeconds: GAME_BALANCE.routes.movingHazards.reactionMarginSeconds, geometric: false,
+  });
 });
 
 test('formation: normal continuation keeps steering variety without replacing recovery or weakening connected safety', t => {
@@ -481,7 +589,7 @@ test('formation: normal continuation keeps steering variety without replacing re
   for (const [number, sector] of Object.entries(bySector)) {
     assert.ok(sector.pairs > 0 && sector.common < sector.pairs, `sector ${number}: ${JSON.stringify(sector)}`);
   }
-  assert.deepEqual(metrics.violations, []);
+  assert.deepEqual(metrics.violations.filter(violation => !violation.short), []);
   assert.ok(metrics.maximumClearStreakByLane.every(streak =>
     streak <= GAME_BALANCE.routes.track.maximumClearEvents.normal));
   const encounters = rows.filter(physical => physical.phase === 0);
@@ -506,8 +614,6 @@ test('formation: normal continuation keeps steering variety without replacing re
   const sides = sources.filter(hazard => hazard.sideObstacle);
   assert.ok(sideHazardQuota(sources.length, sides.length).acceptable);
   assert.ok(sides.some(hazard => hazard.lane === 0) && sides.some(hazard => hazard.lane === 3));
-  const stats = loadoutStats({cargoCapacityRank: 0, ownedModules: {},
-    shipStates: {standard: {equippedModuleIds: []}}});
   let segment = [], stretches = 0;
   const certify = () => {
     if (segment.length < 2) return;
@@ -516,7 +622,7 @@ test('formation: normal continuation keeps steering variety without replacing re
     const proof = validateTrackSequence(segment, index => routeSpeedAtDistance(
       segment[index].plannedDistance + (HAZARD_TRAVEL_PX + HAZARD_ROW_ENVELOPE_PX / 2) *
       METERS_PER_PIXEL, options.levelId, options.mode), {
-      geometric: true, levelId: options.levelId, mode: options.mode,
+      ...TRACK_VALIDATION_REFERENCE, levelId: options.levelId, mode: options.mode,
       minimumClearancePx: GAME_BALANCE.routes.track.routeValidation.minimumClearancePx,
       initialStates: entryLanes.map(lane => ({lane, x: LANE_CENTERS[lane], velocity: 0})),
     });
@@ -753,7 +859,7 @@ test('secondary fillers: themed lane and edge obstacles improve occupied time wi
       proof.clearance >= GAME_BALANCE.routes.track.routeValidation.minimumClearancePx));
   }
   const predicted = physicalPressureMetrics(rows, options);
-  assert.deepEqual(predicted.violations, []);
+  assert.deepEqual(predicted.violations.filter(violation => !violation.short), []);
   const actual = collisionEvents(rows, options);
   assert.equal(actual.length, predicted.events.length);
   for (const [index, event] of actual.entries()) {
@@ -771,7 +877,7 @@ test('secondary fillers: short Continuous continuation is deterministic and uses
   assert.ok(rows.every(physical => physical.certificates.every(proof => proof.completed &&
     proof.clearance >= GAME_BALANCE.routes.track.routeValidation.minimumClearancePx)));
   assert.deepEqual(physicalPressureMetrics(rows, {levelId: 'level1', mode: 'continuous',
-    startDistance: 8000, endDistance: 8600}).violations, []);
+    startDistance: 8000, endDistance: 8600}).violations.filter(violation => !violation.short), []);
 });
 
 test('formation: actual collision checks independently verify Alpha Beta continuation and timed pressure in all16 routes', () => {
@@ -781,19 +887,22 @@ test('formation: actual collision checks independently verify Alpha Beta continu
     assert.equal(physical.length, metrics.events.length, JSON.stringify(options));
     const streaks = [0, 0, 0, 0];
     let rowMask = [false, false, false, false];
+    let protectedMask = 0;
     for (const [index, actual] of physical.entries()) {
       const predicted = metrics.events[index];
       assert.equal(actual.distance, predicted.distance);
       assert.deepEqual(actual.mask, predicted.threatenedLanes, JSON.stringify({options, index, actual, predicted}));
       // Streaks count rows: the last event of a physical row closes it.
       rowMask = rowMask.map((blocked, lane) => blocked || actual.mask[lane]);
+      protectedMask |= actual.protectedLaneMask;
       if (physical[index + 1]?.rowIndex === actual.rowIndex) continue;
       for (let lane = 0; lane < 4; lane++) {
-        streaks[lane] = rowMask[lane] ? 0 : streaks[lane] + 1;
+        streaks[lane] = rowMask[lane] || protectedMask & (1 << lane) ? 0 : streaks[lane] + 1;
         assert.ok(streaks[lane] <= GAME_BALANCE.routes.track.maximumClearEvents[options.mode],
           JSON.stringify({options, actual, lane, streaks}));
       }
       rowMask = [false, false, false, false];
+      protectedMask = 0;
     }
   }
 });

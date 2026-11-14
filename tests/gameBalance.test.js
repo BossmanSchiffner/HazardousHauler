@@ -8,7 +8,7 @@ import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES} from '../src/game/core/depots.js';
 import {ROUTE_END_DISTANCE_M, routeSpeedAtDistance} from '../src/game/core/economy.js';
 
 test('runtime consumers use the single frozen balance source and owner-approved tuning', () => {
-  assert.equal(MAX_TRACK_SPEED, 720);
+  assert.equal(MAX_TRACK_SPEED, 700);
   assert.deepEqual(CAMPAIGN_SPEEDS, {
     level1: [320, 350, 380, 410],
     level2: [350, 380, 410, 440],
@@ -58,6 +58,7 @@ test('runtime consumers use the single frozen balance source and owner-approved 
   assert.deepEqual(LEVEL2_SECTORS.map(sector => sector.themeId), ['dustlands', 'dustlands', 'dustlands', 'dustlands']);
   assert.deepEqual(GAME_BALANCE.routes.movingHazards, {
     eligibleLevelIds: ['level2'], eligibleModes: ['normal'], firstSector: 2,
+    continuousLevelId: 'level1', continuousSectorNumbers: [2, 3],
     minimumPerWindow: 4, maximumPerWindow: 14,
     minimumEncounterSpacingMeters: 40, scheduleWindowFraction: 0.60,
     widthLanes: 1, travelLaneCount: 2, centralTravelLaneCount: 1, speedPxPerSecond: 76, reactionMarginSeconds: 0.8,
@@ -89,8 +90,9 @@ test('runtime consumers use the single frozen balance source and owner-approved 
     chicaneStaggerRows: 1.5, chicaneTransitionExtraPx: 54,
   });
   assert.deepEqual(GAME_BALANCE.routes.continuous, {
-    baselineLevelId: 'level1', baselineSector: 2,
-    depotIntervalMeters: 1000, startSpeedPxPerSecond: 350, milestoneSpeedStep: 40,
+    baselineLevelId: 'level1',
+    depotIntervalMeters: 2000, startSpeedPxPerSecond: 580, milestoneSpeedStep: 20,
+    speedStepIntervalMeters: 1000,
   });
   assert.deepEqual(GAME_BALANCE.cargoProgression.capacityByRank,
     [11, 13, 15, 19, 22, 25, 27, 30, 32]);
@@ -98,6 +100,7 @@ test('runtime consumers use the single frozen balance source and owner-approved 
   assert.equal(GAME_BALANCE.cargoProgression.capacityUpgradePrices[0], 150);
   assert.equal(GAME_BALANCE.vehicles.swift.blueprintCost, 6);
   assert.equal(GAME_BALANCE.rewards.crash.maxCoins, 50);
+  assert.equal(GAME_BALANCE.rewards.continuous.wreckRetention, 0);
   assert.equal(GAME_BALANCE.cargoProgression.reinforcementMitigationByRank.at(-1), 0.6);
   assert.equal(GAME_BALANCE.routes.track.routeValidation.loadedCapacity, 32);
   assert.equal(HAZARDS.sweeper.width, LANE_CENTERS[1] - LANE_CENTERS[0]);
