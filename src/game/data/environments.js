@@ -1,12 +1,14 @@
 import {depotPaletteStep} from '../core/depots.js';
 
 export const ROAD_SURFACE_PRESETS = Object.freeze({
-  industrial: Object.freeze({roadTexture: 'industrial_road', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
-  dustlands: Object.freeze({roadTexture: 'dustlands_road', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
+  industrial: Object.freeze({roadTexture: 'road_industrial_sprite', subRoadTexture: 'subroad_industrial', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  dustlands: Object.freeze({roadTexture: 'road_dustlands_sprite', subRoadTexture: 'subroad_dustlands', blendMode: 'ADD', overlayAlpha: 0.12}),
   // Keep the cached overlay available for art inspection, but do not render it during runs.
   neon: Object.freeze({roadTexture: 'road_neon_base', subRoadTexture: 'overlay_neon_hex', blendMode: 'NORMAL',
     overlayAlpha: 0, overlayScrollRatio: 1, overlayRoadAligned: true}),
-  foundry: Object.freeze({roadTexture: 'reactor_road', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  foundry: Object.freeze({roadTexture: 'road_reactor_sprite', subRoadTexture: 'subroad_foundry', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
+  // Reserved Level 5 (Cryo-Foundry) surface; baked and ready, but no playable sector references it yet.
+  cryo: Object.freeze({roadTexture: 'road_cryo_sprite', subRoadTexture: 'subroad_cryo', blendMode: 'MULTIPLY', overlayAlpha: 0.14}),
 });
 
 export const LEVEL_LIGHTING_PRESETS = Object.freeze({
@@ -87,6 +89,8 @@ export const ENVIRONMENT_VISUALS = Object.freeze({
   cargoNightTint: 0xe6e6e6, cargoNightGlowScale: 0.9,
   burstZoom: 0.94, burstOutMs: 300, burstReturnMs: 1500,
   streakSeconds: 1.8, streakMargin: 0.15,
+  // Mirrored roadside scenery fills only this many world px beside the road; wider screens keep the backdrop.
+  sideFillPx: 72, sideFillOuterLight: 0.45,
 });
 
 const smoothFade = value => {
@@ -115,16 +119,16 @@ const environment = (roadTexture, roadsideIdentity, hazardFamilies, roadTints) =
 
 /** Visual asset inventories; challenge selection lives in challengeProfiles.js. */
 export const ENVIRONMENTS = Object.freeze({
-  industrial: environment('industrial_road', ['vent', 'pipes', 'utility', 'loading'],
+  industrial: environment(ROAD_SURFACE_PRESETS.industrial.roadTexture, ['vent', 'pipes', 'utility', 'loading'],
     ['divider', 'barrier', 'signalCabinet', 'rockSlab', 'loadingPlatform', 'pipeAssembly', 'roadsideMachine', 'cargoDock', 'serviceBoom', 'boomLift'],
     [0xffffff, 0xe0edf4, 0xf2e4d1, 0xd5e4dc]),
-  dustlands: environment('dustlands_road', ['rocks', 'wreckage', 'exposed-conduits'],
+  dustlands: environment(ROAD_SURFACE_PRESETS.dustlands.roadTexture, ['rocks', 'wreckage', 'exposed-conduits'],
     ['divider', 'rockSlab', 'dustConduit', 'wreckPlatform', 'boomLift'],
     [0xffffff, 0xf3e4cb, 0xe5d4c1, 0xe9dfce]),
   neon: environment(ROAD_SURFACE_PRESETS.neon.roadTexture, ['service-facades', 'signal-signs', 'energy-conduits'],
     ['divider', 'signalCabinet', 'neonConduit', 'signGantry', 'vent', 'ventGrille', 'boomLift'],
     [0xffffff, 0xdde8ff, 0xefdbf8, 0xd5edf2]),
-  reactor: environment('reactor_road', ['containment-walls', 'cooling-conduits', 'reactor-panels'],
+  reactor: environment(ROAD_SURFACE_PRESETS.foundry.roadTexture, ['containment-walls', 'cooling-conduits', 'reactor-panels'],
     ['divider', 'rockSlab', 'reactorPipe', 'containment', 'vent', 'ventGrille', 'boomLift'],
     [0xffffff, 0xd9eee0, 0xd5e6ec, 0xe6e5ce]),
   overdrive: environment('overdrive_road', ['containment-walls', 'signal-signs', 'energy-conduits'],

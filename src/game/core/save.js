@@ -47,6 +47,7 @@ export const defaultProfile = () => ({
   totalRuns: 0,
   tutorialCompleted: false,
   rookieTrialRewardsCredited: false,
+  soundMuted: false,
   settledRunIds: [],
   seenHints: [],
   milestones: [],
@@ -276,6 +277,7 @@ export function normalizeProfile(input) {
     totalRuns,
     tutorialCompleted: data.tutorialCompleted === true || establishedProgress,
     rookieTrialRewardsCredited: data.rookieTrialRewardsCredited === true,
+    soundMuted: data.soundMuted === true,
     settledRunIds: [...new Set(Array.isArray(data.settledRunIds)
       ? data.settledRunIds.filter(id => typeof id === 'string' && id) : [])],
     seenHints: normalizeSeenHints(data.seenHints, totalRuns),

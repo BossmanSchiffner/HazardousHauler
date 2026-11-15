@@ -7,7 +7,7 @@ import {DEPOT_ECONOMY} from './depotEconomy.js';
 
 export const HINTS = Object.freeze({
   steer: 'Use the touchscreen to drag left or right to steer.\nUse Mouse or Arrow Keys on PC\nAvoid obstacles on the road.',
-  cargo: 'Cargo adds Coins and Weight.\nA bigger haul makes steering harder!.',
+  cargo: 'Cargo adds Coins and Weight.\nA bigger haul makes steering harder!',
   stack: 'Better cargo appears farther into the run.\nIt can replace cheaper cargo if it fits.',
   hazard: 'Hits damage Hull and can lose cargo.\nAt zero Hull, the run ends.',
   depot: 'Green markers show the Depot side within 60 m.\nLine up with that bay to stop; other lanes bypass.',

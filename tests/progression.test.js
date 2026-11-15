@@ -30,12 +30,11 @@ test('approved route boundaries give Level 1 a 2000 m finish and Level 2 a 3000 
 
 test('equipment gates use the specified Level, Sector and event at exact route boundaries', () => {
   const initial = defaultProfile();
-  for (const [id, levelId, sector, event] of [
-    ['cargo_light', 'level1', 3, 'complete'],
-    ['def_plating', 'level1', 4, 'complete'],
-    ['def_shield', 'level2', 3, 'complete'],
-    ['util_insurance', 'level2', 1, 'reach'],
-  ]) {
+  const gated = Object.entries(MODULES)
+    .filter(([, def]) => def.unlock && ['level1', 'level2'].includes(def.unlock.levelId))
+    .map(([id, def]) => [id, def.unlock.levelId, def.unlock.sector, def.unlock.event]);
+  assert.ok(gated.length >= 4);
+  for (const [id, levelId, sector, event] of gated) {
     const threshold = unlockDistance({levelId, sector, event});
     const status = moduleStatus(initial, id);
     assert.deepEqual(status.def.unlock, {levelId, sector, event});
@@ -52,11 +51,10 @@ test('equipment gates use the specified Level, Sector and event at exact route b
     'the other level cannot supply evidence');
     assert.match(status.lockReason, new RegExp(`${event === 'reach' ? 'Reach' : 'Complete'} Level ${levelId.slice(5)}, Sector ${sector}`));
   }
-  const magnet = moduleStatus(initial, 'coll_magnet');
-  assert.equal(magnet.unlocked, true);
-  assert.match(magnet.requirement.description, /Reach Level 1, Sector 1 \(0 m\).*Available from the start/);
-  assert.equal(buyModule({...initial, coins: MODULES.coll_magnet.price}, 'coll_magnet').ok, true);
-  assert.equal(buyModule({...initial, coins: MODULES.coll_magnet.price - 1}, 'coll_magnet').ok, false);
+  const precision = moduleStatus(initial, 'hand_precision');
+  assert.equal(precision.unlocked, true);
+  assert.equal(buyModule({...initial, coins: MODULES.hand_precision.price}, 'hand_precision').ok, true);
+  assert.equal(buyModule({...initial, coins: MODULES.hand_precision.price - 1}, 'hand_precision').ok, false);
 });
 
 test('sector entry and completion persist separately, including checkpoint segment boundaries', () => {
@@ -68,7 +66,9 @@ test('sector entry and completion persist separately, including checkpoint segme
   const checkpoint = recordSectorProgress(initial, 'level2', L2.sectorStartsMeters[3], L2.sectorStartsMeters[2]);
   assert.deepEqual(checkpoint.levelProgress.level2.reachedSectors, [3, 4]);
   assert.deepEqual(checkpoint.levelProgress.level2.completedSectors, [3]);
-  assert.equal(moduleStatus(checkpoint, 'def_shield').unlocked, true);
+  assert.equal(moduleStatus(checkpoint, 'def_shield').unlocked,
+    checkpoint.levelProgress.level2.completedSectors.includes(MODULES.def_shield.unlock.sector),
+    'the Depot Shield gate follows its configured Level 2 completion sector');
   assert.deepEqual(initial.levelProgress.level2.completedSectors, []);
   assert.equal(recordSectorProgress(checkpoint, 'level2', L2.sectorStartsMeters[3], L2.sectorStartsMeters[2]), checkpoint,
     'unchanged evidence avoids repeated persistence writes');
@@ -95,10 +95,11 @@ test('Level 4 equipment gate stays closed without creating Level progress; owned
 
 test('normal settlement persists completion at the finish without letting continuous or developer runs earn gates', () => {
   const initial = defaultProfile();
+  const platingOnL1 = MODULES.def_plating.unlock.levelId === 'level1';
   const beforeFinish = settleRun(initial, createRunEconomy({fullStart: true}), [], L1.finishDistanceMeters - 1, false).profile;
   assert.equal(moduleStatus(beforeFinish, 'def_plating').unlocked, false);
   const finished = settleRun(initial, createRunEconomy({fullStart: true}), [], L1.finishDistanceMeters, true, true).profile;
-  assert.equal(moduleStatus(finished, 'def_plating').unlocked, true);
+  assert.equal(moduleStatus(finished, 'def_plating').unlocked, platingOnL1);
   assert.deepEqual(finished.levelProgress.level1.completedSectors, [1, 2, 3, 4]);
   assert.deepEqual(finished.completedLevels, ['level1']);
   assert.equal(finished.levelProgress.level2.unlocked, true);

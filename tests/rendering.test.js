@@ -19,6 +19,7 @@ import {
   GUARDRAIL_ART, createGuardrailStructure, syncGuardrailSparks, syncGuardrailBeacon,
   GARAGE_DISPLAY_ART, preloadGarageDisplayArt,
   GARAGE_UPGRADE_ART, preloadGarageUpgradeArt, NEON_ART, NEON_THEME_ASSETS, preloadNeonVisuals,
+  ROAD_SPRITE_ART, bakeRoadSprites,
   brightenObstaclePixels, bakeCanvasSilhouetteTextures,
 } from '../src/game/rendering/industrial.js';
 import {balance} from '../src/game/data/balance.js';
@@ -791,7 +792,7 @@ import {ENVIRONMENTS, resolveVisualTheme, roadTint, ROAD_SURFACE_PRESETS, SECTOR
   from '../src/game/data/environments.js';
 import {ambientAtPoint, createRoadEnvironment, destroyRoadEnvironment, lightingForSector,
   setRoadEnvironmentVisible, setRoadLighting, startRoadBurst, updateRoadEnvironment} from '../src/game/rendering/roadEnvironment.js';
-import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, CONTINUOUS_SECTORS} from '../src/game/core/sectors.js';
+import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS, CONTINUOUS_SECTORS, sectorAtDistance} from '../src/game/core/sectors.js';
 import {DEPOT_ENTRANCE_GEOMETRY, DEPOT_RULES, depotWorldY, depotEntryAllowed} from '../src/game/core/depots.js';
 import {CHUNK_REGISTRIES, LEVEL2_CHUNK_REGISTRIES, createTrackGenerator} from '../src/game/core/trackGenerator.js';
 import {HAZARDS, guardrailContact, guardrailLayout, hazardGeometry, hazardHits, hazardX, LANE_CENTERS} from '../src/game/core/hazards.js';
@@ -863,6 +864,7 @@ function drawingScene({sourceLoaded = true, swiftLoaded = true, armouredLoaded =
     const [width, height] = [[478, 856], [430, 430], [96, 188], [96, 188]][index];
     sources.set(art.sourceKey, {width, height, key: art.sourceKey});
   }
+  for (const art of ROAD_SPRITE_ART) sources.set(art.sourceKey, {width: 896, height: 1200, key: art.sourceKey});
   const canvasTexture = (key, width, height, commands = []) => {
     const context = {};
     for (const method of ['drawImage', 'save', 'restore', 'translate', 'rotate',
@@ -1916,7 +1918,7 @@ test('visual theme lookup preserves shipped textures and falls back without chan
     assert.equal(current.id, sector.themeId, 'every sector in a level shares its theme art');
     assert.equal(current.roadTexture, ENVIRONMENTS[sector.themeId].roadTexture);
     assert.equal(sector.themeId, levelId === 'level2' ? 'dustlands'
-      : levelId === 'level4' ? 'neon' : 'industrial');
+      : levelId === 'level3' ? 'reactor' : levelId === 'level4' ? 'neon' : 'industrial');
     assert.ok(mock.textures.has(current.roadTexture));
     for (const visualThemeId of [undefined, 'unavailable-art', 'toString']) {
       const missing = {...sector, visualThemeId};
@@ -1930,7 +1932,7 @@ test('visual theme lookup preserves shipped textures and falls back without chan
       }
     }
     const changed = {...sector, visualThemeId: 'neon'};
-    assert.equal(resolveVisualTheme(changed).roadTexture, 'road_neon_hex');
+    assert.equal(resolveVisualTheme(changed).roadTexture, 'road_neon_base');
     assert.equal(hazardTexture('sideWall', changed), 'chicane_mid', 'guardrails use one approved chicane set');
     assert.equal(hazardTexture('divider', changed), 'divider_neon');
     assert.equal(changed.difficultyStep, sector.difficultyStep);
@@ -1973,8 +1975,9 @@ test('all environment blends use two surfaces, retain scroll phase and reset cor
     setAlpha(alpha) { this.alpha = alpha; return this; },
     setTint(tint) { this.tint = tint; return this; },
   });
-  const base = surface('industrial_road');
-  const incoming = surface('dustlands_road');
+  const roadKey = themeId => ENVIRONMENTS[themeId].roadTexture;
+  const base = surface('road_industrial_sprite');
+  const incoming = surface('road_dustlands_sprite');
   for (const [index, sector] of IMPLEMENTED_SECTORS.slice(1).entries()) {
     const boundary = sector.startsAt;
     const previous = IMPLEMENTED_SECTORS[index].themeId;
@@ -1982,8 +1985,8 @@ test('all environment blends use two surfaces, retain scroll phase and reset cor
     for (const [offset, alpha] of [[0, 0], [15, 0.5], [30, 0], [300, 0]]) {
       syncSectorRoad(base, incoming, boundary + offset);
       assert.equal(incoming.alpha, alpha);
-      assert.equal(base.displayTexture.key, `${offset >= 30 ? next : previous}_road`);
-      assert.equal(incoming.displayTexture.key, `${next}_road`);
+      assert.equal(base.displayTexture.key, roadKey(offset >= 30 ? next : previous));
+      assert.equal(incoming.displayTexture.key, roadKey(next));
       assert.equal(incoming.tilePositionY, base.tilePositionY);
       const changes = base.changes + incoming.changes;
       syncSectorRoad(base, incoming, boundary + offset);
@@ -1991,7 +1994,7 @@ test('all environment blends use two surfaces, retain scroll phase and reset cor
     }
   }
   syncSectorRoad(base, incoming, 0);
-  assert.equal(base.displayTexture.key, 'industrial_road');
+  assert.equal(base.displayTexture.key, 'road_industrial_sprite');
   assert.equal(incoming.alpha, 0);
   assert.equal(base.tint, 0xffffff, 'retry restores opening palette');
   for (const sector of IMPLEMENTED_SECTORS) {
@@ -2003,7 +2006,7 @@ test('all environment blends use two surfaces, retain scroll phase and reset cor
   assert.equal(base.tint, 0xffffff);
   syncSectorRoad(base, incoming, 450);
   assert.equal(base.tint, ENVIRONMENTS.industrial.roadTints[0], 'no mid-section Depot palette change');
-  assert.equal(base.displayTexture.key, 'industrial_road');
+  assert.equal(base.displayTexture.key, 'road_industrial_sprite');
   const nextBoundary = IMPLEMENTED_SECTORS[1].startsAt;
   syncSectorRoad(base, incoming, nextBoundary);
   assert.equal(base.tint, roadTint(IMPLEMENTED_SECTORS[0], nextBoundary - 0.001),
@@ -2012,11 +2015,11 @@ test('all environment blends use two surfaces, retain scroll phase and reset cor
     'incoming sector begins with its own palette');
   const continuousDepot = GAME_BALANCE.routes.continuous.depotIntervalMeters;
   syncSectorRoad(base, incoming, continuousDepot - 0.001, 'level1', 'continuous');
-  const beforeDepot = base.tint;
+  assert.equal(base.displayTexture.key, 'road_industrial_sprite', 'Continuous opens on the Industrial look');
   syncSectorRoad(base, incoming, continuousDepot, 'level1', 'continuous');
-  assert.equal(base.displayTexture.key, 'industrial_road', 'Continuous uses the Industrial look');
-  assert.equal(base.tint, beforeDepot, 'Continuous preserves Mid-Day styling across milestone Depots');
-  assert.equal(base.tint, ENVIRONMENTS.industrial.roadTints[1]);
+  const stage = sectorAtDistance(continuousDepot, 'level1', 'continuous');
+  assert.equal(base.displayTexture.key, resolveVisualTheme(stage).roadTexture, 'each Continuous stage shows its own road');
+  assert.equal(base.tint, roadTint(stage, continuousDepot, 'level1', 'continuous'));
 });
 
 test('all sector themes have distinct native art and themed filler assets with integrated collision geometry', () => {
@@ -2655,13 +2658,49 @@ test('Neon road and sign art preloads from the approved Art Direction rasters, o
   const scene = {textures: {exists: () => false}, load: {image: (key, url) => loaded.push([key, url])}};
   preloadNeonVisuals(scene);
   assert.deepEqual(NEON_ART.map(art => art.key), Object.values(NEON_THEME_ASSETS));
-  assert.deepEqual(loaded.map(([key]) => key), NEON_ART.map(art => art.sourceKey));
+  assert.deepEqual(loaded.map(([key]) => key), [...NEON_ART, ...ROAD_SPRITE_ART].map(art => art.sourceKey));
   for (const [, url] of loaded) {
-    assert.ok(/neon-(road-base|overlay-hex|sign-apex|sign-kanji)\.webp$/.test(url), url);
+    assert.ok(/(neon-(road-base|overlay-hex|sign-apex|sign-kanji)|road-(industrial|dustlands|reactor|cryo)-sprite)\.webp$/.test(url), url);
     assert.ok(readFileSync(new URL(url)).length > 0, url);
   }
   const baked = {textures: {exists: () => true}, load: {image: () => assert.fail('baked art reloaded')}};
   preloadNeonVisuals(baked);
+});
+
+test('Level 1-3 and reserved Cryo road sprites bake opaque, divider-aligned, seamless tiles before gameplay', () => {
+  const mock = drawingScene();
+  createIndustrialTextures(mock.scene);
+  assert.equal(ROAD_SURFACE_PRESETS.industrial.roadTexture, 'road_industrial_sprite');
+  assert.equal(ROAD_SURFACE_PRESETS.dustlands.roadTexture, 'road_dustlands_sprite');
+  assert.equal(ROAD_SURFACE_PRESETS.foundry.roadTexture, 'road_reactor_sprite');
+  assert.equal(ROAD_SURFACE_PRESETS.cryo.roadTexture, 'road_cryo_sprite');
+  assert.equal(ROAD_SURFACE_PRESETS.neon.roadTexture, 'road_neon_base', 'Neon binding untouched');
+  assert.ok(!Object.values(IMPLEMENTED_LEVELS).flat().some(sector =>
+    resolveVisualTheme(sector).roadTexture === 'road_cryo_sprite'), 'Cryo stays a reserved, unplayable preset');
+  const boundaries = [1, 2, 3].map(lane => (LANE_CENTERS[lane - 1] + LANE_CENTERS[lane]) / 2);
+  for (const art of ROAD_SPRITE_ART) {
+    const road = mock.textures.get(art.key);
+    assert.deepEqual([road.width, road.height], TEXTURE_SIZES[art.key]);
+    assert.deepEqual(road.commands[0], ['fillRect', 0, 0, 390, road.height], `${art.key}: opaque base`);
+    const draws = road.commands.filter(([method]) => method === 'drawImage');
+    const [, image, , , sourceWidth, sourceHeight, x, y, drawnWidth, drawnHeight] = draws[0];
+    assert.equal(image.key, art.sourceKey);
+    assert.deepEqual([sourceWidth, sourceHeight, y], [896, 1200, 0]);
+    const scale = drawnWidth / sourceWidth;
+    for (const [index, divider] of art.dividers.entries()) {
+      if (index !== 1) assert.ok(Math.abs(x + divider * scale - boundaries[index]) < 1e-9, `${art.key} divider ${index}`);
+    }
+    assert.ok(Math.abs(x + art.dividers[1] * scale - boundaries[1]) < 2, `${art.key}: centre divider`);
+    assert.ok(x <= 0 && x + drawnWidth >= 390 && drawnHeight >= road.height + draws.length - 1,
+      'art covers the full 390 px stage with rows to spare for the wrap');
+    assert.equal(draws.length - 1, 48, 'vertical wrap is crossfaded into a seamless tile');
+    assert.ok(!road.commands.some(([method]) => ['clearRect', 'fill'].includes(method)), 'no alpha holes');
+    assert.ok(!mock.scene.textures.exists(art.sourceKey), 'source raster released after the bake');
+  }
+  assert.throws(() => {
+    mock.scene.phase = 'running';
+    bakeRoadSprites(mock.scene);
+  }, /baked before gameplay/);
 });
 
 test('Neon road ambient floor preserves dark shoulders and leaves headlight cones unchanged', () => {
@@ -2671,14 +2710,19 @@ test('Neon road ambient floor preserves dark shoulders and leaves headlight cone
   setRoadEnvironmentVisible(view, true, scene);
   setRoadLighting(view, LEVEL_SECTOR_LIGHTING.level4[2], true);
   updateRoadEnvironment(view, scene, ship, 1600, 0, 0);
+  const margin = ENVIRONMENT_VISUALS.sideFillPx;
   const sample = worldX => {
-    const x = Math.floor((worldX + 32) * view.texture.width / (view.width + 64));
+    const x = Math.min(view.texture.width - 1,
+      Math.floor((worldX + margin) * view.texture.width / (view.width + margin * 2)));
     const y = Math.floor(100 * view.texture.height / (view.height + 64));
     const offset = (y * view.texture.width + x) * 4;
     return Array.from(view.pixels.data.slice(offset, offset + 3));
   };
   assert.deepEqual(sample(195), [150, 146, 180], 'road stays readable outside every light pool');
-  assert.deepEqual(sample(0), [86, 72, 126], 'background retains the original purple darkness');
+  assert.deepEqual(sample(2), [86, 72, 126], 'background retains the original purple darkness');
+  const outer = sample(-margin + 1);
+  assert.ok(outer.every((channel, i) => channel < [86, 72, 126][i] * 0.6),
+    'side fill fades toward the backdrop at its outer edge');
   assert.ok(sample(ROAD_LEFT + 1)[1] >= 146, 'edge never falls below the road floor');
   assert.ok(view.beams.every(beam => beam.displayWidth === 84 && beam.displayHeight === 220 &&
     beam.alpha === 0.35), 'existing cone dimensions and intensity stay unchanged');
@@ -2739,7 +2783,7 @@ test('layered road textures are solid, with additive Dustlands dust and multiply
     const road = mock.textures.get(preset.roadTexture);
     assert.ok(road.commands.some(([method, ...args]) => {
       if (id !== 'neon') return method === 'fillRect' && args.join() === `0,0,390,${road.height}`;
-      const [, x, y, width, height] = args;
+      const [, , , , , x, y, width, height] = args;
       return method === 'drawImage' && x <= 0 && y === 0 && x + width >= 390 && height >= road.height;
     }), id);
     assert.ok(!road.commands.some(([method]) => ['clearRect', 'fill'].includes(method)), 'no alpha carving');
@@ -3287,7 +3331,7 @@ test('gold preview twinkles clean up their own tweens when scrolling menus are r
   assert.deepEqual(destroyed, gold);
 });
 
-test('sector road uses aligned tiled surfaces and lane-center-derived stripe positions with unchanged spacing', () => {
+test('sector road uses aligned tiled surfaces whose painted dividers replace runtime dash overlays', () => {
   const surfaces = [];
   const rectangles = [];
   const scene = {add: {
@@ -3299,21 +3343,16 @@ test('sector road uses aligned tiled surfaces and lane-center-derived stripe pos
     },
     rectangle: (...args) => { rectangles.push(args); return args; },
   }};
-  const road = buildIndustrialRoad(scene, {width: 390, height: 844, stripeGap: 78, stripesPerColumn: 12});
+  const road = buildIndustrialRoad(scene, {width: 390, height: 844});
   assert.equal(surfaces.length, 7);
   assert.equal(road.flanks.length, 4);
   assert.deepEqual(road.flanks.map(flank => flank.args[0]), [-21.5, 411.5, -21.5, 411.5]);
   assert.equal(road.subRoad.depth, 0.05);
   assert.equal(road.subRoad.blendMode, 'MULTIPLY');
   assert.deepEqual(road.subRoad.args, [195, 422, 454, 908, 'subroad_industrial']);
-  assert.deepEqual(road.surface.args, [195, 422, 390, 844, 'industrial_road']);
+  assert.deepEqual(road.surface.args, [195, 422, 390, 844, 'road_industrial_sprite']);
   assert.equal(road.surface.depth, -1);
-  assert.equal(road.lines.length, 36);
-  assert.deepEqual(rectangles[0], [(LANE_CENTERS[0] + LANE_CENTERS[1]) / 2,
-    -25, 2, 35, PALETTE.steelLight, 0.5]);
-  assert.equal(rectangles[1][1], 53);
-  assert.equal(rectangles[12][0], (LANE_CENTERS[1] + LANE_CENTERS[2]) / 2);
-  assert.equal(rectangles[24][0], (LANE_CENTERS[2] + LANE_CENTERS[3]) / 2);
+  assert.deepEqual(rectangles, [], 'no grey dash rectangles doubling the art dividers');
 });
 
 test('HUD backing and Depot decoration stay below text and leave a clear warning gap', () => {

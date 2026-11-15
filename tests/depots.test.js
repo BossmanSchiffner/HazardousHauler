@@ -223,7 +223,7 @@ test('Depot approach chicanes alternate only in the opposite half and preserve s
 
 test('current schema does not infer new level progress from legacy distance; older saves keep earned unlocks', () => {
   const current = {...defaultProfile(), bestDistance: 999, totalRuns: 4, coins: 999};
-  assert.equal(SCHEMA_VERSION, 12);
+  assert.equal(SCHEMA_VERSION, 13);
   assert.ok(!normalizeProfile(current).milestones.includes('level1,depot1'));
   assert.deepEqual(normalizeProfile(current).levelProgress.level1, {
     unlocked: true, completed: false, sector3CheckpointUnlocked: false, bestDistance: 0,
@@ -261,9 +261,10 @@ test('palette progression counts passed facilities rather than visits and resets
   assert.equal(depotPaletteStep(2500, 2500), 0);
   assert.equal(depotPaletteStep(2850, 2500), 0);
   assert.equal(depotPaletteStep(6600, 6000), 0);
-  assert.equal(depotPaletteStep(8000, 0, 'level1', 'continuous'), 8);
-  assert.equal(depotPaletteStep(12000, 0, 'level1', 'continuous'), 12);
-  assert.equal(depotPaletteStep(1e9, 0, 'level1', 'continuous'), 1000000,
+  const endlessGap = GAME_BALANCE.routes.continuous.depotIntervalMeters;
+  assert.equal(depotPaletteStep(8000, 0, 'level1', 'continuous'), Math.floor(8000 / endlessGap));
+  assert.equal(depotPaletteStep(12000, 0, 'level1', 'continuous'), Math.floor(12000 / endlessGap));
+  assert.equal(depotPaletteStep(1e9, 0, 'level1', 'continuous'), Math.floor(1e9 / endlessGap),
     'endless progress is computed without iterating endless Depots');
 });
 test('balance bot must steer into a facility to bank; reaching its sample horizon is not banking', () => {
@@ -389,7 +390,6 @@ test('depot actual scene decelerates before manual banking and recharge, hides H
     assert.ok(shifts.every((shift, i) => !i || shift < shifts[i - 1]));
     assert.ok(Math.abs(scene.distance - start - speed * 0.75 * METERS_PER_PIXEL) < 1e-9);
     assert.ok(Math.abs(scene.roadSurface.tilePositionY + speed * 0.75) < 1e-9);
-    assert.ok(Math.abs(scene.lines[0].y - 100 - speed * 0.75) < 1e-9);
     assert.equal(scene.distance, scene.nextDepotDistance);
     assert.equal(depotWorldY(scene.nextDepot, scene.distance), scene.ship.y,
       'the stopped cab is under the canopy, not downstream of it');

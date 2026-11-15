@@ -437,7 +437,8 @@ test('sector evidence migrates only from the correct Level normal-run records, n
       GAME_BALANCE.routes.level2.sectorEndsMeters[2] - GAME_BALANCE.routes.level2.checkpointDistanceMeters},
   }});
   assert.equal(moduleStatus(exact, 'cargo_light').unlocked, true);
-  assert.equal(moduleStatus(exact, 'def_shield').unlocked, true);
+  assert.equal(moduleStatus(exact, 'def_shield').unlocked,
+    exact.levelProgress.level2.completedSectors.includes(GAME_BALANCE.upgrades.modules.def_shield.unlock.sector));
   assert.deepEqual(exact.levelProgress.level2.completedSectors, [3],
     'a checkpoint record adds its authored start but does not invent earlier completions');
   const completion = normalizeProfile({...source, levelProgress: {

@@ -116,11 +116,47 @@ const NEON_ROAD_TEXTURE_HEIGHT = Math.floor(NEON_ROAD_DRAWN_WIDTH * NEON_ROAD_AR
 const NEON_HEX_TILE_PX = Math.round(430 * 0.7);
 
 export function preloadNeonVisuals(scene) {
-  for (const art of NEON_ART) {
+  for (const art of [...NEON_ART, ...ROAD_SPRITE_ART]) {
     if (!scene.textures.exists(art.key) && !scene.textures.exists(art.sourceKey)) {
       scene.load.image(art.sourceKey, art.url);
     }
   }
+}
+
+/** Level 1–3 and reserved Level 5 roadbeds, rasterised from the approved Art Direction SVG exports. */
+export const ROAD_SPRITE_ASSETS = Object.freeze({
+  INDUSTRIAL: 'road_industrial_sprite',
+  DUSTLANDS: 'road_dustlands_sprite',
+  REACTOR: 'road_reactor_sprite',
+  CRYO: 'road_cryo_sprite',
+});
+const ROAD_SPRITE_SOURCE_SIZE = Object.freeze([896, 1200]);
+const ROAD_SPRITE_SEAM_PX = 48;
+// `dividers` are the painted lane-divider centres in source pixels; `fallbackKey` is the procedural road.
+export const ROAD_SPRITE_ART = Object.freeze([
+  {key: ROAD_SPRITE_ASSETS.INDUSTRIAL, dividers: [304, 448, 592], fallbackKey: 'industrial_road',
+    baseColor: '#2f3e4b', url: new URL('../assets/sprites/road-industrial-sprite.webp', import.meta.url).href},
+  {key: ROAD_SPRITE_ASSETS.DUSTLANDS, dividers: [304.5, 448, 592.5], fallbackKey: 'dustlands_road',
+    baseColor: '#4a4036', url: new URL('../assets/sprites/road-dustlands-sprite.webp', import.meta.url).href},
+  {key: ROAD_SPRITE_ASSETS.REACTOR, dividers: [326.5, 447.5, 568.5], fallbackKey: 'reactor_road',
+    baseColor: '#1c1f25', url: new URL('../assets/sprites/road-reactor-sprite.webp', import.meta.url).href},
+  {key: ROAD_SPRITE_ASSETS.CRYO, dividers: [304, 448, 592], fallbackKey: 'reactor_road',
+    baseColor: '#1f2731', url: new URL('../assets/sprites/road-cryo-sprite.webp', import.meta.url).href},
+].map(art => Object.freeze({...art, dividers: Object.freeze(art.dividers), sourceKey: `road_source_${art.key}`})));
+
+/** Uniform scale that lands the art's outer painted dividers on the gameplay lane boundaries. */
+export function roadSpriteGeometry(art, sourceWidth = ROAD_SPRITE_SOURCE_SIZE[0],
+  sourceHeight = ROAD_SPRITE_SOURCE_SIZE[1]) {
+  const sourceScale = sourceWidth / ROAD_SPRITE_SOURCE_SIZE[0];
+  const first = (LANE_CENTERS[0] + LANE_CENTERS[1]) / 2;
+  const last = (LANE_CENTERS[LANE_CENTERS.length - 2] + LANE_CENTERS[LANE_CENTERS.length - 1]) / 2;
+  const scale = (last - first) / ((art.dividers[2] - art.dividers[0]) * sourceScale);
+  return {
+    scale,
+    x: first - art.dividers[0] * sourceScale * scale,
+    drawnWidth: sourceWidth * scale,
+    height: Math.floor(sourceHeight * scale) - ROAD_SPRITE_SEAM_PX,
+  };
 }
 
 function neonSource(scene, key) {
@@ -157,6 +193,7 @@ export const TEXTURE_SIZES = Object.freeze({
   ])),
   cargo_stack: Object.freeze([32, 30]),
   hazard_energy_orb: Object.freeze([64, 64]),
+  [NEON_READABILITY.cargoRimKey]: Object.freeze([42, 42]),
   glow_orb_radial: Object.freeze([128, 128]),
   vent_air_puff: Object.freeze([40, 40]),
   cargo_spark: Object.freeze([8, 8]),
@@ -168,6 +205,7 @@ export const TEXTURE_SIZES = Object.freeze({
   neon_road: Object.freeze([390, 1248]),
   reactor_road: Object.freeze([390, 1248]),
   overdrive_road: Object.freeze([390, 1248]),
+  ...Object.fromEntries(ROAD_SPRITE_ART.map(art => [art.key, Object.freeze([390, roadSpriteGeometry(art).height])])),
   ...Object.fromEntries(Object.values(ROAD_SURFACE_PRESETS).map(preset =>
     [preset.subRoadTexture, Object.freeze([390, 1248])])),
   overlay_neon_hex: Object.freeze([390, NEON_HEX_TILE_PX]),
@@ -1158,6 +1196,38 @@ function bakeOrbGlowTexture(scene) {
   texture.refresh();
 }
 
+/**
+ * Opaque sprite roadbeds for Industrial, Dustlands, Reactor and reserved Cryo. Each is scaled so its painted
+ * dividers sit on the gameplay lane boundaries, and its wrap is crossfaded so the TileSprite scrolls seamlessly.
+ */
+export function bakeRoadSprites(scene) {
+  assertTextureBakingAllowed(scene);
+  for (const art of ROAD_SPRITE_ART) {
+    if (scene.textures.exists(art.key)) continue;
+    const [width, height] = TEXTURE_SIZES[art.key];
+    const texture = scene.textures.createCanvas(art.key, width, height);
+    const context = texture.getContext();
+    context.globalAlpha = 1;
+    context.fillStyle = art.baseColor;
+    context.fillRect(0, 0, width, height);
+    const source = scene.textures.exists(art.sourceKey)
+      ? scene.textures.get(art.sourceKey).getSourceImage() : null;
+    if (source) {
+      const {scale, x, drawnWidth} = roadSpriteGeometry(art, source.width, source.height);
+      context.drawImage(source, 0, 0, source.width, source.height, x, 0, drawnWidth, source.height * scale);
+      for (let row = 0; row < ROAD_SPRITE_SEAM_PX; row++) {
+        context.globalAlpha = 1 - (row + 0.5) / ROAD_SPRITE_SEAM_PX;
+        context.drawImage(source, 0, (height + row) / scale, source.width, 1 / scale, x, row, drawnWidth, 1);
+      }
+      context.globalAlpha = 1;
+    } else if (scene.textures.exists(art.fallbackKey)) {
+      context.drawImage(scene.textures.get(art.fallbackKey).getSourceImage(), 0, 0);
+    }
+    texture.refresh();
+    if (scene.textures.exists(art.sourceKey)) scene.textures.remove(art.sourceKey);
+  }
+}
+
 export function bakeNeonRoadTexture(scene) {
   assertTextureBakingAllowed(scene);
   bakeNeonBaseRoad(scene);
@@ -1474,6 +1544,7 @@ export function createIndustrialTextures(scene) {
     g.clear();
   }
   g.destroy();
+  bakeRoadSprites(scene);
   bakeCanvasSilhouetteTextures(scene);
   for (const art of OBSTACLE_ART) {
     if (scene.textures.exists(art.sourceKey)) scene.textures.remove(art.sourceKey);
@@ -1503,15 +1574,17 @@ export function bakeCanvasSilhouetteTextures(scene) {
   }
 }
 
-export function buildIndustrialRoad(scene, {width, height, stripeGap, stripesPerColumn}) {
+export function buildIndustrialRoad(scene, {width, height}) {
   const preset = ROAD_SURFACE_PRESETS.industrial;
   const subRoad = routeTile(scene, width / 2, height / 2, width + 64, height + 64,
     preset.subRoadTexture).setDepth(0.05).setBlendMode(preset.blendMode).setAlpha(preset.overlayAlpha);
-  const surface = routeTile(scene, width / 2, height / 2, width, height, 'industrial_road').setDepth(-1);
-  const dust = routeTile(scene, width / 2, height / 2, width, height, 'dustlands_road').setDepth(-0.5).setAlpha(0);
+  const surfaceKey = preset.roadTexture;
+  const dustKey = ROAD_SURFACE_PRESETS.dustlands.roadTexture;
+  const surface = routeTile(scene, width / 2, height / 2, width, height, surfaceKey).setDepth(-1);
+  const dust = routeTile(scene, width / 2, height / 2, width, height, dustKey).setDepth(-0.5).setAlpha(0);
   const flanks = [];
   for (const theme of Object.values(ROAD_SURFACE_PRESETS)) ensureRoadFlankFrames(scene, theme.roadTexture);
-  for (const [owner, key] of [[surface, 'industrial_road'], [dust, 'dustlands_road']]) {
+  for (const [owner, key] of [[surface, surfaceKey], [dust, dustKey]]) {
     owner.flanks = ['flankL', 'flankR'].map(frame => {
       ensureRoadFlankFrames(scene, key);
       const left = frame === 'flankL';
@@ -1524,14 +1597,8 @@ export function buildIndustrialRoad(scene, {width, height, stripeGap, stripesPer
       return flank;
     });
   }
-  const lines = [];
-  for (let lane = 1; lane < LANE_CENTERS.length; lane++) {
-    const x = (LANE_CENTERS[lane - 1] + LANE_CENTERS[lane]) / 2;
-    for (let i = 0; i < stripesPerColumn; i++) {
-      lines.push(scene.add.rectangle(x, -25 + i * stripeGap, 2, 35, PALETTE.steelLight, 0.5));
-    }
-  }
-  return {surface, dust, lines, subRoad, flanks};
+  // Every road texture paints its own lane dividers, so no runtime dash overlay is created.
+  return {surface, dust, subRoad, flanks};
 }
 
 /** Road shoulders become mirrored frames so off-stage flanks continue the scenery to the screen edges. */

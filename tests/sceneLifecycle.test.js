@@ -293,11 +293,12 @@ test('Rookie Trial credits rewards once and completes after auto-equipping Preci
   scene.syncCargoTotals = () => { scene.cargoItems = []; scene.cargoValue = 0; };
   scene.showUpgradeDetail = (kind, id) => { scene.focusedUpgrade = [kind, id]; };
   scene.completeRookieTrial();
-  assert.equal(savedProfile.coins, 165);
+  const trialCoins = 15 + GAME_BALANCE.upgrades.modules.hand_precision.price;
+  assert.equal(savedProfile.coins, trialCoins);
   assert.equal(savedProfile.blueprints, 1);
   assert.equal(savedProfile.rookieTrialRewardsCredited, true);
   assert.deepEqual(scene.focusedUpgrade, ['module', 'hand_precision']);
-  assert.equal(scene.tutorialPayout.coins, 165);
+  assert.equal(scene.tutorialPayout.coins, trialCoins);
   assert.equal(scene.tutorialPayout.blueprints, 1);
 
   scene.completeRookieTrial();
@@ -335,7 +336,7 @@ test('Rookie Trial reward save failure leaves the profile unchanged and can be r
   scene.syncCargoTotals = () => { scene.cargoItems = []; scene.cargoValue = 0; };
   scene.showUpgradeDetail = () => {};
   retrySave();
-  assert.equal(savedProfile.coins, 165);
+  assert.equal(savedProfile.coins, 15 + GAME_BALANCE.upgrades.modules.hand_precision.price);
   assert.equal(savedProfile.blueprints, 1);
   assert.equal(savedProfile.rookieTrialRewardsCredited, true);
 });
@@ -1163,13 +1164,13 @@ test('main menu uses a blue Blueprint sprite tally below Coins and shows only th
   assert.equal(JSON.stringify(scene.profile), before);
 });
 
-test('Normal Run tiles name Industrial Zone and Dustlands', () => {
+test('Normal Run tiles name every level in consistent Title Case with its zone', () => {
   const scene = depotScene();
   const labels = [];
   scene.addLabel = text => { labels.push(text); };
   scene.showLevelSelect();
-  assert.ok(labels.includes('LEVEL 1: INDUSTRIAL ZONE'));
-  assert.ok(labels.includes('LEVEL 2: DUSTLANDS'));
+  assert.ok(labels.includes('Level 1: Industrial Zone'));
+  assert.ok(labels.includes('Level 2: Dustlands'));
 });
 
 test('menu footer actions keep frame padding and separate touch targets at phone sizes', () => {
@@ -1296,6 +1297,14 @@ test('run menu home shows four actions without overlap at phone sizes and keeps 
       logo.x + logoWidth / 2 <= 390 - MENU_SPACING.edge, 'the logo stays inside the panel gutters');
     assert.ok(Math.abs(logoWidth / logoHeight - 295.2749606054797 / 171.80280306739786) < 0.02,
       'the logo keeps its supplied aspect ratio');
+    const sound = buttons.find(button => button.label === 'SOUND: ON');
+    const howTo = buttons.find(button => button.label === 'HOW-TO');
+    assert.ok(sound, 'audio can be muted from the home screen');
+    assert.equal(sound.y, howTo.y, 'the sound toggle shares the HOW-TO row');
+    assert.ok(howTo.x + howTo.width / 2 + MENU_SPACING.gap <= sound.x - sound.width / 2 + 1e-9);
+    assert.ok(howTo.x - howTo.width / 2 >= MENU_SPACING.edge - 1e-9 &&
+      sound.x + sound.width / 2 <= 390 - MENU_SPACING.edge + 1e-9);
+    buttons.splice(buttons.indexOf(sound), 1);
     assert.deepEqual(buttons.map(button => button.label), ['NORMAL RUN', 'ENDLESS RUN', 'GARAGE & UPGRADES', 'HOW-TO']);
     assert.equal(buttons[1].disabled, true);
     assert.match(buttons[1].subtitle, /Complete Level 1/);
@@ -1367,8 +1376,8 @@ test('menu scrolling builds a separate touch scroller and preserves grouped tile
   scene.beginMenuScroll(pointer);
   scene.moveMenuScroll({...pointer, y: 450});
   scene.endMenuScroll(pointer);
-  assert.equal(scene.menuScrollOffset, -200);
-  assert.equal(scene.menuScrollPositions['garage:upgrades'], -200);
+  assert.equal(scene.menuScrollOffset, -190, 'the drag starts at the slop edge instead of leaping 10 px');
+  assert.equal(scene.menuScrollPositions['garage:upgrades'], -190);
 });
 
 test('dragging a garage tile scrolls content without activating the tile or fixed navigation', () => {
@@ -1413,8 +1422,9 @@ test('dragging a garage tile scrolls content without activating the tile or fixe
   handlers.pointermove.forEach(handler => handler(moved));
   handlers.pointerup.forEach(handler => handler(moved, 0, 0, event));
 
-  assert.equal(scene.menuScrollOffset, -70);
-  assert.equal(scene.menuScrollPositions['garage:garage'], -70);
+  assert.equal(scene.menuScrollOffset, -60);
+  assert.equal(scene.menuScrollPositions['garage:garage'], -60);
+  assert.equal(scene.menuScrollGesture, null, 'a release on a tile ends the drag despite stopPropagation');
   assert.equal(fixedButtons, 0, 'natural drag uses no dedicated scroll controls');
 });
 
@@ -1436,11 +1446,11 @@ test('menu momentum respects pointer ownership, stale releases, wheel input and 
   scene.beginMenuScroll({...start, id: 2});
   assert.equal(scene.menuScrollGesture.id, 1, 'a second finger cannot replace a drag');
   scene.moveMenuScroll({...start, y: 380});
-  assert.equal(scene.menuScrollOffset, -170);
+  assert.equal(scene.menuScrollOffset, -160);
   scene.endMenuScroll({...start, isDown: false});
   assert.equal(scene.menuScrollVelocity, -1400);
   scene.update(150, 16);
-  assert.ok(scene.menuScrollOffset < -170);
+  assert.ok(scene.menuScrollOffset < -160);
   assert.equal(scene.menuScrollPositions[scene.menuScrollKey], scene.menuScrollOffset);
 
   scene.beginMenuScroll(start);
@@ -1461,6 +1471,46 @@ test('menu momentum respects pointer ownership, stale releases, wheel input and 
   scene.update(416, 16);
   assert.equal(scene.menuScrollOffset, -700);
   assert.equal(scene.menuScrollVelocity, 0);
+});
+
+test('a new touch never inherits an un-ended drag, and quick repeated flicks build speed', () => {
+  const scene = new Scene();
+  scene.time = {now: 0};
+  scene.menuScrollContainer = {setY(y) { this.y = y; }};
+  scene.menuScrollTop = 200;
+  scene.menuScrollBottom = 700;
+  scene.menuScrollMax = 2000;
+  scene.menuScrollOffset = -300;
+  scene.menuScrollKey = 'level-select';
+  scene.menuScrollPositions = {};
+  scene.updateMenuScrollVisibility = () => {};
+  const fingers = [{id: 1, isDown: true}];
+  scene.input = {manager: {pointers: fingers}};
+
+  scene.beginMenuScroll({id: 1, x: 150, y: 650, isDown: true, downTime: 10});
+  scene.moveMenuScroll({id: 1, x: 150, y: 300, isDown: true, moveTime: 40});
+  assert.equal(scene.menuScrollOffset, -640);
+  fingers[0].isDown = false; // release swallowed by a button's stopPropagation
+
+  scene.beginMenuScroll({id: 1, x: 150, y: 250, isDown: true, downTime: 900});
+  fingers[0].isDown = true;
+  assert.equal(scene.menuScrollGesture.y, 250, 'the next touch starts a fresh gesture');
+  scene.moveMenuScroll({id: 1, x: 150, y: 254, isDown: true, moveTime: 920});
+  assert.equal(scene.menuScrollOffset, -640, 'touching never snaps the list toward the finger');
+
+  scene.menuScrollGesture = null;
+  scene.beginMenuScroll({id: 1, x: 150, y: 600, isDown: true, downTime: 1000});
+  scene.moveMenuScroll({id: 1, x: 150, y: 600.5, isDown: true, moveTime: 1001});
+  scene.moveMenuScroll({id: 1, x: 150, y: 560, isDown: true, moveTime: 1002});
+  scene.moveMenuScroll({id: 1, x: 150, y: 520, isDown: true, moveTime: 1040});
+  scene.endMenuScroll({id: 1, isDown: false, upTime: 1050});
+  const firstFling = scene.menuScrollVelocity;
+  assert.equal(firstFling, -2000, 'coalesced events do not create a velocity spike');
+  scene.beginMenuScroll({id: 1, x: 150, y: 600, isDown: true, downTime: 1100});
+  scene.moveMenuScroll({id: 1, x: 150, y: 560, isDown: true, moveTime: 1110});
+  scene.moveMenuScroll({id: 1, x: 150, y: 520, isDown: true, moveTime: 1130});
+  scene.endMenuScroll({id: 1, isDown: false, upTime: 1135});
+  assert.ok(scene.menuScrollVelocity < firstFling, 'a same-direction flick adds to the coast');
 });
 
 test('partially clipped menu cards render smoothly but cannot intercept header or footer taps', () => {
@@ -1549,7 +1599,7 @@ test('Garage upgrade summaries distinguish full prices from shortfalls and prese
   assert.equal(capacity.tier, 1);
   assert.equal(capacity.name, 'Cargo Capacity');
   const shield = scene.upgradeTileModel({kind: 'module', id: 'def_shield'}, 'standard');
-  assert.equal(shield.requirement, 'Complete L2 · S3');
+  assert.equal(shield.requirement, `Complete L2 · S${GAME_BALANCE.upgrades.modules.def_shield.unlock.sector}`);
   const rack = scene.upgradeTileModel({kind: 'module', id: 'cargo_light'}, 'standard');
   assert.equal(rack.locked, true);
   assert.equal(rack.requirement, 'Complete L1 · S3');
@@ -1699,9 +1749,15 @@ test('equipment Level 2 start records reach separately from access and Level 2 c
   assert.equal(moduleStatus(scene.profile, 'util_insurance').unlocked, false);
   scene.startRun('beginning', 'level2');
   assert.equal(scene.distance, 0);
+  const insurance = GAME_BALANCE.upgrades.modules.util_insurance.unlock;
+  const insuranceGate = GAME_BALANCE.routes.level2.sectorStartsMeters[insurance.sector - 1];
+  assert.equal(moduleStatus(scene.profile, 'util_insurance').unlocked, insuranceGate === 0);
+  scene.distance = insuranceGate;
+  scene.recordMilestones();
   assert.equal(moduleStatus(scene.profile, 'util_insurance').unlocked, true);
   assert.equal(savedProfile, scene.profile);
-  const shieldGate = GAME_BALANCE.routes.level2.sectorEndsMeters[2];
+  const shieldGate = GAME_BALANCE.routes.level2.sectorEndsMeters[
+    GAME_BALANCE.upgrades.modules.def_shield.unlock.sector - 1];
   scene.distance = shieldGate - 1;
   scene.recordMilestones();
   assert.equal(moduleStatus(scene.profile, 'def_shield').unlocked, false);
@@ -3272,6 +3328,53 @@ test('seven taps on the build label within five seconds reveal the hidden develo
   assert.equal(scene.developerTapCount, 0);
 });
 
+test('the developer tap gesture starts fresh on every main menu mount, even after a run', () => {
+  const scene = depotScene();
+  let menuOpened = 0;
+  scene.showDeveloperMenu = () => { menuOpened += 1; };
+  scene.time = {now: 90000};
+  // A stale partial gesture from before the run must not leak into the next menu visit.
+  scene.developerTapCount = 5;
+  scene.developerTapStartedAt = 0;
+  scene.resetDeveloperTaps();
+  for (let tap = 0; tap < 6; tap++) scene.registerDeveloperTap();
+  assert.equal(menuOpened, 0);
+  scene.registerDeveloperTap();
+  assert.equal(menuOpened, 1);
+  scene.time.now += 100000;
+  for (let tap = 0; tap < 7; tap++) scene.registerDeveloperTap();
+  assert.equal(menuOpened, 2, 'a second gesture works without reloading');
+});
+
+test('main menu sound toggle persists the mute choice and applies it on the next boot', () => {
+  const scene = depotScene();
+  const muteRequests = [];
+  scene.sound = {setMute(value) { muteRequests.push(value); return this; }};
+  scene.toggleSound();
+  assert.equal(scene.profile.soundMuted, true);
+  assert.equal(scene.soundToggleLabel(), 'SOUND: OFF');
+  assert.equal(normalizeProfile(JSON.parse(JSON.stringify(scene.profile))).soundMuted, true);
+  assert.deepEqual(muteRequests, [true]);
+  scene.toggleSound();
+  assert.equal(scene.soundToggleLabel(), 'SOUND: ON');
+  assert.deepEqual(muteRequests, [true, false]);
+});
+
+test('developer run exit stays a compact chip above the lanes with no empty backing card', () => {
+  const scene = depotScene();
+  const buttons = [];
+  let cards = 0;
+  scene.debugManager = null;
+  scene.developerSandbox = false;
+  scene.addButton = (label, y, action, options) => buttons.push({label, y, action, ...options});
+  scene.addCard = () => { cards++; };
+  scene.showDeveloperRunControls();
+  assert.equal(cards, 0);
+  assert.equal(buttons.length, 1);
+  assert.ok(buttons[0].y + buttons[0].height / 2 <= 110, 'the chip sits just under the HUD strip');
+  assert.ok(buttons[0].width <= 100, 'the chip leaves the lane centers unobstructed');
+});
+
 test('developer God Mode toggles without saving and marks protected runs ineligible for rewards or records', () => {
   const scene = depotScene();
   scene.debugManager = new DebugManager('');
@@ -4722,6 +4825,7 @@ test('pause sound toggle changes the shared mute setting without resuming or ove
   assert.deepEqual(buttons.map(button => button.label), ['RESUME RUN', 'SOUND: ON', 'END RUN']);
   buttons[1].action();
   assert.deepEqual(muteRequests, [true]);
+  assert.equal(scene.profile.soundMuted, true, 'the mute choice is stored on the saved profile');
   assert.equal(buttons[1].label, 'SOUND: OFF', 'the label updates live despite the stale getter');
   assert.equal(fades, 1, 'toggling rebuilds the menu without replaying the fade');
   assert.equal(scene.phase, 'paused');
@@ -5358,7 +5462,7 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
   scene.refreshHud();
   assert.ok(scene.hud.shieldPips.hexes.every(hex => hex.color === PALETTE.steelDark));
   assert.equal(scene.hud.shield.text, 'SHIELD 0/3', 'empty shield shows capacity, not a countdown');
-  for (const [key, width] of [['distanceLabel',114], ['distance',116], ['depot',116], ['cargo',91],
+  for (const [key, width] of [['distanceLabel',120], ['distance',116], ['depot',116], ['cargo',91],
     ['bonus',140], ['closeCallBonus',140]]) {
     const text = scene.hud[key];
     assert.ok(text.width * text.scaleX <= width + 1e-9);
@@ -5399,7 +5503,7 @@ test('run side areas stay plain and repeated shoulder scenery stays hidden after
   for (const [width, height] of [[390, 844], [1280, 720]]) {
     scene.scale = {width, height};
     scene.syncViewportBackdrop();
-    assert.deepEqual(draws, [['color', 0x080c14], ['rect', 0, 0, width, height]]);
+    assert.deepEqual(draws, [['color', 0x080c14], ['rect', -width, -height, width * 3, height * 3]]);
   }
   scene.roadSurface = {};
   scene.roadFlanks = Array.from({length: 4}, () => ({
@@ -5412,8 +5516,15 @@ test('run side areas stay plain and repeated shoulder scenery stays hidden after
     y: Math.max(0, Math.ceil((720 / zoom - 844) / 2) + 8),
   };
   scene.syncRoadBleed(1280, 720);
-  assert.ok(scene.roadFlanks.every(flank => !flank.visible));
+  assert.ok(scene.roadFlanks.every(flank => !flank.visible), 'menus keep the side fill hidden');
   assert.equal(scene.subRoad.width, 390, 'sub-road texture cannot spill into side areas');
+  scene.worldVisible = true;
+  scene.syncRoadBleed(1280, 720);
+  assert.ok(scene.roadFlanks.every(flank => flank.visible), 'active runs fill the bars beside the road');
+  assert.equal(scene.roadBleed.x, ENVIRONMENT_VISUALS.sideFillPx, 'wide screens only fill a capped strip');
+  scene.syncRoadBleed(320, 568);
+  const phoneBar = Math.ceil((320 / Math.min(320 / 390, 568 / 844) - 390) / 2);
+  assert.ok(scene.roadBleed.x > phoneBar, 'phone bars are fully covered');
 });
 
 test('active HUD separates value, load, hull and centered bonus lines, including bypass updates and cap', () => {
@@ -5433,7 +5544,7 @@ test('active HUD separates value, load, hull and centered bonus lines, including
   scene.hull = 2;
   scene.distance = 375;
   scene.refreshHud();
-  assert.equal(scene.hud.distanceLabel.text, 'LEVEL 1 • SECTOR 1/4');
+  assert.equal(scene.hud.distanceLabel.text, 'Level 1: Industrial Zone\nSECTOR 1/4');
   assert.equal(scene.hud.distance.text, '375 m');
   assert.equal(scene.hud.cargo.text, '45');
   assert.equal(scene.hud.load.text, `LOAD 1/${scene.stats.capacity}`);

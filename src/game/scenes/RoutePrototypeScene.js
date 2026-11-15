@@ -127,16 +127,19 @@ import {createRouteStream, ROUTE_STREAM_LATE_ROW_MS, warmRouteStreamWorkers} fro
 
 const VERTICAL_HIT_PX = GAME_BALANCE.physics.collision.cargoHalfHeightPx;
 const levelDisplayName = levelId => ({
-  level1: 'LEVEL 1',
-  level2: 'LEVEL 2',
+  level1: 'Level 1: Industrial Zone',
+  level2: 'Level 2: Dustlands',
   level3: 'Level 3: Reactor Zone',
   level4: 'Level 4: Neon Gridway',
 }[levelId] ?? levelId.toUpperCase());
+const DEVELOPER_TAP_COUNT = 7;
+const DEVELOPER_TAP_WINDOW_MS = 5000;
+const MENU_DRAG_SLOP_PX = 10;
+const MENU_FLING_MAX_VELOCITY = 3200;
+const DEVELOPER_EXIT_Y = 96;
 const W = GAME_BALANCE.routes.geometry.logicalWidthPx;
 const H = GAME_BALANCE.routes.geometry.logicalHeightPx;
-const STRIPE_GAP = 78;
 const TRUCK_CARD_MIN_HEIGHT = 196;
-const STRIPES_PER_COLUMN = 12;
 const HOLD_FULL_TEXT = 'Load limit reached. Better cargo can replace cheaper cargo if it fits.\n' +
   'Bank at a Depot to secure its value.';
 const TOAST_STYLES = {
@@ -193,6 +196,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
   create() {
     let saveWarning = null;
     this.profile = loadProfile(message => { saveWarning = message; });
+    this.applySoundSetting();
     this.stats = loadoutStats(this.profile, this.profile.selectedVehicleId);
     this.phase = 'menu';
     this.feedback = new RunFeedback(this);
@@ -271,6 +275,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     }
     this.profile = this.debugManager.profileForSession(this.profile);
     this.stats = loadoutStats(this.profile, this.profile.selectedVehicleId);
+    this.applySoundSetting();
     const {flags} = this.debugManager;
     if (flags.warp || flags.bot || flags.god || flags.fast) {
       this.startRun('developer', flags.warp?.levelId ?? 'level1', 'normal', {
@@ -390,6 +395,22 @@ export class RoutePrototypeScene extends Phaser.Scene {
     return this.debugManager ? this.debugManager.persist(profile, saveProfile) : saveProfile(profile);
   }
 
+  applySoundSetting() {
+    this.sound?.setMute?.(this.profile?.soundMuted === true);
+  }
+
+  soundToggleLabel() {
+    return `SOUND: ${this.profile?.soundMuted ? 'OFF' : 'ON'}`;
+  }
+
+  toggleSound() {
+    const profile = {...this.profile, soundMuted: !this.profile.soundMuted};
+    // Muting still applies for this session even if storage is unavailable.
+    this.persistProfile(profile);
+    this.profile = profile;
+    this.applySoundSetting();
+  }
+
   handleViewportResize(gameSize) {
     if (!gameSize || !Number.isFinite(gameSize.width) || !Number.isFinite(gameSize.height)) return;
     const viewport = responsiveViewport(gameSize.width, gameSize.height, W);
@@ -432,13 +453,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.syncRoadBleed(screenWidth, screenHeight);
   }
 
-  /** Preserve the complete portrait course; unused screen width stays plain rather than tiling scenery. */
+  /** Mirrored roadside scenery fills a capped strip beside the road; any wider screen keeps the plain backdrop. */
   syncRoadBleed(screenWidth, screenHeight) {
     if (!this.roadSurface || !this.roadFlanks?.length) return;
-    this.roadFlanks.forEach(flank => flank.setVisible(false));
+    const showFlanks = !!this.worldVisible;
+    this.roadFlanks.forEach(flank => flank.setVisible(showFlanks));
     this.subRoad?.setSize(W, H + 64);
     const zoom = Math.min(screenWidth / W, screenHeight / H, 1.12) * ENVIRONMENT_VISUALS.burstZoom;
-    const bleedX = Math.max(8, Math.ceil((screenWidth / zoom - W) / 2) + 8);
+    const bleedX = Math.min(ENVIRONMENT_VISUALS.sideFillPx,
+      Math.max(8, Math.ceil((screenWidth / zoom - W) / 2) + 8));
     const bleedY = Math.max(0, Math.ceil((screenHeight / zoom - H) / 2) + 8);
     if (this.roadBleed?.x === bleedX && this.roadBleed?.y === bleedY) return;
     this.roadBleed = {x: bleedX, y: bleedY};
@@ -455,7 +478,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
           this.viewportBackdropSize?.gameplay === gameplay)) return;
     this.viewportBackdropSize = {width, height, gameplay};
     if (gameplay) {
-      graphics.clear().fillStyle(0x080c14, 1).fillRect(0, 0, width, height);
+      // Oversized so camera zoom (which also scales scroll-factor-0 graphics) never exposes the canvas edge.
+      graphics.clear().fillStyle(0x080c14, 1).fillRect(-width, -height, width * 3, height * 3);
       return;
     }
     const stageWidth = Math.min(width, W * Math.min(width / W, height / H, 1.12));
@@ -487,17 +511,11 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   buildWorld() {
-    const road = buildIndustrialRoad(this, {
-      width: W,
-      height: H,
-      stripeGap: STRIPE_GAP,
-      stripesPerColumn: STRIPES_PER_COLUMN,
-    });
+    const road = buildIndustrialRoad(this, {width: W, height: H});
     this.roadSurface = road.surface;
     this.dustSurface = road.dust;
     this.roadFlanks = road.flanks ?? [];
     this.subRoad = road.subRoad;
-    this.lines = road.lines;
     const finishGraphic = this.add.graphics();
     const finishLeft = ROAD_LEFT - W / 2;
     for (let tile = 0; tile < 16; tile++) {
@@ -610,11 +628,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.hudBacking = addHudBacking(this, W);
     const text = (label, x, y, size = 10, color = '#8ab4f8', centered = false) =>
       this.add.text(x, y, label, {...this.textStyle(size, color), fontFamily: 'monospace',
+        align: centered ? 'center' : 'left',
         fontStyle: size === 22 ? 'bold' : 'normal'}).setOrigin(centered ? 0.5 : 0, 0);
     const line = (x, y, width, color) =>
       this.add.rectangle(x, y, width, 4, color).setOrigin(0, 0.5);
     this.hud = {
-      distanceLabel: text('LEVEL 1 • SECTOR 1/4', 8, 6, 9),
+      distanceLabel: text('Level 1: Industrial Zone\nSECTOR 1/4', 8, 2, 9),
       progressTrack: line(8, 27, 90, PALETTE.steelDark),
       progressBar: line(8, 27, 90, 0x00f0ff),
       cargoLabel: text('CARGO VALUE', 8, 33, 8),
@@ -638,8 +657,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   setWorldVisible(visible) {
+    this.worldVisible = visible;
     if (this.roadEnvironment) setRoadEnvironmentVisible(this.roadEnvironment, visible, this);
-    this.roadFlanks?.forEach(flank => flank.setVisible(false));
     this.syncResponsiveCamera();
     if (!visible && this.depotEntrance) {
       syncDepotEntrance(this.depotEntrance, this.nextDepot, this.distance, 'menu', this.levelId ?? 'level1');
@@ -901,16 +920,34 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   beginMenuScroll(pointer) {
-    if (this.menuScrollGesture) return;
+    const existing = this.menuScrollGesture;
+    if (existing) {
+      // Several listeners report the same press; a second finger must not steal an active drag.
+      if (existing.id === pointer.id && existing.downTime === pointer.downTime) return;
+      if (existing.id !== pointer.id && this.menuPointerIsDown(existing.id)) return;
+      // Touch pointers reuse ids, so an un-ended gesture would make the next touch jump the list.
+      this.menuScrollGesture = null;
+    }
     const point = this.menuPointerPoint(pointer);
     if (!this.menuScrollContainer || point.y < this.menuScrollTop || point.y > this.menuScrollBottom) return;
-    const coasting = Math.abs(this.menuScrollVelocity ?? 0) > 0;
+    const carriedVelocity = this.menuScrollVelocity ?? 0;
+    const coasting = Math.abs(carriedVelocity) > 0;
     this.menuScrollVelocity = 0;
     this.menuScrollDraggedPointerId = coasting ? pointer.id : null;
+    const time = this.menuPointerTime(pointer, pointer.downTime);
     this.menuScrollGesture = {
-      id: pointer.id, x: point.x, y: point.y, offset: this.menuScrollOffset, moved: false,
-      lastY: point.y, lastTime: this.time?.now ?? 0, velocity: 0,
+      id: pointer.id, downTime: pointer.downTime, x: point.x, y: point.y, offset: this.menuScrollOffset,
+      moved: false, lastY: point.y, lastTime: time, velocity: null, carriedVelocity,
     };
+  }
+
+  menuPointerIsDown(id) {
+    const pointer = this.input?.manager?.pointers?.find?.(candidate => candidate?.id === id);
+    return pointer ? pointer.isDown : true;
+  }
+
+  menuPointerTime(pointer, eventTime = pointer?.moveTime) {
+    return Number.isFinite(eventTime) && eventTime > 0 ? eventTime : this.time?.now ?? 0;
   }
 
   menuPointerPoint(pointer) {
@@ -923,15 +960,24 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const gesture = this.menuScrollGesture;
     if (!gesture || gesture.id !== pointer.id || !pointer.isDown) return;
     const point = this.menuPointerPoint(pointer);
-    const deltaY = point.y - gesture.y;
-    if (!gesture.moved && Math.hypot(point.x - gesture.x, deltaY) * (this.viewportScale ?? 1) < 10) return;
-    gesture.moved = true;
+    let deltaY = point.y - gesture.y;
+    if (!gesture.moved) {
+      const scale = this.viewportScale ?? 1;
+      if (Math.hypot(point.x - gesture.x, deltaY) * scale < MENU_DRAG_SLOP_PX) return;
+      // Start the drag from the slop edge so the list never leaps toward the finger.
+      gesture.y += Math.sign(deltaY) * Math.min(Math.abs(deltaY), MENU_DRAG_SLOP_PX / scale);
+      deltaY = point.y - gesture.y;
+      gesture.moved = true;
+    }
     this.menuScrollDraggedPointerId = pointer.id;
     this.menuScrollOffset = Phaser.Math.Clamp(gesture.offset + deltaY, -this.menuScrollMax, 0);
-    const now = this.time?.now ?? 0;
+    const now = this.menuPointerTime(pointer);
     const elapsed = now - gesture.lastTime;
-    if (elapsed > 0) {
-      gesture.velocity = Phaser.Math.Clamp((point.y - gesture.lastY) * 1000 / elapsed, -1800, 1800);
+    // Coalesced touch events arrive microseconds apart; sample over a real interval to avoid spikes.
+    if (elapsed >= 8) {
+      const sample = Phaser.Math.Clamp((point.y - gesture.lastY) * 1000 / elapsed,
+        -MENU_FLING_MAX_VELOCITY, MENU_FLING_MAX_VELOCITY);
+      gesture.velocity = gesture.velocity === null ? sample : gesture.velocity * 0.3 + sample * 0.7;
       gesture.lastY = point.y;
       gesture.lastTime = now;
     }
@@ -940,12 +986,20 @@ export class RoutePrototypeScene extends Phaser.Scene {
   }
 
   endMenuScroll(pointer) {
-    if (!this.menuScrollGesture || (pointer && this.menuScrollGesture.id !== pointer.id)) return;
-    if (this.menuScrollGesture.moved) {
+    const gesture = this.menuScrollGesture;
+    if (!gesture || (pointer && gesture.id !== pointer.id)) return;
+    if (gesture.moved) {
+      this.menuScrollPositions ??= {};
       this.menuScrollPositions[this.menuScrollKey] = this.menuScrollOffset;
-      this.menuScrollVelocity = pointer?.isDown === false &&
-        (this.time?.now ?? 0) - this.menuScrollGesture.lastTime < 80
-        ? this.menuScrollGesture.velocity : 0;
+      const releaseTime = this.menuPointerTime(pointer, pointer?.upTime);
+      let velocity = pointer?.isDown === false && releaseTime - gesture.lastTime < 80
+        ? gesture.velocity ?? 0 : 0;
+      // Repeated flicks in the same direction build speed for fast scrolling through long lists.
+      if (velocity && Math.sign(velocity) === Math.sign(gesture.carriedVelocity)) {
+        velocity = Phaser.Math.Clamp(velocity + gesture.carriedVelocity,
+          -MENU_FLING_MAX_VELOCITY, MENU_FLING_MAX_VELOCITY);
+      }
+      this.menuScrollVelocity = velocity;
     }
     this.menuScrollGesture = null;
   }
@@ -1063,6 +1117,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
         const valid = press?.id === pointer.id && pointer.getDistance() <= 10 &&
           this.menuScrollDraggedPointerId !== pointer.id &&
           this.menuControlContainsPointer(pointer, scrollable);
+        // stopPropagation hides this release from the scene listener, so end the drag here.
+        this.endMenuScroll(pointer);
         press = null;
         tile.setAlpha(1);
         if (valid) {
@@ -1244,6 +1300,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       const valid = pressed?.id === pointer.id && this.menuScrollDraggedPointerId !== pointer.id &&
         Math.hypot(pointer.x - pressed.x, pointer.y - pressed.y) <= 10 &&
         pointer.getDistance() <= 10 && this.menuControlContainsPointer(pointer, scrollable);
+      this.endMenuScroll(pointer);
       pressed = null;
       control.setAlpha(1);
       if (valid) {
@@ -1307,32 +1364,48 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.addButton('GARAGE & UPGRADES', actionsY + 124,
       () => this.showGarage('', false, 'upgrades'),
       {fill: PALETTE.steelDark, height: 54, size: 18});
+    const halfWidth = (W - MENU_SPACING.edge * 2 - MENU_SPACING.gap) / 2;
     this.addButton('HOW-TO', actionsY + 186,
-      () => this.showHowToPlay(), {fill: PALETTE.edge, height: 54, size: 17});
+      () => this.showHowToPlay(), {fill: PALETTE.edge, height: 54, size: 17,
+        width: halfWidth, x: MENU_SPACING.edge + halfWidth / 2});
+    this.addButton(this.soundToggleLabel(), actionsY + 186, () => {
+      this.toggleSound();
+      this.showMenu();
+    }, {fill: PALETTE.steelDark, height: 54, size: 15,
+      width: halfWidth, x: W - MENU_SPACING.edge - halfWidth / 2});
     const controlsHint = this.initialInputType === 'touch'
       ? 'Touch and drag to steer.' : 'Mouse, A/D or arrows to steer.';
     this.addLabel(controlsHint, W / 2, height - 72, 11, '#b4c5d4', 340);
     const buildY = height - 40;
-    const buildLabel = this.addLabel(`Build ${BUILD_ID}`, W / 2, buildY, 8, '#71879a');
-    if (buildLabel?.setInteractive) {
-      buildLabel.setInteractive({useHandCursor: false});
-      buildLabel.on('pointerup', (_pointer, _localX, _localY, event) => {
-        event.stopPropagation();
+    this.addLabel(`Build ${BUILD_ID}`, W / 2, buildY, 8, '#71879a');
+    this.resetDeveloperTaps();
+    // A generous invisible target keeps the 7-tap gesture reliable on touch; rebuilt on every menu mount.
+    const buildTarget = this.add?.zone?.(W / 2, buildY + 6, 180, 36);
+    if (buildTarget?.setInteractive) {
+      buildTarget.setDepth(40).setInteractive({useHandCursor: false});
+      buildTarget.on('pointerup', (_pointer, _localX, _localY, event) => {
+        event?.stopPropagation?.();
         this.registerDeveloperTap();
       });
+      this.trackOverlayObject(buildTarget);
     }
+  }
+
+  resetDeveloperTaps() {
+    this.developerTapCount = 0;
+    this.developerTapStartedAt = null;
   }
 
   registerDeveloperTap() {
     const now = this.time.now;
-    if (now - (this.developerTapStartedAt ?? now) > 5000) {
+    if (this.developerTapStartedAt === null || this.developerTapStartedAt === undefined ||
+        now - this.developerTapStartedAt > DEVELOPER_TAP_WINDOW_MS) {
       this.developerTapStartedAt = now;
       this.developerTapCount = 0;
     }
-    this.developerTapCount = (this.developerTapCount ?? 0) + 1;
-    if (this.developerTapCount >= 7) {
-      this.developerTapCount = 0;
-      this.developerTapStartedAt = 0;
+    this.developerTapCount += 1;
+    if (this.developerTapCount >= DEVELOPER_TAP_COUNT) {
+      this.resetDeveloperTaps();
       this.showDeveloperMenu();
     }
   }
@@ -1448,7 +1521,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.phase = 'developerSandboxSetup';
     this.setScreenRenderer(() => this.showDeveloperSandboxSetup(vehicleId));
     this.devSandboxVehicleId = selectedVehicleId;
-    this.panel('STEERING SANDBOX', 'Choose an owned ship and use its saved loadout.');
+    this.panel('STEERING SANDBOX', 'Choose an owned truck and use its saved loadout.');
     availableVehicles.forEach((id, index) => this.addButton(
       id === selectedVehicleId ? `${id.toUpperCase()}  •  SELECTED` : id.toUpperCase(),
       258 + index * 64, () => this.showDeveloperSandboxSetup(id),
@@ -1489,8 +1562,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       if (checkpointReady) this.prepareRunStream(levelId, 'normal', checkpointDistance(levelId));
       this.withMenuScrollItem(y + cardHeight / 2, cardHeight, () => {
         this.addCard(y, cardHeight, available ? PALETTE.cyan : PALETTE.steel);
-        const title = {level1: 'LEVEL 1: INDUSTRIAL ZONE', level2: 'LEVEL 2: DUSTLANDS'}[levelId]
-          ?? levelDisplayName(levelId);
+        const title = levelDisplayName(levelId);
         this.addCardText(`${title}${progress.completed ? '  •  COMPLETE' : ''}`,
           textLeft, y + padding + headingHeight / 2, textWidth, 17,
           available ? '#a0f4ff' : '#b8c9d8', {maxHeight: headingHeight});
@@ -2509,11 +2581,9 @@ export class RoutePrototypeScene extends Phaser.Scene {
     this.showPauseOverlay('PAUSED', 0.2, 272);
     this.addButton('RESUME RUN', H / 2 - 44, () => this.beginResumeCountdown(),
       {width: 286, height: 48, size: 13, fill: PALETTE.steelDark, depth: 112});
-    // Phaser's WebAudio mute getter reads a gain that setMute schedules asynchronously, so keep our own state.
-    this.soundMuted ??= Boolean(this.sound.mute);
-    this.addButton(`SOUND: ${this.soundMuted ? 'OFF' : 'ON'}`, H / 2 + 16, () => {
-      this.soundMuted = !this.soundMuted;
-      this.sound.setMute(this.soundMuted);
+    // Phaser's WebAudio mute getter reads a gain that setMute schedules asynchronously, so the profile owns the state.
+    this.addButton(this.soundToggleLabel(), H / 2 + 16, () => {
+      this.toggleSound();
       this.showPauseMenu(false);
     }, {width: 286, height: 48, size: 13, fill: PALETTE.steelDark, depth: 112});
     this.addButton('END RUN', H / 2 + 76, () => this.showPauseEndRunConfirmation(),
@@ -2742,10 +2812,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
         {width: 180, height: 38, size: 11, fill: PALETTE.steelDark});
       return;
     }
-    this.addCard(198, this.developerSandbox ? 228 : 76, PALETTE.magenta);
-    this.addButton(this.developerSandbox ? 'EXIT SANDBOX' : 'EXIT DEVELOPER RUN', 224,
+    if (!this.developerSandbox) {
+      // Compact corner chip below the HUD strip keeps all four lanes readable during developer runs.
+      this.addButton('EXIT DEV RUN', DEVELOPER_EXIT_Y, () => this.showDeveloperMenu(),
+        {size: 9, height: 26, width: 96, x: 8 + 48, fill: PALETTE.steelDark, depth: 101});
+      return;
+    }
+    this.addCard(198, 228, PALETTE.magenta);
+    this.addButton('EXIT SANDBOX', 224,
       () => this.showDeveloperMenu(), {size: 12, height: 38, fill: PALETTE.steelDark});
-    if (!this.developerSandbox) return;
     const cargoTools = [
       ['COIN • 1 LOAD', {kind: 'coin', mass: 1, slots: 1, value: SINGLE_COIN_PAYOUT}],
       ['STACK • 2 LOAD', {kind: 'coinStack', mass: 2, slots: 2, value: 10}],
@@ -3027,10 +3102,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
   refreshHud() {
     this.hudContainer?.setVisible(this.phase === 'running' || this.phase === 'docking');
     this.hud.distanceLabel.setText(this.developerSandbox
-      ? `${levelDisplayName(this.levelId)} • STEERING SANDBOX`
+      ? `${levelDisplayName(this.levelId)}\nSTEERING SANDBOX`
       : this.runMode === 'continuous'
-      ? `ENDLESS RUN • ${Math.floor(this.distance)} m`
-      : `${levelDisplayName(this.levelId)} • SECTOR ${this.currentSector.number}/${IMPLEMENTED_LEVELS[this.levelId].length}`);
+      ? `ENDLESS RUN\n${Math.floor(this.distance)} m`
+      : `${levelDisplayName(this.levelId)}\nSECTOR ${this.currentSector.number}/${IMPLEMENTED_LEVELS[this.levelId].length}`);
     this.hud.distance.setText(`${Math.floor(this.distance)} m`);
     const sector = this.currentSector;
     const endless = this.runMode === 'continuous';
@@ -3083,7 +3158,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       this.hud.depot.setText(`DEPOT ${this.nextDepot.side === 'left' ? '<' : '>'} ${toDepot} m`)
         .setColor('#7ba0c0');
     }
-    for (const [key, width] of [['distanceLabel', 114], ['distance', 116], ['depot', 116],
+    for (const [key, width] of [['distanceLabel', 120], ['distance', 116], ['depot', 116],
       ['shield', 116], ['cargo', 91], ['hull', 113], ['load', 113], ['bonus', 140], ['closeCallBonus', 140]]) {
       const node = this.hud[key];
       node.setScale(Math.min(1, width / Math.max(1, node.width)));
@@ -3116,6 +3191,10 @@ export class RoutePrototypeScene extends Phaser.Scene {
         });
       }
       return;
+    }
+    if (this.menuScrollGesture && !this.menuPointerIsDown(this.menuScrollGesture.id)) {
+      const released = this.input.manager.pointers.find(pointer => pointer?.id === this.menuScrollGesture.id);
+      this.endMenuScroll(released);
     }
     if (this.menuScrollContainer && !this.menuScrollGesture && this.menuScrollVelocity) {
       const next = advanceMenuScroll(this.menuScrollOffset, this.menuScrollVelocity,
@@ -3521,10 +3600,6 @@ export class RoutePrototypeScene extends Phaser.Scene {
   scrollRoad(scrollPx) {
     this.roadSurface.tilePositionY -= scrollPx;
     syncSectorRoad(this.roadSurface, this.dustSurface, this.distance, this.levelId, this.runMode, this.subRoad);
-    for (const stripe of this.lines) {
-      stripe.y += scrollPx;
-      if (stripe.y > H + 40) stripe.y -= STRIPES_PER_COLUMN * STRIPE_GAP;
-    }
     this.updateShoulderSigns(scrollPx);
   }
 
@@ -3797,10 +3872,12 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   completeRookieTrial() {
     const cargoCoins = this.cargoValue;
+    // The bonus alone always covers the guided Precision Steering purchase at its configured price.
+    const trialBonus = GAME_BALANCE.upgrades.modules.hand_precision.price;
     const shouldCreditRewards = !this.profile.rookieTrialRewardsCredited;
     if (shouldCreditRewards) {
       const rewardedProfile = {...this.profile,
-        coins: this.profile.coins + cargoCoins + 150,
+        coins: this.profile.coins + cargoCoins + trialBonus,
         blueprints: this.profile.blueprints + 1,
         rookieTrialRewardsCredited: true};
       if (!this.persistProfile(rewardedProfile)) {
@@ -3812,7 +3889,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
       }
       this.profile = rewardedProfile;
     }
-    this.tutorialPayout = {coins: shouldCreditRewards ? cargoCoins + 150 : 0,
+    this.tutorialPayout = {coins: shouldCreditRewards ? cargoCoins + trialBonus : 0,
       blueprints: shouldCreditRewards ? 1 : 0};
     this.cargoItems = [];
     this.syncCargoTotals();

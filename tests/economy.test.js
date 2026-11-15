@@ -27,7 +27,9 @@ test('cargo slows steering without causing an unsteerable ship', () => {
 });
 test('price progression and crash consolation are bounded', () => {
   assert.equal(upgradeCost(30, 1), 30);
-  assert.ok(upgradeCost(30, 4) > upgradeCost(30, 3));
+  assert.ok(upgradeCost(30, 4) >= upgradeCost(30, 3), 'rank prices never fall');
+  assert.equal(upgradeCost(30, 4),
+    Math.round(30 * GAME_BALANCE.upgrades.moduleUpgradeCostMultiplier ** 3), 'ranks follow the configured multiplier');
   assert.equal(crashReward(0), 5);
   assert.equal(crashReward(99_999), 50);
 });

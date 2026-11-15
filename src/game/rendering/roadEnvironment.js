@@ -44,12 +44,13 @@ export function ambientAtPoint(color, x, y, beams, lamps) {
 export function createRoadEnvironment(scene, road, width, height) {
   // A small, linearly filtered multiplicative light mask works in both Canvas and WebGL.
   const key = `ambient_${scene.sys.settings.key}`;
-  const texture = scene.textures.createCanvas(key, Math.ceil((width + 64) / 4), Math.ceil((height + 64) / 4));
+  const texture = scene.textures.createCanvas(key, Math.ceil((width + V.sideFillPx * 2) / 4),
+    Math.ceil((height + 64) / 4));
   texture.setFilter(0); // Phaser LINEAR; keep the upscaled light mask smooth in pixel-art mode.
   const context = texture.getContext();
   const pixels = context.createImageData(texture.width, texture.height);
   const ambient = scene.add.image(width / 2, height / 2, key)
-    .setDisplaySize(width + 64, height + 64).setBlendMode('MULTIPLY').setDepth(16).setVisible(false);
+    .setDisplaySize(width + V.sideFillPx * 2, height + 64).setBlendMode('MULTIPLY').setDepth(16).setVisible(false);
   const renderer = scene.sys.game.renderer;
   if (renderer.currentContext && renderer.blendModes[ambient.blendMode] !== 'multiply') {
     // Phaser can cache source-over before its asynchronous Canvas blend probe completes.
@@ -234,16 +235,19 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
   if (night || maskColor !== view.lastMaskColor || neon !== view.lastNeonReadability) {
     const pixels = view.pixels.data;
     for (let y = 0; y < view.texture.height; y++) for (let x = 0; x < view.texture.width; x++) {
-      const worldX = -32 + (x + 0.5) * (view.width + 64) / view.texture.width;
+      const worldX = -V.sideFillPx + (x + 0.5) * (view.width + V.sideFillPx * 2) / view.texture.width;
       const worldY = -32 + (y + 0.5) * (view.height + 64) / view.texture.height;
       const light = lightAtPoint(worldX, worldY, lights, pools);
       const index = (y * view.texture.width + x) * 4;
       const onRoad = neon && worldX >= ROAD_LEFT && worldX <= ROAD_RIGHT;
       const ambientFloor = onRoad && Math.min(worldX - ROAD_LEFT, ROAD_RIGHT - worldX) <=
         NEON_READABILITY.edgeWidthPx ? NEON_READABILITY.edgeAmbient : NEON_READABILITY.roadAmbient;
+      // Off-stage scenery fades toward the backdrop so the mirrored side fill frames the road quietly.
+      const outside = Math.max(0, -worldX, worldX - view.width) / V.sideFillPx;
+      const fade = 1 - (1 - V.sideFillOuterLight) * Math.min(1, outside);
       for (let channel = 0; channel < 3; channel++) {
         const ambient = onRoad ? Math.max(view.color[channel], ambientFloor[channel]) : view.color[channel];
-        pixels[index + channel] = Math.round(ambient + (255 - ambient) * light);
+        pixels[index + channel] = Math.round((ambient + (255 - ambient) * light) * fade);
       }
       pixels[index + 3] = 255;
     }

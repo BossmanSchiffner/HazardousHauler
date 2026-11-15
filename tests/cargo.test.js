@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {advanceCargoTrail, createCargoTrail, cargoOffer, cargoPickupForRoll, cargoTotals, collectCargo, damageCargo} from '../src/game/core/cargo.js';
-import {createTrackGenerator, createTrackStream} from '../src/game/core/trackGenerator.js';
+import {createTrackGenerator, createTrackStream, pickupClearOfDepots, pickupContactDistance} from '../src/game/core/trackGenerator.js';
+import {DEPOT_RULES} from '../src/game/core/depots.js';
+import {GAME_BALANCE} from '../src/game/data/gameBalance.js';
 import {steeringMultiplier, METERS_PER_PIXEL} from '../src/game/core/economy.js';
 import {IMPLEMENTED_LEVELS, IMPLEMENTED_SECTORS} from '../src/game/core/sectors.js';
 import {SECTOR_CARGO} from '../src/game/data/catalog.js';
@@ -250,6 +252,27 @@ test('premium cargo follows certified decision waypoints or alternates opposite 
       assert.ok(row.certificates.every(proof =>
         proof.exits.some(exit => exit.lanes[row.phase + 1] === pickup.lane)));
     }
+  }
+});
+
+test('every sector offers the minimum pickups and none appear inside Depot approach or exit windows', () => {
+  const minimum = GAME_BALANCE.cargo.minPickupsPerSector;
+  for (const levelId of Object.keys(IMPLEMENTED_LEVELS)) for (const enterDepots of [false, true]) {
+    const finish = GAME_BALANCE.routes[levelId].finishDistanceMeters;
+    const depots = IMPLEMENTED_LEVELS[levelId].slice(1).map(sector => sector.startsAt);
+    const counts = IMPLEMENTED_LEVELS[levelId].map(() => 0);
+    for (const row of sampleRoute(7, finish, enterDepots, levelId, 'normal')) {
+      for (const pickup of row.pickups) {
+        const contact = pickupContactDistance(row.plannedDistance);
+        if (contact >= finish) continue;
+        assert.ok(pickupClearOfDepots(contact, levelId, 'normal'), `${levelId} pickup at ${contact} m`);
+        assert.ok(depots.every(depot => contact <= depot - DEPOT_RULES.approachMeters ||
+          contact >= depot + DEPOT_RULES.exitMeters), `${levelId} pickup inside a Depot zone at ${contact} m`);
+        counts[IMPLEMENTED_LEVELS[levelId].findLastIndex(sector => sector.startsAt <= contact)] += pickup.slots;
+      }
+    }
+    assert.ok(counts.every(count => count >= minimum),
+      `${levelId} (${enterDepots ? 'docking' : 'passing'}) pickups per sector: ${counts}`);
   }
 });
 

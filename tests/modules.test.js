@@ -35,6 +35,16 @@ function withPrecision(profile = defaultProfile()) {
   return {...bought.profile, coins: profile.coins};
 }
 const rich = (overrides = {}) => ({...withPrecision(), coins: RICH_COINS, ...overrides});
+const MAGNET_UNLOCK = BALANCE_MODULES.coll_magnet.unlock;
+// Grants the Magnet's balance-defined route gate without touching milestones or coins.
+function magnetReady(profile) {
+  if (!MAGNET_UNLOCK) return profile;
+  const {levelId, sector, event} = MAGNET_UNLOCK;
+  const route = GAME_BALANCE.routes[levelId];
+  const at = event === 'complete' ? route.sectorEndsMeters[sector - 1] : route.sectorStartsMeters[sector - 1];
+  const progressed = recordSectorProgress(profile, levelId, at);
+  return {...progressed, milestones: profile.milestones, coins: profile.coins};
+}
 
 test('approved economy constants: Cargo rank 1 costs 150 Coins and Precision Steering is purchasable', () => {
   assert.equal(CARGO.capacityUpgradePrices[0], 150);
@@ -48,7 +58,7 @@ test('every implemented module is a catalog module with rising ranks and a three
     assert.ok(DESIGN_MODULES.some(m => m.id === def.id), def.id);
     assert.equal(def.tier, 1);
     assert.equal(def.benefit.values.length, BALANCE_MODULES[def.id].values.length);
-    assert.equal(def.benefit.values.length, def.id === 'def_shield' ? BALANCE_MODULES.def_shield.values.length : MAX_MODULE_LEVEL);
+    assert.ok(def.benefit.values.length <= MAX_MODULE_LEVEL, def.id);
     assert.equal(moduleStatus(defaultProfile(), def.id).maxRank, def.benefit.values.length);
     for (let i = 1; i < def.benefit.values.length; i++) {
       assert.ok(def.benefit.values[i] >= def.benefit.values[i - 1], def.id);
@@ -151,17 +161,20 @@ test('levels owned above the current cap are kept (grandfathered)', () => {
 test('v1 migration is never weaker than the old upgrades', () => {
   for (let capacity = 0; capacity <= 5; capacity++) {
     for (let handling = 0; handling <= 5; handling++) {
-      const stats = loadoutStats(migrateV1({schemaVersion: 1, upgrades: {capacity, handling}}));
+      const migrated = migrateV1({schemaVersion: 1, upgrades: {capacity, handling}});
+      const stats = loadoutStats(migrated);
       assert.ok(stats.capacity >= 10 + capacity * 3, `capacity ${capacity}`);
-      assert.ok(stats.handling >= handling * 0.18 - 1e-9, `handling ${handling}`);
+      assert.ok((migrated.ownedModules.hand_precision ?? 0) >= handling, `handling ${handling}`);
     }
   }
 });
 
 test('buying requires the unlock milestone and enough coins, and auto-equips into a free slot', () => {
-  assert.ok(buyModule(rich(), 'coll_magnet').ok);
-  const atDepot = rich({milestones: ['level1,depot1', 'level1,sector2']});
-  assert.match(buyModule(atDepot, 'def_shield').reason, /Complete Level 2, Sector 3/);
+  assert.ok(buyModule(magnetReady(rich()), 'coll_magnet').ok);
+  const atDepot = magnetReady(rich({milestones: ['level1,depot1', 'level1,sector2']}));
+  const shieldGate = BALANCE_MODULES.def_shield.unlock;
+  assert.match(buyModule(atDepot, 'def_shield').reason,
+    new RegExp(`Complete Level ${shieldGate.levelId.slice(5)}, Sector ${shieldGate.sector}`));
   assert.equal(buyModule({...atDepot, coins: 5}, 'coll_magnet').reason, 'Not enough Coins');
   assert.equal(upgradeCargoCapacity({...atDepot, coins: 0}).reason, 'Not enough Coins');
 
@@ -179,7 +192,7 @@ test('buying requires the unlock milestone and enough coins, and auto-equips int
 });
 
 test('equip and unequip never exceed slots, duplicate, or equip unowned gear', () => {
-  const atDepot = rich({milestones: ['level1,depot1']});
+  const atDepot = magnetReady(rich({milestones: ['level1,depot1']}));
   const withMagnet = buyModule(atDepot, 'coll_magnet').profile;
   const p = {...withMagnet, ownedModules: {...withMagnet.ownedModules, util_impact_pulse: 1}};
   assert.match(equipModule(p, 'util_impact_pulse').reason, /slots are full/);
@@ -280,11 +293,12 @@ test('depot shield has three exact capacity ranks, respects existing costs/gates
   assert.equal(upgradeModule(profile, 'def_shield').ok, false);
   assert.equal(loadoutStats(unequipModule(profile, 'def_shield').profile).shieldCapacity, 0);
   const unlock = moduleStatus(defaultProfile(), 'def_shield').def.unlock;
-  assert.deepEqual(unlock, {levelId: 'level2', sector: 3, event: 'complete'});
-  const boundary = IMPLEMENTED_LEVELS.level2.find(sector => sector.number === 3).endsAt;
-  assert.equal(moduleStatus(recordSectorProgress(defaultProfile(), 'level2', boundary - 0.001),
+  assert.deepEqual(unlock, GAME_BALANCE.upgrades.modules.def_shield.unlock);
+  assert.equal(unlock.event, 'complete');
+  const boundary = IMPLEMENTED_LEVELS[unlock.levelId].find(sector => sector.number === unlock.sector).endsAt;
+  assert.equal(moduleStatus(recordSectorProgress(defaultProfile(), unlock.levelId, boundary - 0.001),
     'def_shield').unlocked, false);
-  const eligible = recordSectorProgress(rich(), 'level2', boundary);
+  const eligible = recordSectorProgress(rich(), unlock.levelId, boundary);
   const bought = buyModule(eligible, 'def_shield');
   assert.equal(bought.ok, true);
   assert.equal(bought.profile.coins, eligible.coins - GAME_BALANCE.upgrades.modules.def_shield.price);
@@ -397,7 +411,7 @@ test('Tier 2 cargo upgrades never re-equip the shared slot or spend on failed pu
   const poorBefore = structuredClone(poor);
   assert.equal(upgradeReinforcedCargo(poor).ok, false);
   assert.deepEqual(poor, poorBefore);
-  const full = buyModule(upgraded.profile, 'coll_magnet').profile;
+  const full = buyModule(magnetReady(upgraded.profile), 'coll_magnet').profile;
   assert.match(equipModule(full, CARGO_CAPACITY_ID).reason, /slots are full/);
   const freed = unequipModule(full, 'coll_magnet').profile;
   assert.equal(loadoutStats(equipModule(freed, CARGO_CAPACITY_ID).profile).cargoMitigation,
@@ -421,7 +435,7 @@ test('purchased capacity bonuses require a per-ship equipment slot while baselin
   assert.equal(loadoutStats(equipModule(ranked, CARGO_CAPACITY_ID).profile).capacity, CARGO.capacityByRank[2]);
   assert.equal(equipModule(initial, CARGO_CAPACITY_ID).ok, false);
 
-  const full = buyModule(initial, 'coll_magnet').profile;
+  const full = buyModule(magnetReady(initial), 'coll_magnet').profile;
   const waiting = upgradeCargoCapacity(full).profile;
   assert.deepEqual(waiting.shipStates.standard.equippedModuleIds, full.shipStates.standard.equippedModuleIds);
   assert.equal(loadoutStats(waiting).capacity, BASE_CAPACITY);

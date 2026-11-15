@@ -342,6 +342,34 @@ export function hazardsBeforeDepot(row, distance, nextDepotDistance, protectedUn
       first > nextDepotDistance + DEPOT_RULES.exitMeters);
 }
 
+const PICKUP_DEPOT_MARGIN_METERS = GAME_BALANCE.physics.collision.cargoHalfHeightPx *
+  GAME_BALANCE.cargo.pickupTriggerScale * METERS_PER_PIXEL;
+
+/** Distance at which a row's pickup reaches the truck. */
+export function pickupContactDistance(plannedDistance) {
+  return plannedDistance + HAZARD_TRAVEL_PX * METERS_PER_PIXEL;
+}
+
+/** Pickups obey the obstacle Depot rule: nothing inside any Depot approach or exit window. */
+export function pickupClearOfDepots(contact, levelId = 'level1', mode = 'normal') {
+  const margin = PICKUP_DEPOT_MARGIN_METERS;
+  const depot = nextDepotAfter(Math.max(0, contact - DEPOT_RULES.exitMeters - margin), DEPOT_RULES, levelId, mode);
+  if (!Number.isFinite(depot.distance)) return true;
+  return contact <= depot.distance - depotApproachMeters(depot.distance, levelId, mode) - margin ||
+    contact >= depot.distance + DEPOT_RULES.exitMeters + margin;
+}
+
+/** Pickup-eligible span of the sector (Continuous: Depot interval) containing `contact`. */
+export function pickupSectorWindow(contact, levelId = 'level1', mode = 'normal') {
+  const window = nextMoverWindowAfter(contact, MOVER_WINDOW_RULES, levelId, mode);
+  const margin = PICKUP_DEPOT_MARGIN_METERS;
+  const start = window.startDistance + (window.startDistance > 0 ? DEPOT_RULES.exitMeters + margin : 0);
+  const finish = mode === 'normal' ? GAME_BALANCE.routes[levelId].finishDistanceMeters : Infinity;
+  const end = window.distance >= finish ? finish
+    : window.distance - depotApproachMeters(window.distance, levelId, mode) - margin;
+  return {key: window.startDistance, start, end};
+}
+
 /** Extend existing authored groups; no new pickup rolls and no independently sprinkled walls. */
 export function prepareTrackChunk(chunk, distance, random, levelId = 'level1', mode = 'normal') {
   const sector = sectorAtDistance(distance, levelId, mode);
@@ -995,6 +1023,9 @@ export function depotResumeFirstDistance(distance) {
   return distance + DEPOT_RESUME_METERS - (HAZARD_TRAVEL_PX - HAZARD_ROW_ENVELOPE_PX / 2) * METERS_PER_PIXEL;
 }
 
+/** Rows reaching the truck before this Level 1 distance use recovery pacing (no split gates or walls). */
+export const LEVEL1_OPENING_RAMP_METERS = 150;
+
 /** Challenge composition is separate from encounter density. */
 function hardChunkChance(distance, levelId = 'level1', mode = 'normal') {
   const route = routeBalanceForLevel(levelId);
@@ -1173,6 +1204,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   const progress = typeof onPlanningProgress === 'function' ? onPlanningProgress : () => {};
   let random = createSeededRandom(seed);
   let orbRandom = createSeededRandom(seed ^ 0x4f524231);
+  const cargoRandom = createSeededRandom(seed ^ 0x43524731);
   let nextOrbDistance = null;
   let sweeperRandom = createSeededRandom(seed ^ 0x53575052);
   let nextSweeperDistance = null;
@@ -1221,6 +1253,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
   const emittedRecentRows = [];
   let familyUse = new Map([...families, 'moving_intercept'].map(family => [family, 0]));
   let rowsUntilPickup = 1;
+  const sectorPickups = new Map();
   let lastPremiumLane = null;
   let lastPickupLane = null;
   let pendingCargo = null;
@@ -2506,6 +2539,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       let committedDensity;
       let pacing;
       let movingDeadline = false;
+      let openingRamp = false;
       if (commitment) {
         candidate = commitment.candidate;
         certificates = candidate.results;
@@ -2534,8 +2568,12 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       const hard = random() < hardChunkChance(distance, levelId, mode);
       const sustained = hard && random() < route.sustainedChance[difficultyStepAtDistance(distance, levelId, mode)];
       pacing = !hard ? 'recovery' : sustained ? 'pressure' : 'normal';
+      // New drivers get a short read of lane width and cargo weight before three-lane gates arrive.
+      openingRamp = mode === 'normal' && levelId === 'level1' &&
+        distance + HAZARD_TRAVEL_PX * METERS_PER_PIXEL < LEVEL1_OPENING_RAMP_METERS;
       let available = trackBalance.encounters.pacingFamilies[pacing].filter(family => family !== previousFamily &&
         (mode !== 'normal' || family !== 'offset_pair') &&
+        !(openingRamp && family === 'split_gate') &&
         !(mode === 'normal' && levelId === 'level2' && movingEligible && family === 'split_gate'));
       const upcomingDepot = nextDepotAfter(distance, DEPOT_RULES, levelId, mode);
       const sideBodiesFit = mode !== 'normal' || !Number.isFinite(upcomingDepot.distance) ||
@@ -2947,7 +2985,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         const openings = TRACK_LANES.filter(lane => !urgent.includes(lane)).sort((a, b) =>
           (edgeDue ? Number([0, 3].includes(b)) - Number([0, 3].includes(a)) : 0) ||
           Number(streaks[b] === 1) - Number(streaks[a] === 1) || streaks[a] - streaks[b]);
-        const fallback = levelId === 'level2' && mode === 'normal'
+        const fallback = levelId === 'level2' && mode === 'normal' || openingRamp
           ? [...TRACK_LANES.map(lane => ['single_pressure', lane]),
             ...TRACK_LANES.map(lane => ['risk_reward', lane]),
             ...(urgent.length > 1 ? openings.map(lane => ['split_gate', lane]) : [])]
@@ -3274,12 +3312,38 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       return {streaks: [...reachedPressure(emittedPressure, distance).streaks]};
     },
     /**
-     * One pickup every COIN_ROW_GAP_MIN..MAX rows (deferred past rows without a cargo lane),
-     * so coins keep a steady rhythm without random droughts or floods.
+     * One pickup every COIN_ROW_GAP_MIN..MAX rows (deferred past rows without a cargo lane or inside a
+     * Depot window). A sector behind its minimum-pickup pace adds a bonus pickup on rows the cadence skips.
      */
     nextRowPickups(cargoLanes, distance = 0, row = null) {
       rowsUntilPickup -= 1;
-      if (rowsUntilPickup > 0 && !Number.isInteger(row?.riskCargoLane) || cargoLanes.length === 0) return [];
+      const contact = pickupContactDistance(distance);
+      // The cadence still rolls inside Depot windows so the shared planning RNG never shifts;
+      // its pickup is simply withheld there.
+      const laneMemory = [lastPremiumLane, lastPickupLane];
+      let pickups = this.rowPickups(cargoLanes, distance, row);
+      if (!pickupClearOfDepots(contact, levelId, mode)) {
+        // A withheld pickup was never seen, so it cannot anchor the next premium crossing.
+        [lastPremiumLane, lastPickupLane] = laneMemory;
+        return [];
+      }
+      const sector = pickupSectorWindow(contact, levelId, mode);
+      const placed = sectorPickups.get(sector.key) ?? 0;
+      const minimum = GAME_BALANCE.cargo.minPickupsPerSector;
+      const progress = Math.max(0, Math.min(1, (contact - sector.start) / Math.max(1, sector.end - sector.start)));
+      const behind = placed < Math.min(minimum, Math.floor(minimum * progress) + 1);
+      if (!pickups.length && behind && row && !Number.isInteger(row.riskCargoLane)) {
+        pickups = this.rowPickups(cargoLanes, distance, row, true);
+      }
+      if (pickups.length) {
+        sectorPickups.set(sector.key, placed + pickups.length);
+        for (const key of sectorPickups.keys()) if (key < sector.key) sectorPickups.delete(key);
+      }
+      return pickups;
+    },
+    rowPickups(cargoLanes, distance, row, bonus = false) {
+      if (rowsUntilPickup > 0 && !bonus && !Number.isInteger(row?.riskCargoLane) ||
+        cargoLanes.length === 0) return [];
       let targetLanes = cargoLanes;
       let pickupOffsetX = 0;
       let escapeLane = null;
@@ -3287,6 +3351,13 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
       let clearance = null;
       let optionalRisk = false;
       let certifiedLanes = cargoLanes;
+      const pickupOffset = lane => {
+        const center = LANE_CENTERS[lane];
+        const nearestEdge = blocked.flat().reduce((best, edge) =>
+          Math.abs(edge - center) < Math.abs(best - center) ? edge : best, Infinity);
+        return Number.isFinite(nearestEdge) ? Math.sign(nearestEdge - center) *
+          Math.min(CARGO_COLLISION_DISTANCE_PX - 1, Math.max(0, clearance(lane) - 20)) : 0;
+      };
       if (row) {
         const collectionHalfHeight = GAME_BALANCE.physics.collision.cargoHalfHeightPx *
           GAME_BALANCE.cargo.pickupTriggerScale;
@@ -3317,6 +3388,22 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         optionalRisk = targetLanes.length > 0;
         if (!optionalRisk) targetLanes = certifiedLanes;
       }
+      if (bonus) {
+        // Quota pickups draw only from their own stream and leave the cadence state untouched,
+        // so the shared planning RNG and premium crossings proceed exactly as without them.
+        const laneRoll = cargoRandom();
+        const pickup = mode === 'continuous'
+          ? cargoPickupForRoll(distance, cargoRandom(), levelId, mode)
+          : {kind: 'coin', mass: GAME_BALANCE.cargo.singleCoinMass,
+            slots: GAME_BALANCE.cargo.pickupSlots, value: SINGLE_COIN_PAYOUT};
+        if (row) {
+          const risk = lane => -0.25 * Math.abs(lane - escapeLane) + 20 / Math.max(20, clearance(lane));
+          const highestRisk = Math.max(...targetLanes.map(risk));
+          targetLanes = targetLanes.filter(lane => Math.abs(risk(lane) - highestRisk) < 1e-8);
+        }
+        const lane = targetLanes[Math.floor(laneRoll * targetLanes.length)];
+        return [{lane, ...pickup, ...(row ? {offsetX: pickupOffset(lane)} : {})}];
+      }
       const step = difficultyStepAtDistance(distance, levelId, mode);
       if (pendingCargo && pendingCargo.step !== step) pendingCargo = null;
       if (row?.plannedCargo) pendingCargo = {laneRoll: 0, pickup: row.plannedCargo, step};
@@ -3340,13 +3427,7 @@ export function createTrackGenerator(seed, levelId = 'level1', mode = 'normal',
         targetLanes = targetLanes.filter(lane => Math.abs(risk(lane) - highestRisk) < 1e-8);
       }
       let lane = targetLanes[Math.floor(laneRoll * targetLanes.length)];
-      if (row) {
-        const center = LANE_CENTERS[lane];
-        const nearestEdge = blocked.flat().reduce((best, edge) =>
-          Math.abs(edge - center) < Math.abs(best - center) ? edge : best, Infinity);
-        pickupOffsetX = Number.isFinite(nearestEdge) ? Math.sign(nearestEdge - center) *
-          Math.min(CARGO_COLLISION_DISTANCE_PX - 1, Math.max(0, clearance(lane) - 20)) : 0;
-      }
+      if (row) pickupOffsetX = pickupOffset(lane);
       if (!row && premium && cargoLanes.some(candidate => candidate === 0 || candidate === 3)) {
         // Better cargo rewards an optional outside commitment, never an extra roll or payout.
         if (lane !== 0 && lane !== 3) lane = cargoLanes.find(candidate => candidate === 0 || candidate === 3);

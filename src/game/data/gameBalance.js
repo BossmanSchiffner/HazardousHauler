@@ -254,6 +254,8 @@ const balance = {
     stackChance: 0.2,
     freightChance: 0.04,
     pickupRowGap: {min: 1, max: 2},
+    // Every sector (Continuous: every Depot interval) offers at least this many pickups outside Depot zones.
+    minPickupsPerSector: 10,
     pickupCollisionRadiusPx: 30,
     pickupTriggerScale: 1.2,
     singleCoinMass: 1,
@@ -292,10 +294,10 @@ const balance = {
       5: {milestone: 'level1,sector3', costCoins: 800},
       6: {milestone: 'level1,sector4', costCoins: 1600},
     },
-    moduleUpgradeCostMultiplier: 1.8,
+    moduleUpgradeCostMultiplier: 1,
     modules: {
       hand_precision: {
-        starter: false, unlock: null, price: 150, upgradeBase: 200,
+        starter: false, unlock: null, price: 200, upgradeBase: 250,
         stat: 'handling', values: [0.10, 0.20, 0.30, 0.40, 0.50], drawback: null,
       },
       cargo_light: {
@@ -304,12 +306,12 @@ const balance = {
         drawback: {stat: 'capacity', value: -2},
       },
       def_plating: {
-        starter: false, unlock: {levelId: 'level2', sector: 4, event: 'complete'}, price: 400, upgradeBase: 300,
+        starter: false, unlock: {levelId: 'level2', sector: 4, event: 'complete'}, price: 400, upgradeBase: 500,
         stat: 'hull', values: [1, 1, 1],
         drawback: {stat: 'handling', value: -0.06},
       },
       coll_magnet: {
-        starter: false, unlock: {levelId: 'level3', sector: 1, event: 'reach'}, price: 300, upgradeBase: 200,
+        starter: false, unlock: {levelId: 'level3', sector: 1, event: 'reach'}, price: 300, upgradeBase: 250,
         stat: 'magnet', values: [10, 20, 30, 40, 50], drawback: null,
       },
       util_impact_pulse: {
@@ -317,11 +319,11 @@ const balance = {
         stat: 'impactPulseSeconds', values: [0.2, 0.35, 0.5, 0.65, 0.8], drawback: null,
       },
       def_shield: {
-        starter: false, unlock: {levelId: 'level2', sector: 3, event: 'complete'}, price: 750, upgradeBase: 250,
+        starter: false, unlock: {levelId: 'level2', sector: 4, event: 'complete'}, price: 750, upgradeBase: 350,
         stat: 'shieldCapacity', values: [1, 2, 3], drawback: null,
       },
       util_insurance: {
-        starter: false, unlock: {levelId: 'level2', sector: 1, event: 'reach'}, price: 500, upgradeBase: 250,
+        starter: false, unlock: {levelId: 'level2', sector: 2, event: 'reach'}, price: 500, upgradeBase: 250,
         stat: 'insurance', values: [0.3, 0.45, 0.6, 0.75, 0.9], drawback: null,
       },
     },
