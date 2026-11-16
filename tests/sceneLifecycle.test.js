@@ -60,6 +60,7 @@ import {IMPLEMENTED_VEHICLE_IDS, VEHICLES} from '../src/game/data/catalog.js';
 let savedProfile;
 let storageAvailable = true;
 let startupWarning = null;
+let cabinetState;
 // Lifetime tests count one image per structure; tests opt into real shadow/Depot art via these hooks.
 const lightweightVisual = (y = 0) => ({y, setPosition() { return this; }, setVisible() { return this; },
   destroy() { this.destroyed = true; }});
@@ -84,6 +85,7 @@ function useRealVisuals() {
 const source = readFileSync(new URL('../src/game/scenes/RoutePrototypeScene.js', import.meta.url), 'utf8')
   .replace(/^import[\s\S]*?;\r?\n/gm, '').replace('export class RoutePrototypeScene', 'class RoutePrototypeScene');
 const {Scene, styles} = vm.runInNewContext(`${source}\n({Scene: RoutePrototypeScene, styles: TOAST_STYLES})`, {
+  window: {updateCabinetUI: state => { cabinetState = state; }},
   // These logic fixtures replace the display owner; strict Phaser Group allocation is tested in rendering.
   Phaser: {Scene: class { constructor() {
     this.routeVisualPool = {
@@ -235,6 +237,16 @@ test('ordinary startup opens the main menu directly and classifies the first inp
     if (trigger === 'pointerdown') listeners.get(trigger)({wasTouch: inputType === 'touch'});
     else listeners.get(trigger)({preventDefault() {}});
     assert.equal(scene.initialInputType, inputType);
+    if (inputType === 'keyboard') {
+      let pauses = 0;
+      scene.handlePauseKey = () => { pauses++; };
+      scene.registry = {get: () => false};
+      for (const key of ['ESC', 'P']) listeners.get(`keydown-${key}`)({});
+      assert.equal(pauses, 0, 'extra cabinet shortcuts do not change mobile controls');
+      scene.registry.get = () => true;
+      for (const key of ['ESC', 'P', 'SPACE']) listeners.get(`keydown-${key}`)({});
+      assert.equal(pauses, 3, 'all three desktop pause shortcuts use the existing lifecycle');
+    }
   }
 });
 
@@ -4868,6 +4880,60 @@ test('pause overlays keep gameplay camera framing on resize instead of restoring
   assert.equal(scene.menuHeight, responsiveViewport(320, 568, 390).worldHeight);
 });
 
+test('cabinet framing widens only the roadside and preserves the portrait vertical sightline', () => {
+  const scene = new Scene();
+  scene.registry = {get: () => true};
+  scene.phase = 'running';
+  scene.scale = {width: 640, height: 844};
+  scene.cameras = {main: {setZoom(value) { this.zoom = value; }, setScroll(x, y) {
+    this.scrollX = x;
+    this.scrollY = y;
+  }}};
+  scene.syncViewportBackdrop = () => {};
+  scene.syncRoadBleed = () => {};
+  scene.handleViewportResize(scene.scale);
+  const camera = scene.cameras.main;
+  assert.equal(camera.zoom, 1);
+  assert.equal(camera.scrollY, 0);
+  assert.equal(camera.scrollX, (390 - 640) / 2);
+  assert.equal(scene.menuHeight, 844);
+  assert.equal(scene.viewportWorldWidth, 640);
+  assert.equal(scene.viewportWorldHeight, 844);
+  scene.shipTargetX = 195;
+  scene.menuPointerPoint = pointer => pointer;
+  scene.keyboardSteeringDirection = () => null;
+  for (const [x, expected] of [[-125, ROAD_LEFT + 30], [515, ROAD_RIGHT - 30]]) {
+    scene.beginSteering({x, y: 200, id: 1});
+    assert.equal(scene.shipTargetX, expected, 'extra roadside never widens the steering bounds');
+  }
+});
+
+test('cabinet bridge reflects equipped truck modules and records without changing the saved profile', () => {
+  const scene = new Scene();
+  scene.registry = {get: () => true};
+  scene.profile = defaultProfile();
+  scene.profile.ownedModules.hand_precision = 1;
+  scene.profile.shipStates.standard.equippedModuleIds = ['hand_precision'];
+  scene.profile.endlessBestDistance = 4321;
+  const before = structuredClone(scene.profile);
+  scene.setScreenRenderer(() => {});
+  assert.equal(cabinetState.truckName, 'Standard Hauler');
+  assert.equal(cabinetState.capacity, loadoutStats(scene.profile).capacity);
+  assert.ok(Number.isFinite(cabinetState.steering));
+  assert.ok(cabinetState.maxSteering >= cabinetState.steering);
+  assert.equal(cabinetState.endlessBest, 4321);
+  assert.equal(cabinetState.sockets.length, 6);
+  assert.equal(cabinetState.sockets[0].url, GARAGE_UPGRADE_ART.find(art => art.id === 'hand_precision').url);
+  assert.equal(cabinetState.sockets[1].name, 'Empty socket');
+  assert.equal(cabinetState.sockets.at(-1).name, 'Locked socket');
+  assert.deepEqual(scene.profile, before);
+  const previous = cabinetState;
+  scene.registry.get = () => false;
+  scene.profile.endlessBestDistance = 9999;
+  scene.syncCabinetUI();
+  assert.equal(cabinetState, previous, 'mobile never sends panel updates');
+});
+
 test('mobile re-pause is blocked for exactly two seconds after the resume fade completes', () => {
   const scene = depotScene();
   scene.endMenuScroll = () => {};
@@ -5412,6 +5478,7 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
   const scene = depotScene();
   const node = (x, y, width = 0, height = 0) => ({x, y, width, height, scaleX: 1, scaleY: 1,
     setOrigin() { return this; }, setDepth(depth) { this.depth = depth; return this; },
+    setInteractive() { return this; }, on(name, callback) { this[name] = callback; return this; },
     setScrollFactor(value) { this.scrollFactor = value; return this; },
     setVisible(value) { this.visible = value; return this; },
     setPosition(x, y) { this.x = x; this.y = y; return this; },
@@ -5434,9 +5501,17 @@ test('compact telemetry HUD keeps three bounded columns and stays screen-pinned 
       fillPoints(points) { this.hexes.push({points, color: this.color}); return this; },
       lineStyle() { return this; }, strokePoints() { return this; },
       fillRect(...args) { this.rects.push(args); return this; }}),
-    container: (x, y, children) => Object.assign(node(x, y), {children}),
+    container: (x, y, children) => Object.assign(node(x, y), {children,
+      add(child) { this.children.push(child); return this; }}),
   };
   scene.buildHud();
+  assert.equal(scene.hudPauseButton.scrollFactor, 0, 'input and rendering share the screen-pinned HUD space');
+  assert.equal(scene.hudPauseButton.visible, false, 'cabinet pause control stays hidden on mobile');
+  let pauseClicks = 0, stopped = false;
+  scene.handlePauseKey = () => { pauseClicks++; };
+  scene.hudPauseButton.pointerup(null, 0, 0, {stopPropagation() { stopped = true; }});
+  assert.equal(pauseClicks, 1);
+  assert.equal(stopped, true, 'HUD clicks cannot steer or trigger a touch-release pause');
   scene.refreshHud = Scene.prototype.refreshHud;
   scene.distance = 375;
   loadCargo(scene, 9999999);

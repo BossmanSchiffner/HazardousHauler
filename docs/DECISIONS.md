@@ -29,6 +29,18 @@ See [design](GAME_DESIGN.md), [architecture](ARCHITECTURE.md),
 
 ## Overrides preserved from current owner work
 
+### Desktop arcade cabinet (16 November 2026)
+
+Only `(min-width: 1024px) and (min-aspect-ratio: 4/3) and (pointer: fine)`
+enables the supplied cabinet frame, loadout/records and placeholder leaderboard.
+The cabinet uses a 640 x 844 FIT canvas centered on the unchanged 390 x 844
+world; extra horizontal space is roadside scenery, not additional lanes.
+The supplied frame's cutouts determine the column proportions. All other
+devices retain the existing full-viewport RESIZE boot and camera behavior.
+Live gate changes preserve the scene and save. Desktop adds a top-right HUD
+pause control and Esc/P shortcuts alongside Space. No leaderboard SDK,
+balance, progression or save-schema changes.
+
 ### Neon Gridway readability (14 November 2026)
 
 Level 4 keeps its dark-purple shoulders while the playable road has an ambient

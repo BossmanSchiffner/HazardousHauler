@@ -84,6 +84,7 @@ export function createRoadEnvironment(scene, road, width, height) {
     tint: [0xff963c, 0xffc160], blendMode: 'ADD',
   }).setDepth(7.8);
   return {road, width, height, texture, context, pixels, ambient, beams, lamps, skids, glints,
+    sideFillPx: V.sideFillPx,
     streaks, dockingChevrons, backfire, color: [255, 255, 255], from: [255, 255, 255], target: [255, 255, 255],
     blendElapsed: V.ambientBlendSeconds, lighting: OVERDRIVE_LIGHTING, visible: false,
     zoom: {factor: 1}, streakRemaining: 0, depotMarks: []};
@@ -235,7 +236,7 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
   if (night || maskColor !== view.lastMaskColor || neon !== view.lastNeonReadability) {
     const pixels = view.pixels.data;
     for (let y = 0; y < view.texture.height; y++) for (let x = 0; x < view.texture.width; x++) {
-      const worldX = -V.sideFillPx + (x + 0.5) * (view.width + V.sideFillPx * 2) / view.texture.width;
+      const worldX = -view.sideFillPx + (x + 0.5) * (view.width + view.sideFillPx * 2) / view.texture.width;
       const worldY = -32 + (y + 0.5) * (view.height + 64) / view.texture.height;
       const light = lightAtPoint(worldX, worldY, lights, pools);
       const index = (y * view.texture.width + x) * 4;
@@ -243,7 +244,7 @@ export function updateRoadEnvironment(view, scene, ship, distance, scrollPx, dt,
       const ambientFloor = onRoad && Math.min(worldX - ROAD_LEFT, ROAD_RIGHT - worldX) <=
         NEON_READABILITY.edgeWidthPx ? NEON_READABILITY.edgeAmbient : NEON_READABILITY.roadAmbient;
       // Off-stage scenery fades toward the backdrop so the mirrored side fill frames the road quietly.
-      const outside = Math.max(0, -worldX, worldX - view.width) / V.sideFillPx;
+      const outside = Math.max(0, -worldX, worldX - view.width) / view.sideFillPx;
       const fade = 1 - (1 - V.sideFillOuterLight) * Math.min(1, outside);
       for (let channel = 0; channel < 3; channel++) {
         const ambient = onRoad ? Math.max(view.color[channel], ambientFloor[channel]) : view.color[channel];

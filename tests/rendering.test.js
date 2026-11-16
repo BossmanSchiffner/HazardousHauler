@@ -263,19 +263,25 @@ test('route visual pool releases compound children atomically, safely reuses con
   assert.ok(created.every(node => node.destroyed === 1), 'no double-destroy of container children');
 });
 
-test('desktop scaling fills the viewport with RESIZE and no CSS canvas stretching', () => {
+test('scaling retains mobile RESIZE and uses desktop-only cabinet FIT without CSS canvas stretching', () => {
   const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
     .replace(/^import.*;\r?\n/gm, '').replace(/^if \(import\.meta\.env\.DEV\).*$/m, '');
-  let config;
-  vm.runInNewContext(source, {
-    Phaser: {AUTO: 'AUTO', Scale: {RESIZE: 'RESIZE', CENTER_BOTH: 'CENTER_BOTH'},
-      Game: class { constructor(value) { config = value; } }},
-    RoutePrototypeScene: class {},
-  });
-  assert.equal(config.width, 390);
-  assert.equal(config.height, 844);
-  assert.equal(config.scale.mode, 'RESIZE');
-  assert.equal(config.scale.autoCenter, 'CENTER_BOTH');
+  for (const active of [false, true]) {
+    let config, cabinetFlag;
+    vm.runInNewContext(source, {
+      Phaser: {AUTO: 'AUTO', Scale: {RESIZE: 'RESIZE', FIT: 'FIT', CENTER_BOTH: 'CENTER_BOTH'},
+        Game: class { constructor(value) { config = value; } }},
+      RoutePrototypeScene: class {},
+      mountCabinet: () => ({active, onChange() {}}),
+      CABINET_WIDTH: 640, CABINET_HEIGHT: 844,
+    });
+    config.callbacks.preBoot({registry: {set(key, value) { cabinetFlag = {key, value}; }}});
+    assert.deepEqual(cabinetFlag, {key: 'cabinetMode', value: active});
+    assert.equal(config.width, active ? 640 : 390);
+    assert.equal(config.height, 844);
+    assert.equal(config.scale.mode, active ? 'FIT' : 'RESIZE');
+    assert.equal(config.scale.autoCenter, 'CENTER_BOTH');
+  }
   const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const canvasRule = css.match(/#game canvas\s*\{([^}]+)\}/)[1];
   assert.ok(!/(?:^|;)\s*(?:width|height)\s*:\s*100%/.test(canvasRule), 'Phaser controls the aspect-correct display size');

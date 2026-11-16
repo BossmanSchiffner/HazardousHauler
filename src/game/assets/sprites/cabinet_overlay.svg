@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080" fill="none">
+  <defs>
+    <!-- Dark Industrial Metal Gradients -->
+    <linearGradient id="cabinet-bg" x1="0" y1="0" x2="0" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#222b36"/>
+      <stop offset="50%" stop-color="#171e26"/>
+      <stop offset="100%" stop-color="#10151b"/>
+    </linearGradient>
+
+    <linearGradient id="bezel-metal" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2d3846"/>
+      <stop offset="50%" stop-color="#1d2530"/>
+      <stop offset="100%" stop-color="#141a22"/>
+    </linearGradient>
+
+    <linearGradient id="header-plate" x1="680" y1="12" x2="680" y2="86" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#293442"/>
+      <stop offset="100%" stop-color="#151b23"/>
+    </linearGradient>
+
+    <linearGradient id="gold-trim" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b87d14"/>
+      <stop offset="50%" stop-color="#f5b81c"/>
+      <stop offset="100%" stop-color="#b87d14"/>
+    </linearGradient>
+
+    <!-- Diagonal Hazard Stripe Pattern -->
+    <pattern id="hazard-stripes" width="24" height="24" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+      <rect width="12" height="24" fill="#f5b81c"/>
+      <rect x="12" width="12" height="24" fill="#14181f"/>
+    </pattern>
+
+    <!-- Subtle Rivet Symbol -->
+    <g id="rivet">
+      <circle r="7" fill="#0d1117"/>
+      <circle r="5.5" fill="#3a4656"/>
+      <circle cx="-1.5" cy="-1.5" r="2" fill="#5c6d82"/>
+      <line x1="-3" y1="0" x2="3" y2="0" stroke="#181f28" stroke-width="1.2"/>
+    </g>
+
+    <!-- Cutout Mask: White = Solid Cabinet Metal, Black = Transparent Cutouts -->
+    <mask id="cabinet-cutouts">
+      <rect width="1920" height="1080" fill="white"/>
+      <!-- Left Panel Cutout (Loadout & Records) -->
+      <rect id="left-panel-slot" x="56" y="80" width="500" height="954" rx="12" fill="black"/>
+      <!-- Center Game Viewport Cutout (720x950 ~ 3:4) -->
+      <rect id="game-viewport-slot" x="600" y="92" width="720" height="950" rx="10" fill="black"/>
+      <!-- Right Panel Cutout (Leaderboard) -->
+      <rect id="right-panel-slot" x="1364" y="80" width="500" height="954" rx="12" fill="black"/>
+    </mask>
+  </defs>
+
+  <!-- 1. OUTER CABINET CHASSIS (Masked for Transparent Slots) -->
+  <g id="cabinet-frame" mask="url(#cabinet-cutouts)">
+    <rect width="1920" height="1080" fill="url(#cabinet-bg)"/>
+
+    <!-- Subtle Industrial Paneling Lines -->
+    <path d="M 24 24 L 1896 24 L 1896 1056 L 24 1056 Z" stroke="#2f3b4a" stroke-width="3" fill="none"/>
+    <path d="M 16 16 L 1904 16 L 1904 1064 L 16 1064 Z" stroke="#0b0f14" stroke-width="4" fill="none"/>
+
+    <!-- Angled Side Recesses -->
+    <path d="M 0 180 L 24 204 L 24 876 L 0 900 Z" fill="#12171e" stroke="#2b3644" stroke-width="1.5"/>
+    <path d="M 1920 180 L 1896 204 L 1896 876 L 1920 900 Z" fill="#12171e" stroke="#2b3644" stroke-width="1.5"/>
+  </g>
+
+  <!-- 2. PANEL BEZELS & FRAMES (Drawn Around Cutouts) -->
+  <!-- Left Panel Frame -->
+  <g id="left-panel-frame">
+    <rect x="48" y="72" width="516" height="970" rx="16" stroke="#3c495b" stroke-width="3" fill="none"/>
+    <rect x="55" y="79" width="502" height="956" rx="12" stroke="#0b0f14" stroke-width="3" fill="none"/>
+    <!-- Top Header Hazard Bar -->
+    <rect x="66" y="138" width="480" height="10" rx="2" fill="url(#hazard-stripes)" opacity="0.9"/>
+    <!-- Lower Endless Best Hazard Bar -->
+    <rect x="66" y="704" width="480" height="8" rx="2" fill="url(#hazard-stripes)" opacity="0.85"/>
+    <!-- Bottom Controls Hazard Bar -->
+    <rect x="66" y="802" width="480" height="8" rx="2" fill="url(#hazard-stripes)" opacity="0.85"/>
+  </g>
+
+  <!-- Center Viewport Bezel -->
+  <g id="center-viewport-frame">
+    <rect x="590" y="82" width="740" height="970" rx="14" stroke="#455468" stroke-width="3.5" fill="none"/>
+    <rect x="598" y="90" width="724" height="954" rx="10" stroke="#090c10" stroke-width="4" fill="none"/>
+    <!-- Subtle Amber Accent Corners on Center Viewport -->
+    <path d="M 590 120 L 590 92 Q 590 82 600 82 L 628 82" stroke="#f5b81c" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 1330 120 L 1330 92 Q 1330 82 1320 82 L 1292 82" stroke="#f5b81c" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 590 1014 L 590 1042 Q 590 1052 600 1052 L 628 1052" stroke="#f5b81c" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 1330 1014 L 1330 1042 Q 1330 1052 1320 1052 L 1292 1052" stroke="#f5b81c" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Right Panel Frame (Leaderboard) -->
+  <g id="right-panel-frame">
+    <rect x="1356" y="72" width="516" height="970" rx="16" stroke="#3c495b" stroke-width="3" fill="none"/>
+    <rect x="1363" y="79" width="502" height="956" rx="12" stroke="#0b0f14" stroke-width="3" fill="none"/>
+    <!-- Top Header Hazard Bar -->
+    <rect x="1374" y="138" width="480" height="10" rx="2" fill="url(#hazard-stripes)" opacity="0.9"/>
+  </g>
+
+  <!-- 3. TOP-CENTER LOGO MARQUEE PLATE (Place Logo Sprite Here) -->
+  <g id="logo-slot">
+    <path d="M 670 10 L 1250 10 L 1226 84 L 694 84 Z" fill="url(#header-plate)" stroke="url(#gold-trim)" stroke-width="3"/>
+    <path d="M 684 17 L 1236 17 L 1216 77 L 704 77 Z" stroke="#0c1015" stroke-width="2" fill="none"/>
+    <!-- Side Hazard Tabs on Marquee -->
+    <rect x="614" y="24" width="52" height="12" rx="2" fill="url(#hazard-stripes)" opacity="0.85"/>
+    <rect x="1254" y="24" width="52" height="12" rx="2" fill="url(#hazard-stripes)" opacity="0.85"/>
+  </g>
+
+  <!-- 4. CORNER RIVETS -->
+  <g id="cabinet-rivets">
+    <!-- Outer Cabinet Corners -->
+    <use href="#rivet" x="38" y="38"/>
+    <use href="#rivet" x="1882" y="38"/>
+    <use href="#rivet" x="38" y="1042"/>
+    <use href="#rivet" x="1882" y="1042"/>
+    <!-- Left Panel Corners -->
+    <use href="#rivet" x="62" y="86"/>
+    <use href="#rivet" x="550" y="86"/>
+    <use href="#rivet" x="62" y="1028"/>
+    <use href="#rivet" x="550" y="1028"/>
+    <!-- Right Panel Corners -->
+    <use href="#rivet" x="1370" y="86"/>
+    <use href="#rivet" x="1858" y="86"/>
+    <use href="#rivet" x="1370" y="1028"/>
+    <use href="#rivet" x="1858" y="1028"/>
+  </g>
+</svg>

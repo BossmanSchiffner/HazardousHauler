@@ -260,6 +260,13 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const pauseKeyHandler = event => this.handlePauseKey(event);
     this.input.keyboard?.on?.('keydown-SPACE', pauseKeyHandler);
     this.events.once('shutdown', () => this.input.keyboard?.off?.('keydown-SPACE', pauseKeyHandler));
+    const cabinetPauseHandler = event => {
+      if (this.registry?.get('cabinetMode')) this.handlePauseKey(event);
+    };
+    for (const key of ['ESC', 'P']) {
+      this.input.keyboard?.on?.(`keydown-${key}`, cabinetPauseHandler);
+      this.events.once('shutdown', () => this.input.keyboard?.off?.(`keydown-${key}`, cabinetPauseHandler));
+    }
     this.initializeUrlDebug(globalThis.location?.search ?? '');
     if (saveWarning) this.showToast(saveWarning, 'error');
   }
@@ -395,6 +402,35 @@ export class RoutePrototypeScene extends Phaser.Scene {
     return this.debugManager ? this.debugManager.persist(profile, saveProfile) : saveProfile(profile);
   }
 
+  syncCabinetUI() {
+    if (!this.registry?.get('cabinetMode') || !globalThis.window?.updateCabinetUI || !this.profile) return;
+    const vehicleId = this.profile.selectedVehicleId;
+    const vehicle = VEHICLES.find(candidate => candidate.id === vehicleId);
+    const state = this.profile.shipStates[vehicleId];
+    const stats = loadoutStats(this.profile, vehicleId);
+    window.updateCabinetUI({
+      truckName: vehicle.name,
+      capacity: stats.capacity,
+      maxCapacity: GAME_BALANCE.cargoProgression.capacityByRank.at(-1) +
+        (GAME_BALANCE.vehicles[vehicleId].cargoCapacityOffset ?? 0),
+      steering: steeringMultiplier(0, stats.capacity, stats.handling, stats.loadRelief, stats.vehicleSteeringMultiplier),
+      maxSteering: steeringMultiplier(0, 1, GAME_BALANCE.upgrades.modules.hand_precision.values.at(-1), 0,
+        Math.max(...IMPLEMENTED_VEHICLE_IDS.map(id => GAME_BALANCE.vehicles[id].steeringMultiplier ?? 1))),
+      endlessBest: this.profile.endlessBestDistance,
+      sockets: Array.from({length: SLOT_MAX}, (_, index) => {
+        const id = state.equippedModuleIds[index];
+        const art = id ? GARAGE_UPGRADE_ART.find(candidate => candidate.id === id) : null;
+        if (id && !art) throw new Error(`Missing cabinet upgrade art: ${id}`);
+        return {
+          name: id === CARGO_CAPACITY_ID ? 'Cargo Capacity' : id ? moduleStatus(this.profile, id).def.name
+            : index < state.unlockedSlotCount ? 'Empty socket' : 'Locked socket',
+          url: art?.url,
+          locked: index >= state.unlockedSlotCount,
+        };
+      }),
+    });
+  }
+
   applySoundSetting() {
     this.sound?.setMute?.(this.profile?.soundMuted === true);
   }
@@ -413,7 +449,8 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   handleViewportResize(gameSize) {
     if (!gameSize || !Number.isFinite(gameSize.width) || !Number.isFinite(gameSize.height)) return;
-    const viewport = responsiveViewport(gameSize.width, gameSize.height, W);
+    const viewport = responsiveViewport(gameSize.width, gameSize.height, W,
+      this.registry?.get('cabinetMode') ? gameSize.height / H : 1.12);
     this.viewportScale = viewport.zoom;
     this.viewportWorldWidth = viewport.worldWidth;
     this.viewportWorldHeight = viewport.worldHeight;
@@ -435,19 +472,23 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const screenWidth = this.scale.width;
     const screenHeight = this.scale.height;
     const gameplay = GAMEPLAY_VIEW_PHASES.has(this.phase);
-    const zoom = gameplay ? Math.min(screenWidth / W, screenHeight / H, 1.12) *
+    const cabinet = this.registry?.get('cabinetMode') === true;
+    const baseZoom = cabinet ? screenHeight / H : Math.min(screenWidth / W, screenHeight / H, 1.12);
+    const zoom = gameplay ? baseZoom *
       (this.roadEnvironment?.zoom.factor ?? 1) : this.viewportScale;
     const viewHeight = screenHeight / zoom;
     const worldCenterY = gameplay ? H / 2 : viewHeight / 2;
     this.cameras.main.setZoom(zoom);
     this.cameras.main.setScroll(W / 2 - screenWidth / 2, worldCenterY - screenHeight / 2);
     if (this.hudContainer) {
-      const hudScale = Math.min(screenWidth / W, 1.12);
+      const hudScale = cabinet ? screenHeight / H : Math.min(screenWidth / W, 1.12);
       // Cancel camera zoom/origin so telemetry stays screen-pinned even during sector bursts.
       this.hudContainer.setScale(hudScale / zoom).setPosition(
         screenWidth / 2 * (1 - 1 / zoom) + (screenWidth - W * hudScale) / (2 * zoom),
         screenHeight / 2 * (1 - 1 / zoom));
       this.hudBacking.setDisplaySize(screenWidth / hudScale, 78);
+      this.hudPauseButton?.setVisible(cabinet).setPosition(
+        W + (screenWidth / hudScale - W) / 2 - 28, 28);
     }
     this.syncViewportBackdrop();
     this.syncRoadBleed(screenWidth, screenHeight);
@@ -459,8 +500,17 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const showFlanks = !!this.worldVisible;
     this.roadFlanks.forEach(flank => flank.setVisible(showFlanks));
     this.subRoad?.setSize(W, H + 64);
-    const zoom = Math.min(screenWidth / W, screenHeight / H, 1.12) * ENVIRONMENT_VISUALS.burstZoom;
-    const bleedX = Math.min(ENVIRONMENT_VISUALS.sideFillPx,
+    const cabinet = this.registry?.get('cabinetMode') === true;
+    const baseZoom = cabinet ? screenHeight / H : Math.min(screenWidth / W, screenHeight / H, 1.12);
+    const zoom = baseZoom * ENVIRONMENT_VISUALS.burstZoom;
+    const sideFill = cabinet ? Math.max(ENVIRONMENT_VISUALS.sideFillPx,
+      Math.ceil((screenWidth / zoom - W) / 2) + 8) : ENVIRONMENT_VISUALS.sideFillPx;
+    if (this.roadEnvironment && this.roadEnvironment.sideFillPx !== sideFill) {
+      this.roadEnvironment.sideFillPx = sideFill;
+      this.roadEnvironment.ambient.setDisplaySize(W + sideFill * 2, H + 64);
+      this.roadEnvironment.lastMaskColor = null;
+    }
+    const bleedX = Math.min(sideFill,
       Math.max(8, Math.ceil((screenWidth / zoom - W) / 2) + 8));
     const bleedY = Math.max(0, Math.ceil((screenHeight / zoom - H) / 2) + 8);
     if (this.roadBleed?.x === bleedX && this.roadBleed?.y === bleedY) return;
@@ -508,6 +558,7 @@ export class RoutePrototypeScene extends Phaser.Scene {
 
   setScreenRenderer(renderer) {
     this.screenRenderer = renderer;
+    this.syncCabinetUI();
   }
 
   buildWorld() {
@@ -654,6 +705,15 @@ export class RoutePrototypeScene extends Phaser.Scene {
     const dividers = [130, 260].map(x => this.add.rectangle(x, 39, 1, 62, PALETTE.steel, 0.4));
     this.hudContainer = this.add.container(0, 0, [this.hudBacking, ...dividers, ...Object.values(this.hud)])
       .setDepth(100).setScrollFactor(0).setVisible(false);
+    this.hudPauseButton = this.add.text(0, 28, '||', {
+      ...this.textStyle(24, '#ffe6a1'), backgroundColor: '#182b39', padding: {x: 12, y: 6},
+    }).setOrigin(0.5).setScrollFactor(0).setInteractive({useHandCursor: true}).setVisible(false);
+    this.hudPauseButton.on('pointerdown', (_pointer, _x, _y, event) => event.stopPropagation());
+    this.hudPauseButton.on('pointerup', (_pointer, _x, _y, event) => {
+      event.stopPropagation();
+      this.handlePauseKey();
+    });
+    this.hudContainer.add(this.hudPauseButton);
   }
 
   setWorldVisible(visible) {

@@ -34,6 +34,16 @@ the dependency lock. Neither is a dead source tree.
 
 ## Ownership map
 
+`src/cabinet.js` owns desktop-only HTML chrome and the exact media-query gate.
+The bundled `cabinet_overlay.svg` supplies the bezel/rivets; HTML panels align
+with its authored cutouts. `main.js` switches FIT/RESIZE without recreating the
+game. `RoutePrototypeScene.syncCabinetUI` sends equipped truck stats, six
+sockets (using the Garage art registry) and Endless Best through
+`window.updateCabinetUI(state)` on screen/profile transitions and gate changes,
+never per frame. Hidden cabinet panels return immediately. Road/steering
+coordinates remain in the original world; cabinet framing preserves its
+vertical sightline and extends only the warmed roadside visuals.
+
 Active runtime modes are `normal` and global `continuous`, not per-level
 Overdrive. MAX_TRACK_SPEED is exported once by gameBalance and reexported to
 balance/economy/generator; scene scrolling clamps through the same constant.
